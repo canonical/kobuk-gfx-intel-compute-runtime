@@ -10,6 +10,7 @@
 #include "shared/source/assert_handler/assert_handler.h"
 #include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/debugger/debugger_l0.h"
+#include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/addressing_mode_helper.h"
@@ -23,7 +24,6 @@
 #include "shared/source/helpers/local_work_size.h"
 #include "shared/source/helpers/per_thread_data.h"
 #include "shared/source/helpers/ray_tracing_helper.h"
-#include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/helpers/surface_format_info.h"
@@ -36,6 +36,7 @@
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/program/work_size_info.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/arrayref.h"
 
 #include "level_zero/api/driver_experimental/public/zex_module.h"
@@ -430,13 +431,12 @@ ze_result_t KernelImp::setGroupSize(uint32_t groupSizeX, uint32_t groupSizeY,
     }
 
     if (this->heaplessEnabled && this->localDispatchSupport) {
-        auto isEngineIstanced = neoDevice->isEngineInstanced();
-        this->maxWgCountPerTileCcs = suggestMaxCooperativeGroupCount(NEO::EngineGroupType::compute, isEngineIstanced, true);
+        this->maxWgCountPerTileCcs = suggestMaxCooperativeGroupCount(NEO::EngineGroupType::compute, true);
         if (this->rcsAvailable) {
-            this->maxWgCountPerTileRcs = suggestMaxCooperativeGroupCount(NEO::EngineGroupType::renderCompute, isEngineIstanced, true);
+            this->maxWgCountPerTileRcs = suggestMaxCooperativeGroupCount(NEO::EngineGroupType::renderCompute, true);
         }
         if (this->cooperativeSupport) {
-            this->maxWgCountPerTileCooperative = suggestMaxCooperativeGroupCount(NEO::EngineGroupType::cooperativeCompute, isEngineIstanced, true);
+            this->maxWgCountPerTileCooperative = suggestMaxCooperativeGroupCount(NEO::EngineGroupType::cooperativeCompute, true);
         }
     }
     return ZE_RESULT_SUCCESS;
@@ -502,7 +502,7 @@ ze_result_t KernelImp::suggestGroupSize(uint32_t globalSizeX, uint32_t globalSiz
     return ZE_RESULT_SUCCESS;
 }
 
-uint32_t KernelImp::suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineGroupType, uint32_t *groupSize, bool isEngineInstanced, bool forceSingleTileQuery) {
+uint32_t KernelImp::suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineGroupType, uint32_t *groupSize, bool forceSingleTileQuery) {
     auto &rootDeviceEnvironment = module->getDevice()->getNEODevice()->getRootDeviceEnvironment();
     auto &helper = rootDeviceEnvironment.getHelper<NEO::GfxCoreHelper>();
     auto &descriptor = kernelImmData->getDescriptor();
@@ -524,8 +524,7 @@ uint32_t KernelImp::suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineG
                                                    usedSlmSize,
                                                    workDim,
                                                    localWorkSize,
-                                                   engineGroupType,
-                                                   isEngineInstanced);
+                                                   engineGroupType);
 }
 
 ze_result_t KernelImp::setIndirectAccess(ze_kernel_indirect_access_flags_t flags) {
@@ -949,7 +948,7 @@ ze_result_t KernelImp::getProperties(ze_kernel_properties_t *pKernelProperties) 
         } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_KERNEL_MAX_GROUP_SIZE_EXT_PROPERTIES) {
             ze_kernel_max_group_size_properties_ext_t *properties = reinterpret_cast<ze_kernel_max_group_size_properties_ext_t *>(extendedProperties);
             properties->maxGroupSize = maxKernelWorkGroupSize;
-        } else if (extendedProperties->stype == ZEX_STRUCTURE_KERNEL_REGISTER_FILE_SIZE_EXP) {
+        } else if (extendedProperties->stype == ZEX_STRUCTURE_KERNEL_REGISTER_FILE_SIZE_EXP) { // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
             zex_kernel_register_file_size_exp_t *properties = reinterpret_cast<zex_kernel_register_file_size_exp_t *>(extendedProperties);
             properties->registerFileSize = kernelDescriptor.kernelAttributes.numGrfRequired;
         }
@@ -971,7 +970,14 @@ NEO::GraphicsAllocation *KernelImp::allocatePrivateMemoryGraphicsAllocation() {
     auto privateMemoryGraphicsAllocation = neoDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties(
         {neoDevice->getRootDeviceIndex(), privateSurfaceSize, NEO::AllocationType::privateSurface, neoDevice->getDeviceBitfield()});
 
-    UNRECOVERABLE_IF(privateMemoryGraphicsAllocation == nullptr);
+    if (privateMemoryGraphicsAllocation == nullptr) {
+        const auto usedLocalMemorySize = neoDevice->getMemoryManager()->getUsedLocalMemorySize(neoDevice->getRootDeviceIndex());
+        const auto maxGlobalMemorySize = neoDevice->getRootDevice()->getGlobalMemorySize(static_cast<uint32_t>(neoDevice->getDeviceBitfield().to_ulong()));
+        CREATE_DEBUG_STRING(str, "Failed to allocate private surface of %zu bytes, used local memory %zu, max global memory %zu\n", static_cast<size_t>(privateSurfaceSize), usedLocalMemorySize, static_cast<size_t>(maxGlobalMemorySize));
+        neoDevice->getRootDeviceEnvironment().executionEnvironment.setErrorDescription(std::string(str.get()));
+        PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, str.get());
+    }
+
     return privateMemoryGraphicsAllocation;
 }
 
@@ -1035,8 +1041,6 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     const auto &hwInfo = neoDevice->getHardwareInfo();
     auto deviceBitfield = neoDevice->getDeviceBitfield();
     const auto &gfxHelper = rootDeviceEnvironment.getHelper<NEO::GfxCoreHelper>();
-
-    this->midThreadPreemptionDisallowedForRayTracingKernels = productHelper.isMidThreadPreemptionDisallowedForRayTracingKernels();
 
     this->heaplessEnabled = rootDeviceEnvironment.getHelper<NEO::CompilerProductHelper>().isHeaplessModeEnabled();
     this->localDispatchSupport = productHelper.getSupportedLocalDispatchSizes(hwInfo).size() > 0;
@@ -1140,6 +1144,9 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     auto &kernelAttributes = kernelDescriptor.kernelAttributes;
     if ((kernelAttributes.perHwThreadPrivateMemorySize != 0U) && (false == module->shouldAllocatePrivateMemoryPerDispatch())) {
         this->privateMemoryGraphicsAllocation = allocatePrivateMemoryGraphicsAllocation();
+        if (this->privateMemoryGraphicsAllocation == nullptr) {
+            return ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
+        }
         this->patchCrossthreadDataWithPrivateAllocation(this->privateMemoryGraphicsAllocation);
         this->internalResidencyContainer.push_back(this->privateMemoryGraphicsAllocation);
     }

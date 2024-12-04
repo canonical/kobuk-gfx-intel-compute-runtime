@@ -13,9 +13,15 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/hw_info_helper.h"
 #include "shared/source/kernel/kernel_properties.h"
+#include "shared/source/os_interface/os_inc_base.h"
 #include "shared/source/release_helper/release_helper.h"
 
 namespace NEO {
+
+template <PRODUCT_FAMILY gfxProduct>
+bool CompilerProductHelperHw<gfxProduct>::isMidThreadPreemptionSupported(const HardwareInfo &hwInfo) const {
+    return hwInfo.featureTable.flags.ftrWalkerMTP;
+}
 
 template <PRODUCT_FAMILY gfxProduct>
 bool CompilerProductHelperHw<gfxProduct>::isForceEmuInt32DivRemSPRequired() const {
@@ -285,10 +291,6 @@ bool CompilerProductHelperHw<gfxProduct>::isBFloat16ConversionSupported(const Re
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-void CompilerProductHelperHw<gfxProduct>::applyDeviceBlobFixesOnHwInfo(HardwareInfo &hwInfo) const {
-}
-
-template <PRODUCT_FAMILY gfxProduct>
 void CompilerProductHelperHw<gfxProduct>::adjustHwInfoForIgc(HardwareInfo &hwInfo) const {
 }
 
@@ -316,12 +318,23 @@ void CompilerProductHelperHw<gfxProduct>::getKernelCapabilitiesExtra(const Relea
         extraCaps |= releaseHelper->getAdditionalExtraCaps();
     }
 }
+
 template <PRODUCT_FAMILY gfxProduct>
 bool CompilerProductHelperHw<gfxProduct>::isBindlessAddressingDisabled(const ReleaseHelper *releaseHelper) const {
     if (releaseHelper) {
         return releaseHelper->isBindlessAddressingDisabled();
     }
     return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+const char *CompilerProductHelperHw<gfxProduct>::getCustomIgcLibraryName() const {
+    return nullptr;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+const char *CompilerProductHelperHw<gfxProduct>::getFinalizerLibraryName() const {
+    return nullptr;
 }
 
 } // namespace NEO

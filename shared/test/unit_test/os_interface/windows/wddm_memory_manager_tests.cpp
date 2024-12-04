@@ -14,7 +14,6 @@
 #include "shared/source/os_interface/windows/dxgi_wrapper.h"
 #include "shared/source/os_interface/windows/wddm/um_km_data_translator.h"
 #include "shared/source/os_interface/windows/windows_wrapper.h"
-#include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/execution_environment_helper.h"
@@ -29,7 +28,6 @@
 #include "shared/test/common/mocks/mock_gmm_page_table_mngr.h"
 #include "shared/test/common/mocks/mock_gmm_resource_info.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
-#include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/mocks/mock_product_helper.h"
 #include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/mocks/windows/mock_wddm_allocation.h"
@@ -1316,6 +1314,13 @@ TEST_F(WddmMemoryManagerSimpleTest, givenWddmMemoryManagerWhenGpuAddressIsReserv
     EXPECT_EQ(MemoryConstants::pageSize64k, addressRange.size);
 
     memoryManager->freeGpuAddress(addressRange, 0);
+}
+
+TEST_F(WddmMemoryManagerSimpleTest, givenWddmMemoryManagerWhenCpuAddressIsReservedAndFreedThenAddressRangeIsNonZero) {
+    auto addressRange = memoryManager->reserveCpuAddress(0, 1234);
+    EXPECT_NE(0u, addressRange.address);
+    EXPECT_EQ(1234u, addressRange.size);
+    memoryManager->freeCpuAddress(addressRange);
 }
 
 TEST_F(WddmMemoryManagerSimpleTest, givenWddmMemoryManagerWhenAllocatingWithGpuVaThenNullptrIsReturned) {
@@ -3640,6 +3645,13 @@ TEST_F(MockWddmMemoryManagerTest, givenDefaultMemoryManagerWhenItIsCreatedThenCo
     EXPECT_EQ(memoryManager.getHugeGfxMemoryChunkSize(GfxMemoryAllocationMethod::useUmdSystemPtr), 4 * MemoryConstants::gigaByte - MemoryConstants::pageSize64k);
 }
 
+TEST_F(MockWddmMemoryManagerTest, givenDebugOverrideWhenQueryIsDoneThenProperSizeIsReturned) {
+    DebugManagerStateRestore dbgRestore;
+    NEO::debugManager.flags.ForceWddmHugeChunkSizeMB.set(256);
+    MockWddmMemoryManager memoryManager(executionEnvironment);
+    EXPECT_EQ(256 * MemoryConstants::megaByte, memoryManager.getHugeGfxMemoryChunkSize(GfxMemoryAllocationMethod::allocateByKmd));
+}
+
 TEST_F(MockWddmMemoryManagerTest, givenAllocateGraphicsMemoryForHostBufferAndRequestedSizeIsHugeThenResultAllocationIsSplitted) {
     DebugManagerStateRestore dbgRestore;
 
@@ -4031,6 +4043,13 @@ struct WddmMemoryManagerWithAsyncDeleterTest : public ::testing::Test {
     HardwareInfo *hwInfo;
     WddmMock *wddm;
 };
+
+TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenWddmWhenAsyncDeleterIsEnabledThenDoNotDeferExternalHostptrDeletions) {
+    EXPECT_EQ(0, deleter->deferDeletionCalled);
+    memoryManager->tryDeferDeletions(nullptr, 0, 0, 0, AllocationType::externalHostPtr);
+    EXPECT_EQ(0, deleter->deferDeletionCalled);
+    EXPECT_EQ(1u, wddm->destroyAllocationResult.called);
+}
 
 TEST_F(WddmMemoryManagerWithAsyncDeleterTest, givenWddmWhenAsyncDeleterIsEnabledThenCanDeferDeletions) {
     EXPECT_EQ(0, deleter->deferDeletionCalled);

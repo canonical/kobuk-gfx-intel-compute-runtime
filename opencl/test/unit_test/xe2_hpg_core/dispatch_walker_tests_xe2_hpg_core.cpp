@@ -24,20 +24,24 @@ XE2_HPG_CORETEST_F(WalkerDispatchTestsXe2HpGCore, whenEncodeAdditionalWalkerFiel
 
     DebugManagerStateRestore debugRestorer;
     auto walkerCmd = FamilyType::cmdInitGpgpuWalker;
-    MockExecutionEnvironment mockExecutionEnvironment{};
-    auto &rootDeviceEnvironment = *mockExecutionEnvironment.rootDeviceEnvironments[0];
 
     KernelDescriptor kernelDescriptor;
-    EncodeWalkerArgs walkerArgs{KernelExecutionType::concurrent, true, kernelDescriptor, NEO::RequiredDispatchWalkOrder::none, 0, 0};
+    EncodeWalkerArgs walkerArgs{
+        kernelDescriptor,                     // kernelDescriptor
+        KernelExecutionType::concurrent,      // kernelExecutionType
+        NEO::RequiredDispatchWalkOrder::none, // requiredDispatchWalkOrder
+        0,                                    // additionalSizeParam
+        0,                                    // maxFrontEndThreads
+        true};                                // requiredSystemFence
     {
-        EncodeDispatchKernel<FamilyType>::encodeAdditionalWalkerFields(rootDeviceEnvironment, walkerCmd, walkerArgs);
+        EncodeDispatchKernel<FamilyType>::encodeComputeDispatchAllWalker(walkerCmd, walkerArgs);
         EXPECT_TRUE(walkerCmd.getComputeDispatchAllWalkerEnable());
     }
 
     {
         walkerArgs.kernelExecutionType = KernelExecutionType::defaultType;
         debugManager.flags.ComputeDispatchAllWalkerEnableInComputeWalker.set(1);
-        EncodeDispatchKernel<FamilyType>::encodeAdditionalWalkerFields(rootDeviceEnvironment, walkerCmd, walkerArgs);
+        EncodeDispatchKernel<FamilyType>::encodeComputeDispatchAllWalker(walkerCmd, walkerArgs);
 
         EXPECT_TRUE(walkerCmd.getComputeDispatchAllWalkerEnable());
     }

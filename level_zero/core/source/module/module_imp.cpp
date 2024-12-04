@@ -291,7 +291,7 @@ ze_result_t ModuleTranslationUnit::buildFromSpirV(const char *input, uint32_t in
     return this->compileGenBinary(inputArgs, false);
 }
 
-ze_result_t ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inputSize) {
+ze_result_t ModuleTranslationUnit::createFromNativeBinary(const char *input, size_t inputSize, const char *internalBuildOptions) {
     UNRECOVERABLE_IF((nullptr == device) || (nullptr == device->getNEODevice()));
     auto productAbbreviation = NEO::hardwarePrefix[device->getNEODevice()->getHardwareInfo().platform.eProductFamily];
 
@@ -348,7 +348,7 @@ ze_result_t ModuleTranslationUnit::createFromNativeBinary(const char *input, siz
             updateBuildLog(NEO::CompilerWarnings::recompiledFromIr.str());
         }
 
-        return buildFromSpirV(this->irBinary.get(), static_cast<uint32_t>(this->irBinarySize), this->options.c_str(), "", nullptr);
+        return buildFromSpirV(this->irBinary.get(), static_cast<uint32_t>(this->irBinarySize), this->options.c_str(), internalBuildOptions, nullptr);
     } else {
         if (processUnpackedBinary() != ZE_RESULT_SUCCESS) {
             driverHandle->clearErrorDescription();
@@ -545,7 +545,7 @@ ze_result_t ModuleImp::initialize(const ze_module_desc_t *desc, NEO::Device *neo
     if (result != ZE_RESULT_SUCCESS) {
         return result;
     }
-    this->verifyDebugCapabilities();
+
     if (this->shouldBuildBeFailed(neoDevice)) {
         return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
@@ -741,7 +741,7 @@ inline ze_result_t ModuleImp::initializeTranslationUnit(const ze_module_desc_t *
             this->isFunctionSymbolExportEnabled = true;
             this->isGlobalSymbolExportEnabled = true;
             this->precompiled = true;
-            return this->translationUnit->createFromNativeBinary(reinterpret_cast<const char *>(desc->pInputModule), desc->inputSize);
+            return this->translationUnit->createFromNativeBinary(reinterpret_cast<const char *>(desc->pInputModule), desc->inputSize, internalBuildOptions.c_str());
         } else if (desc->format == ZE_MODULE_FORMAT_IL_SPIRV) {
             this->builtFromSpirv = true;
             this->precompiled = false;
@@ -1277,20 +1277,6 @@ ze_result_t ModuleImp::getKernelNames(uint32_t *pCount, const char **pNames) {
     }
 
     return ZE_RESULT_SUCCESS;
-}
-
-void ModuleImp::verifyDebugCapabilities() {
-    bool debugCapabilities = device->getNEODevice()->getDebugger() != nullptr;
-
-    if (debugCapabilities) {
-        // verify all kernels are debuggable
-        for (auto kernelInfo : this->translationUnit->programInfo.kernelInfos) {
-            bool systemThreadSurfaceAvailable = NEO::isValidOffset(kernelInfo->kernelDescriptor.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindful) ||
-                                                NEO::isValidOffset(kernelInfo->kernelDescriptor.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindless);
-
-            debugCapabilities &= systemThreadSurfaceAvailable;
-        }
-    }
 }
 
 void ModuleImp::checkIfPrivateMemoryPerDispatchIsNeeded() {

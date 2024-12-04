@@ -446,6 +446,31 @@ TEST(L0DeviceTest, givenFilledTopologyWhenGettingApiSliceThenCorrectSliceIdIsRet
     EXPECT_TRUE(ret);
 }
 
+TEST(L0DeviceTest, whenCallingGetDeviceMemoryNameThenCorrectTypeIsReturned) {
+    std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
+
+    auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get(), 0));
+    auto device = std::unique_ptr<L0::Device>(Device::create(driverHandle.get(), neoDevice.release(), false, nullptr));
+    ASSERT_NE(nullptr, device);
+
+    uint32_t count = 1;
+    ze_device_memory_properties_t memProperties = {};
+
+    auto &sysInfo = device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo()->gtSystemInfo;
+
+    for (uint32_t i = 0; i < 11; i++) {
+        sysInfo.MemoryType = i;
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, device->getMemoryProperties(&count, &memProperties));
+
+        if (i == 2 || i == 3 || i == 5 || i == 8) {
+            EXPECT_STREQ("HBM", memProperties.name);
+        } else {
+            EXPECT_STREQ("DDR", memProperties.name);
+        }
+    }
+}
+
 TEST(L0DeviceTest, givenFilledTopologyForZeroSubDeviceWhenGettingApiSliceForHigherSubDevicesThenFalseIsReturned) {
 
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
@@ -1592,7 +1617,7 @@ TEST_F(DeviceTest, whenGetDevicePropertiesCalledThenCorrectDevicePropertyEccFlag
     ze_device_properties_t deviceProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
 
     device->getProperties(&deviceProps);
-    auto expected = (this->neoDevice->getDeviceInfo().errorCorrectionSupport) ? ZE_DEVICE_PROPERTY_FLAG_ECC : static_cast<ze_device_property_flag_t>(0u);
+    auto expected = (this->neoDevice->getDeviceInfo().errorCorrectionSupport) ? ZE_DEVICE_PROPERTY_FLAG_ECC : static_cast<ze_device_property_flag_t>(0u); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     EXPECT_EQ(expected, deviceProps.flags & ZE_DEVICE_PROPERTY_FLAG_ECC);
 }
 
@@ -1787,11 +1812,11 @@ class FalseCpuDeviceTime : public NEO::DeviceTime {
         pGpuCpuTime->gpuTimeStamp = mockGpuTimeInNs;
         return true;
     }
-    double getDynamicDeviceTimerResolution(HardwareInfo const &hwInfo) const override {
-        return NEO::OSTime::getDeviceTimerResolution(hwInfo);
+    double getDynamicDeviceTimerResolution() const override {
+        return NEO::OSTime::getDeviceTimerResolution();
     }
-    uint64_t getDynamicDeviceTimerClock(HardwareInfo const &hwInfo) const override {
-        return static_cast<uint64_t>(1000000000.0 / OSTime::getDeviceTimerResolution(hwInfo));
+    uint64_t getDynamicDeviceTimerClock() const override {
+        return static_cast<uint64_t>(1000000000.0 / OSTime::getDeviceTimerResolution());
     }
     uint64_t mockCpuTimeInNs = 0u;
     uint64_t mockGpuTimeInNs = 100u;
@@ -4488,30 +4513,6 @@ struct MultipleDevicesDifferentLocalMemorySupportTest : public MultipleDevicesTe
     L0::Device *deviceWithoutLocalMemory = nullptr;
 };
 
-struct MultipleDevicesDifferentFamilyAndLocalMemorySupportTest : public MultipleDevicesTest {
-    void SetUp() override {
-
-        if ((NEO::ProductHelper::create(IGFX_SKYLAKE) == nullptr) ||
-            (NEO::ProductHelper::create(IGFX_KABYLAKE) == nullptr)) {
-            GTEST_SKIP();
-        }
-
-        MultipleDevicesTest::SetUp();
-
-        memoryManager->localMemorySupported[0] = 1;
-        memoryManager->localMemorySupported[1] = 1;
-
-        deviceSKL = driverHandle->devices[0];
-        deviceKBL = driverHandle->devices[1];
-
-        deviceSKL->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo()->platform.eProductFamily = IGFX_SKYLAKE;
-        deviceKBL->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo()->platform.eProductFamily = IGFX_KABYLAKE;
-    }
-
-    L0::Device *deviceSKL = nullptr;
-    L0::Device *deviceKBL = nullptr;
-};
-
 struct MultipleDevicesSameFamilyAndLocalMemorySupportTest : public MultipleDevicesTest {
     void SetUp() override {
         MultipleDevicesTest::SetUp();
@@ -6023,7 +6024,7 @@ TEST_F(DeviceTest, GivenValidDeviceWhenQueryingKernelTimestampsProptertiesThenCo
 
 TEST_F(DeviceTest, givenDeviceWhenQueryingCmdListMemWaitOnMemDataSizeThenReturnValueFromHelper) {
     ze_device_properties_t devProps;
-    ze_intel_device_command_list_wait_on_memory_data_size_exp_desc_t sizeProps = {ZE_INTEL_STRUCTURE_TYPE_DEVICE_COMMAND_LIST_WAIT_ON_MEMORY_DATA_SIZE_EXP_DESC};
+    ze_intel_device_command_list_wait_on_memory_data_size_exp_desc_t sizeProps = {ZE_INTEL_STRUCTURE_TYPE_DEVICE_COMMAND_LIST_WAIT_ON_MEMORY_DATA_SIZE_EXP_DESC}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
 
     devProps.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
     devProps.pNext = &sizeProps;
@@ -6036,7 +6037,7 @@ TEST_F(DeviceTest, givenDeviceWhenQueryingCmdListMemWaitOnMemDataSizeThenReturnV
 
 TEST_F(DeviceTest, givenDeviecWhenQueryingMediaPropertiesThenReturnZero) {
     ze_device_properties_t devProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    ze_intel_device_media_exp_properties_t mediaProps = {ZE_STRUCTURE_TYPE_INTEL_DEVICE_MEDIA_EXP_PROPERTIES};
+    ze_intel_device_media_exp_properties_t mediaProps = {ZE_STRUCTURE_TYPE_INTEL_DEVICE_MEDIA_EXP_PROPERTIES}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     mediaProps.numDecoderCores = 123;
     mediaProps.numEncoderCores = 456;
 
@@ -6083,7 +6084,7 @@ struct RTASDeviceTest : public ::testing::Test {
         std::string getFullPath() override {
             return std::string();
         }
-        static OsLibrary *load(const std::string &name) {
+        static OsLibrary *load(const NEO::OsLibraryCreateProperties &properties) {
             if (failLibraryLoad) {
                 return nullptr;
             }
@@ -6256,7 +6257,7 @@ TEST(ExtensionLookupTest, given2DBlockLoadFalseAnd2DBlockStoreFalseThenFlagsIndi
     Mock2DTransposeDevice<false, false> deviceImp(neoMockDevice, neoMockDevice->getExecutionEnvironment());
 
     ze_device_properties_t deviceProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES};
+    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     deviceProps.pNext = &blockArrayProps;
 
     auto success = L0::Device::fromHandle(static_cast<ze_device_handle_t>(&deviceImp))->getProperties(&deviceProps);
@@ -6271,7 +6272,7 @@ TEST(ExtensionLookupTest, given2DBlockLoadTrueAnd2DBlockStoreFalseThenFlagsIndic
     Mock2DTransposeDevice<true, false> deviceImp(neoMockDevice, neoMockDevice->getExecutionEnvironment());
 
     ze_device_properties_t deviceProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES};
+    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     deviceProps.pNext = &blockArrayProps;
 
     auto success = L0::Device::fromHandle(static_cast<ze_device_handle_t>(&deviceImp))->getProperties(&deviceProps);
@@ -6286,7 +6287,7 @@ TEST(ExtensionLookupTest, given2DBlockLoadFalseAnd2DBlockStoreTrueThenFlagsIndic
     Mock2DTransposeDevice<false, true> deviceImp(neoMockDevice, neoMockDevice->getExecutionEnvironment());
 
     ze_device_properties_t deviceProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES};
+    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     deviceProps.pNext = &blockArrayProps;
 
     auto success = L0::Device::fromHandle(static_cast<ze_device_handle_t>(&deviceImp))->getProperties(&deviceProps);
@@ -6301,7 +6302,7 @@ TEST(ExtensionLookupTest, given2DBlockLoadTrueAnd2DBlockStoreTrueThenFlagsIndica
     Mock2DTransposeDevice<true, true> deviceImp(neoMockDevice, neoMockDevice->getExecutionEnvironment());
 
     ze_device_properties_t deviceProps = {ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
-    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES};
+    ze_intel_device_block_array_exp_properties_t blockArrayProps = {ZE_INTEL_DEVICE_BLOCK_ARRAY_EXP_PROPERTIES}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     deviceProps.pNext = &blockArrayProps;
 
     auto success = L0::Device::fromHandle(static_cast<ze_device_handle_t>(&deviceImp))->getProperties(&deviceProps);

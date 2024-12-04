@@ -103,12 +103,10 @@ class GfxCoreHelper {
     virtual uint8_t getBarriersCountFromHasBarriers(uint8_t hasBarriers) const = 0;
     virtual uint32_t calculateAvailableThreadCount(const HardwareInfo &hwInfo, uint32_t grfCount) const = 0;
     virtual uint32_t calculateMaxWorkGroupSize(const KernelDescriptor &kernelDescriptor, uint32_t defaultMaxGroupSize) const = 0;
-    virtual bool largeGrfModeSupported() const = 0;
     virtual uint32_t alignSlmSize(uint32_t slmSize) const = 0;
     virtual uint32_t computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) const = 0;
 
     virtual bool isWaDisableRccRhwoOptimizationRequired() const = 0;
-    virtual bool isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const = 0;
     virtual uint32_t getMinimalSIMDSize() const = 0;
     virtual uint32_t getMinimalGrfSize() const = 0;
     virtual bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo, const ProductHelper &productHelper) const = 0;
@@ -125,7 +123,7 @@ class GfxCoreHelper {
     virtual bool isRcsAvailable(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual uint32_t adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
-                                             const RootDeviceEnvironment &rootDeviceEnvironment, bool isEngineInstanced) const = 0;
+                                             const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual uint32_t adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, bool isHwLocalGeneration, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual size_t getMaxFillPaternSizeForCopyEngine() const = 0;
     virtual size_t getSipKernelMaxDbgSurfaceSize(const HardwareInfo &hwInfo) const = 0;
@@ -201,6 +199,7 @@ class GfxCoreHelper {
     virtual bool usmCompressionSupported(const NEO::HardwareInfo &hwInfo) const = 0;
 
     virtual uint32_t getDeviceTimestampWidth() const = 0;
+    virtual void alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const = 0;
 
     virtual ~GfxCoreHelper() = default;
 
@@ -308,8 +307,9 @@ class GfxCoreHelperHw : public GfxCoreHelper {
 
     uint32_t calculateAvailableThreadCount(const HardwareInfo &hwInfo, uint32_t grfCount) const override;
 
+    void alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const override;
+
     uint32_t calculateMaxWorkGroupSize(const KernelDescriptor &kernelDescriptor, uint32_t defaultMaxGroupSize) const override;
-    bool largeGrfModeSupported() const override;
 
     uint32_t alignSlmSize(uint32_t slmSize) const override;
 
@@ -324,8 +324,6 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     static bool isForceDefaultRCSEngineWARequired(const HardwareInfo &hwInfo);
 
     bool isWaDisableRccRhwoOptimizationRequired() const override;
-
-    bool isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const override;
 
     uint32_t getMinimalSIMDSize() const override;
 
@@ -352,7 +350,7 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
 
     uint32_t adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
-                                     const RootDeviceEnvironment &rootDeviceEnvironment, bool isEngineInstanced) const override;
+                                     const RootDeviceEnvironment &rootDeviceEnvironment) const override;
 
     uint32_t adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, bool isHwLocalGeneration, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
     size_t getMaxFillPaternSizeForCopyEngine() const override;
@@ -487,6 +485,11 @@ struct MemorySynchronizationCommands {
 
     static void setBarrierWaFlags(void *barrierCmd);
 
+    enum class AdditionalSynchronizationType : uint32_t {
+        semaphore = 0,
+        fence,
+        none
+    };
     static void addAdditionalSynchronizationForDirectSubmission(LinearStream &commandStream, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void addAdditionalSynchronization(LinearStream &commandStream, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment);

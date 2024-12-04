@@ -175,14 +175,6 @@ struct DebugSessionLinux : DebugSessionImp {
         interruptAll
     };
 
-    struct AttentionEventFields {
-        uint64_t clientHandle;
-        uint64_t contextHandle;
-        uint64_t lrcHandle;
-        uint32_t bitmaskSize;
-        uint8_t *bitmask;
-    };
-
     std::vector<std::pair<zet_debug_event_t, uint64_t>> eventsToAck; // debug event, handle to module
     void enqueueApiEvent(zet_debug_event_t &debugEvent) override {
         pushApiEvent(debugEvent);
@@ -192,7 +184,7 @@ struct DebugSessionLinux : DebugSessionImp {
         return pushApiEvent(debugEvent, invalidHandle);
     }
 
-    void pushApiEvent(zet_debug_event_t &debugEvent, uint64_t moduleHandle) {
+    MOCKABLE_VIRTUAL void pushApiEvent(zet_debug_event_t &debugEvent, uint64_t moduleHandle) {
         std::unique_lock<std::mutex> lock(asyncThreadMutex);
 
         if (moduleHandle != invalidHandle && (debugEvent.flags & ZET_DEBUG_EVENT_FLAG_NEED_ACK)) {
@@ -205,8 +197,8 @@ struct DebugSessionLinux : DebugSessionImp {
         apiEventCondition.notify_all();
     }
 
-    MOCKABLE_VIRTUAL void updateStoppedThreadsAndCheckTriggerEvents(AttentionEventFields &attention, uint32_t tileIndex, std::vector<EuThread::ThreadId> &threadsWithAttention);
-    virtual void updateContextAndLrcHandlesForThreadsWithAttention(EuThread::ThreadId threadId, AttentionEventFields &attention) = 0;
+    void updateStoppedThreadsAndCheckTriggerEvents(const AttentionEventFields &attention, uint32_t tileIndex, std::vector<EuThread::ThreadId> &threadsWithAttention) override;
+    virtual void updateContextAndLrcHandlesForThreadsWithAttention(EuThread::ThreadId threadId, const AttentionEventFields &attention) = 0;
     virtual uint64_t getVmHandleFromClientAndlrcHandle(uint64_t clientHandle, uint64_t lrcHandle) = 0;
     virtual std::unique_lock<std::mutex> getThreadStateMutexForTileSession(uint32_t tileIndex) = 0;
     virtual void checkTriggerEventsForAttentionForTileSession(uint32_t tileIndex) = 0;
@@ -214,6 +206,8 @@ struct DebugSessionLinux : DebugSessionImp {
                                                                           uint64_t memoryHandle,
                                                                           const void *stateSaveArea,
                                                                           uint32_t tileIndex) = 0;
+    virtual void pushApiEventForTileSession(uint32_t tileIndex, zet_debug_event_t &debugEvent) = 0;
+    virtual void setPageFaultForTileSession(uint32_t tileIndex, EuThread::ThreadId threadId, bool hasPageFault) = 0;
 
     virtual int threadControl(const std::vector<EuThread::ThreadId> &threads, uint32_t tile, ThreadControlCmd threadCmd, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) = 0;
     void checkStoppedThreadsAndGenerateEvents(const std::vector<EuThread::ThreadId> &threads, uint64_t memoryHandle, uint32_t deviceIndex) override;
@@ -247,7 +241,16 @@ struct DebugSessionLinux : DebugSessionImp {
     void createTileSessionsIfEnabled();
     virtual DebugSessionImp *createTileSession(const zet_debug_config_t &config, Device *device, DebugSessionImp *rootDebugSession) = 0;
     bool checkAllEventsCollected();
+    struct PageFaultEvent {
+        uint64_t vmHandle;
+        uint32_t tileIndex;
+        uint64_t pageFaultAddress;
+        uint32_t bitmaskSize;
+        uint8_t *bitmask;
+    };
+    void handlePageFaultEvent(PageFaultEvent &pfEvent);
 
+    uint8_t maxRetries = 3;
     std::unique_ptr<IoctlHandler> ioctlHandler;
 };
 } // namespace L0

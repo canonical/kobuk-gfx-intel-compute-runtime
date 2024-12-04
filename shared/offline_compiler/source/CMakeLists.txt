@@ -50,6 +50,7 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/zebin_decoder.h
     ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/zeinfo_decoder.cpp
     ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/zeinfo_decoder.h
+    ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/${BRANCH_DIR_SUFFIX}zeinfo_extra.cpp
     ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices.inl
     ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
     ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}/product_config.inl
@@ -59,10 +60,8 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_product_helper.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_product_helper_base.inl
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_aot_config_bdw_and_later.inl
-    ${NEO_SHARED_DIRECTORY}/helpers/compiler_product_helper_bdw_and_later.inl
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_product_helper_before_xe_hpc.inl
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_product_helper_xe_hpc_and_later.inl
-    ${NEO_SHARED_DIRECTORY}/helpers/compiler_product_helper_xe2_hpg_and_later.inl
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_options_parser.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_options_parser.h
     ${NEO_SHARED_DIRECTORY}/helpers/cache_policy.h
@@ -361,7 +360,7 @@ target_include_directories(${OCLOC_NAME}_lib BEFORE PRIVATE ${CLOC_LIB_INCLUDES}
 target_include_directories(${OCLOC_NAME}_lib BEFORE PRIVATE ${IGA_INCLUDE_DIR})
 
 target_compile_definitions(${OCLOC_NAME}_lib PUBLIC ${CLOC_LIB_LIB_FLAGS_DEFINITIONS} ${OCLOC_SUPPORTED_CORE_FLAGS_DEFINITONS} DEFAULT_PLATFORM=${DEFAULT_SUPPORTED_PLATFORM}
-                           IGA_LIBRARY_NAME="${CMAKE_SHARED_LIBRARY_PREFIX}${IGA_LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+                           IGA_LIBRARY_NAME="${IGA_LIBRARY_FILENAME}"
                            ${AOT_DEFINITIONS}
 )
 target_compile_definitions(${OCLOC_NAME}_lib PUBLIC ${NEO__IGC_COMPILE_DEFINITIONS})

@@ -11,8 +11,13 @@
 #include "shared/source/helpers/kernel_helpers.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/mock_product_helper_hw.h"
+#include "shared/test/common/helpers/raii_gfx_core_helper.h"
+#include "shared/test/common/helpers/raii_product_helper.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
+#include "shared/test/common/mocks/mock_gfx_core_helper.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
 
 #include <algorithm>
@@ -46,7 +51,7 @@ struct KernelHelperMaxWorkGroupsTests : ::testing::Test {
         hwInfo->gtSystemInfo.DualSubSliceCount = dssCount;
         hwInfo->capabilityTable.slmSize = (availableSlm / MemoryConstants::kiloByte) / dssCount;
 
-        return KernelHelper::getMaxWorkGroupCount(*rootDeviceEnvironment, descriptor, numSubdevices, usedSlm, workDim, lws, engineType, false);
+        return KernelHelper::getMaxWorkGroupCount(*rootDeviceEnvironment, descriptor, numSubdevices, usedSlm, workDim, lws, engineType);
     }
 
     std::unique_ptr<MockExecutionEnvironment> executionEnvironment;
@@ -59,7 +64,7 @@ TEST_F(KernelHelperMaxWorkGroupsTests, GivenNoBarriersOrSlmUsedWhenCalculatingMa
     uint32_t workGroupSize = static_cast<uint32_t>(lws[0] * lws[1] * lws[2]);
     uint32_t expected = helper.calculateAvailableThreadCount(*rootDeviceEnvironment->getHardwareInfo(), grf) / static_cast<uint32_t>(Math::divideAndRoundUp(workGroupSize, simd));
 
-    expected = helper.adjustMaxWorkGroupCount(expected, EngineGroupType::compute, *rootDeviceEnvironment, false);
+    expected = helper.adjustMaxWorkGroupCount(expected, EngineGroupType::compute, *rootDeviceEnvironment);
     EXPECT_EQ(expected, getMaxWorkGroupCount());
 }
 
@@ -86,27 +91,58 @@ TEST_F(KernelHelperMaxWorkGroupsTests, givenMultipleSubdevicesWenCalculatingMaxW
     }
 }
 
-TEST_F(KernelHelperMaxWorkGroupsTests, GivenBarriersWhenCalculatingMaxWorkGroupsCountThenResultIsCalculatedWithRegardToBarriersCount) {
+HWTEST2_F(KernelHelperMaxWorkGroupsTests, GivenBarriersWhenCalculatingMaxWorkGroupsCountThenResultIsCalculatedWithRegardToBarriersCount, MatchAny) {
+    NEO::RAIIProductHelperFactory<MockProductHelperHw<productFamily>> raii(*rootDeviceEnvironment);
+    raii.mockProductHelper->isCooperativeEngineSupportedValue = false;
+    lws[0] = 1;
+    lws[1] = 0;
+    lws[2] = 0;
+    workDim = 1;
     numberOfBarriers = 0;
-    auto baseCount = getMaxWorkGroupCount();
 
     numberOfBarriers = 16;
 
     auto &helper = rootDeviceEnvironment->getHelper<NEO::GfxCoreHelper>();
     auto maxBarrierCount = helper.getMaxBarrierRegisterPerSlice();
 
-    auto expected = std::min(baseCount, static_cast<uint32_t>(dssCount * (maxBarrierCount / numberOfBarriers)));
+    auto expected = static_cast<uint32_t>(dssCount * (maxBarrierCount / numberOfBarriers));
     EXPECT_EQ(expected, getMaxWorkGroupCount());
 }
 
-TEST_F(KernelHelperMaxWorkGroupsTests, GivenUsedSlmSizeWhenCalculatingMaxWorkGroupsCountThenResultIsCalculatedWithRegardToUsedSlmSize) {
+HWTEST2_F(KernelHelperMaxWorkGroupsTests, GivenUsedSlmSizeWhenCalculatingMaxWorkGroupsCountThenResultIsCalculatedWithRegardToUsedSlmSize, MatchAny) {
+    NEO::RAIIProductHelperFactory<MockProductHelperHw<productFamily>> raii(*rootDeviceEnvironment);
+    raii.mockProductHelper->isCooperativeEngineSupportedValue = false;
     usedSlm = 0;
-    auto baseCount = getMaxWorkGroupCount();
+    lws[0] = 1;
+    lws[1] = 0;
+    lws[2] = 0;
+    workDim = 1;
 
     usedSlm = 4 * MemoryConstants::kiloByte;
 
-    auto expected = std::min(baseCount, availableSlm / usedSlm);
+    auto expected = availableSlm / usedSlm;
     EXPECT_EQ(expected, getMaxWorkGroupCount());
+}
+
+HWTEST_F(KernelHelperMaxWorkGroupsTests, givenUsedSlmSizeWhenCalculatingMaxWorkGroupsCountThenAlignToDssSizeCalled) {
+    auto raiiFactory = RAIIGfxCoreHelperFactory<MockGfxCoreHelperHw<FamilyType>>(*rootDeviceEnvironment);
+    usedSlm = 4 * MemoryConstants::kiloByte;
+    getMaxWorkGroupCount();
+    EXPECT_EQ(raiiFactory.mockGfxCoreHelper->alignThreadGroupCountToDssSizeCalledTimes, 1u);
+}
+HWTEST_F(KernelHelperMaxWorkGroupsTests, givenBarriersWhenCalculatingMaxWorkGroupsCountThenAlignToDssSizeCalled) {
+    auto raiiFactory = RAIIGfxCoreHelperFactory<MockGfxCoreHelperHw<FamilyType>>(*rootDeviceEnvironment);
+    numberOfBarriers = 1;
+    getMaxWorkGroupCount();
+    EXPECT_EQ(raiiFactory.mockGfxCoreHelper->alignThreadGroupCountToDssSizeCalledTimes, 1u);
+}
+
+HWTEST_F(KernelHelperMaxWorkGroupsTests, givenZeroBarriersAndSlmNotUsedWhenCalculatingMaxWorkGroupsCountThenAlignToDssSizeNotCalled) {
+    auto raiiFactory = RAIIGfxCoreHelperFactory<MockGfxCoreHelperHw<FamilyType>>(*rootDeviceEnvironment);
+    numberOfBarriers = 0;
+    usedSlm = 0;
+    getMaxWorkGroupCount();
+    EXPECT_EQ(raiiFactory.mockGfxCoreHelper->alignThreadGroupCountToDssSizeCalledTimes, 0u);
 }
 
 TEST_F(KernelHelperMaxWorkGroupsTests, GivenVariousValuesWhenCalculatingMaxWorkGroupsCountThenLowestResultIsAlwaysReturned) {

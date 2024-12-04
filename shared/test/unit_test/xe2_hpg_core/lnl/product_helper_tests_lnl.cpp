@@ -14,13 +14,13 @@
 #include "shared/source/xe2_hpg_core/hw_info_xe2_hpg_core.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/os_interface/product_helper_tests.h"
 
 #include "aubstream/product_family.h"
 #include "platforms.h"
-#include "wmtp_setup_lnl.inl"
 
 using namespace NEO;
 
@@ -33,11 +33,6 @@ LNLTEST_F(LnlProductHelper, whenGettingAubstreamProductFamilyThenProperEnumValue
 LNLTEST_F(LnlProductHelper, givenProductHelperWhenGettingEvictIfNecessaryFlagSupportedThenExpectTrue) {
 
     EXPECT_TRUE(productHelper->isEvictionIfNecessaryFlagSupported());
-}
-
-LNLTEST_F(LnlProductHelper, whenGettingMidThreadPreemptionSupportForRtKernelsThenExpectNoSupport) {
-
-    EXPECT_TRUE(productHelper->isMidThreadPreemptionDisallowedForRayTracingKernels());
 }
 
 LNLTEST_F(LnlProductHelper, givenProductHelperWhenGetCommandsStreamPropertiesSupportThenExpectCorrectValues) {
@@ -93,7 +88,7 @@ LNLTEST_F(LnlProductHelper, givenCompilerProductHelperWhenGetMidThreadPreemption
     hwInfo.featureTable.flags.ftrWalkerMTP = false;
     EXPECT_FALSE(compilerProductHelper->isMidThreadPreemptionSupported(hwInfo));
     hwInfo.featureTable.flags.ftrWalkerMTP = true;
-    EXPECT_EQ(wmtpSupported, compilerProductHelper->isMidThreadPreemptionSupported(hwInfo));
+    EXPECT_TRUE(compilerProductHelper->isMidThreadPreemptionSupported(hwInfo));
 }
 
 LNLTEST_F(LnlProductHelper, whenCheckPreferredAllocationMethodThenAllocateByKmdIsReturnedExceptTagBufferAndTimestampPacketTagBuffer) {

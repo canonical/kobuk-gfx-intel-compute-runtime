@@ -830,6 +830,7 @@ bool DebugSessionImp::isAIPequalToThreadStartIP(uint32_t *cr0, uint32_t *dbg0) {
 void DebugSessionImp::fillResumeAndStoppedThreadsFromNewlyStopped(std::vector<EuThread::ThreadId> &resumeThreads, std::vector<EuThread::ThreadId> &stoppedThreadsToReport, std::vector<EuThread::ThreadId> &interruptedThreads) {
 
     if (newlyStoppedThreads.empty()) {
+        PRINT_DEBUGGER_INFO_LOG("%s", "No newly stopped threads found. Returning");
         return;
     }
     const auto regSize = std::max(getRegisterSize(ZET_DEBUG_REGSET_TYPE_CR_INTEL_GPU), 64u);
@@ -1109,7 +1110,7 @@ const SIP::regset_desc *DebugSessionImp::typeToRegsetDesc(uint32_t type) {
         case ZET_DEBUG_REGSET_TYPE_MSG_INTEL_GPU:
             return &pStateSaveAreaHeader->regHeaderV3.msg;
         case ZET_DEBUG_REGSET_TYPE_SBA_INTEL_GPU: {
-            auto &stateSaveAreaHeader = NEO::SipKernel::getBindlessDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
+            auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
             auto pStateSaveArea = reinterpret_cast<const NEO::StateSaveAreaHeader *>(stateSaveAreaHeader.data());
             return DebugSessionImp::getSbaRegsetDesc(*pStateSaveArea);
         }
@@ -1143,7 +1144,7 @@ const SIP::regset_desc *DebugSessionImp::typeToRegsetDesc(uint32_t type) {
         case ZET_DEBUG_REGSET_TYPE_FC_INTEL_GPU:
             return &pStateSaveAreaHeader->regHeader.fc;
         case ZET_DEBUG_REGSET_TYPE_SBA_INTEL_GPU: {
-            auto &stateSaveAreaHeader = NEO::SipKernel::getBindlessDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
+            auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
             auto pStateSaveArea = reinterpret_cast<const NEO::StateSaveAreaHeader *>(stateSaveAreaHeader.data());
             return DebugSessionImp::getSbaRegsetDesc(*pStateSaveArea);
         }
@@ -1207,7 +1208,7 @@ ze_result_t DebugSessionImp::readModeFlags(uint32_t start, uint32_t count, void 
     if (start != 0 || count != 1) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
-    auto &stateSaveAreaHeader = NEO::SipKernel::getBindlessDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
+    auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
     auto pStateSaveArea = reinterpret_cast<const NEO::StateSaveAreaHeader *>(stateSaveAreaHeader.data());
     const size_t size = 4;
     memcpy_s(pRegisterValues, size, &pStateSaveArea->regHeaderV3.sip_flags, size);
@@ -1239,7 +1240,7 @@ ze_result_t DebugSessionImp::readDebugScratchRegisters(uint32_t start, uint32_t 
 
 ze_result_t DebugSessionImp::readSbaRegisters(EuThread::ThreadId threadId, uint32_t start, uint32_t count, void *pRegisterValues) {
 
-    auto &stateSaveAreaHeader = NEO::SipKernel::getBindlessDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
+    auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*connectedDevice->getNEODevice()).getStateSaveAreaHeader();
     auto pStateSaveArea = reinterpret_cast<const NEO::StateSaveAreaHeader *>(stateSaveAreaHeader.data());
     auto sbaRegDesc = DebugSessionImp::getSbaRegsetDesc(*pStateSaveArea);
 
@@ -1334,31 +1335,15 @@ void DebugSession::updateGrfRegisterSetProperties(EuThread::ThreadId thread, uin
         return;
     }
 
-    auto &gfxCoreHelper = this->connectedDevice->getGfxCoreHelper();
-    if (!gfxCoreHelper.largeGrfModeSupported()) {
-        return;
-    }
-
-    // update GRF, if large GRF is enabled
     auto &l0GfxCoreHelper = connectedDevice->getNEODevice()->getRootDeviceEnvironment().getHelper<L0GfxCoreHelper>();
     auto regsetType = l0GfxCoreHelper.getRegsetTypeForLargeGrfDetection();
-    bool largeGrfModeEnabled = false;
     const auto regSize = std::max(getRegisterSize(regsetType), 64u);
     auto reg = std::make_unique<uint32_t[]>(regSize / sizeof(uint32_t));
     memset(reg.get(), 0, regSize);
     readRegistersImp(thread, regsetType, 0, 1, reg.get());
-    auto regPtr = reg.get();
-    if (regsetType == ZET_DEBUG_REGSET_TYPE_CR_INTEL_GPU) {
-        largeGrfModeEnabled = regPtr[0] & 0x2000;
-    } else if (regsetType == ZET_DEBUG_REGSET_TYPE_SR_INTEL_GPU) {
-        largeGrfModeEnabled = ((regPtr[1] & 0x6000) == 0x6000);
-    }
-
-    if (largeGrfModeEnabled) {
-        for (uint32_t i = 0; i < *pCount; i++) {
-            if (pRegisterSetProperties[i].type == ZET_DEBUG_REGSET_TYPE_GRF_INTEL_GPU) {
-                pRegisterSetProperties[i].count = 256;
-            }
+    for (uint32_t i = 0; i < *pCount; i++) {
+        if (pRegisterSetProperties[i].type == ZET_DEBUG_REGSET_TYPE_GRF_INTEL_GPU) {
+            pRegisterSetProperties[i].count = l0GfxCoreHelper.getGrfRegisterCount(reg.get());
         }
     }
 }
@@ -1391,7 +1376,7 @@ ze_result_t DebugSession::getRegisterSetProperties(Device *device, uint32_t *pCo
         return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
     }
 
-    auto &stateSaveAreaHeader = NEO::SipKernel::getBindlessDebugSipKernel(*device->getNEODevice()).getStateSaveAreaHeader();
+    auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*device->getNEODevice()).getStateSaveAreaHeader();
 
     if (stateSaveAreaHeader.size() == 0) {
         *pCount = 0;
@@ -1653,24 +1638,19 @@ void DebugSessionImp::getNotStoppedThreads(const std::vector<EuThread::ThreadId>
     }
 }
 
-bool DebugSessionImp::isValidNode(uint64_t vmHandle, uint64_t gpuVa, SIP::fifo_node &node) {
+ze_result_t DebugSessionImp::isValidNode(uint64_t vmHandle, uint64_t gpuVa, SIP::fifo_node &node) {
     constexpr uint32_t failsafeTimeoutMax = 100, failsafeTimeoutWait = 50;
     uint32_t timeCount = 0;
     while (!node.valid && (timeCount < failsafeTimeoutMax)) {
         auto retVal = readGpuMemory(vmHandle, reinterpret_cast<char *>(&node), sizeof(SIP::fifo_node), gpuVa);
         if (retVal != ZE_RESULT_SUCCESS) {
             PRINT_DEBUGGER_ERROR_LOG("Reading FIFO failed, error = %d\n", retVal);
-            return false;
+            return retVal;
         }
         NEO::sleep(std::chrono::milliseconds(failsafeTimeoutWait));
         timeCount += failsafeTimeoutWait;
     }
-    if (!node.valid) {
-        PRINT_DEBUGGER_ERROR_LOG("%S", "Invalid entry  in SW FIFO\n");
-        return false;
-    }
-
-    return true;
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t DebugSessionImp::readFifo(uint64_t vmHandle, std::vector<EuThread::ThreadId> &threadsWithAttention) {
@@ -1683,29 +1663,34 @@ ze_result_t DebugSessionImp::readFifo(uint64_t vmHandle, std::vector<EuThread::T
 
     // Drain the fifo
     uint32_t drainRetries = 2, lastHead = ~0u;
-    uint64_t offsetTail = (sizeof(SIP::StateSaveArea)) + offsetof(struct SIP::intelgt_state_save_area_V3, fifo_tail);
-    uint64_t offsetHead = (sizeof(SIP::StateSaveArea)) + offsetof(struct SIP::intelgt_state_save_area_V3, fifo_head);
+    const uint64_t offsetTail = (sizeof(SIP::StateSaveArea)) + offsetof(struct SIP::intelgt_state_save_area_V3, fifo_tail);
+    const uint64_t offsetFifoSize = (sizeof(SIP::StateSaveArea)) + offsetof(struct SIP::intelgt_state_save_area_V3, fifo_size);
     const uint64_t offsetFifo = gpuVa + (stateSaveAreaHeader->versionHeader.size * 8) + stateSaveAreaHeader->regHeaderV3.fifo_offset;
 
     while (drainRetries--) {
         constexpr uint32_t failsafeTimeoutWait = 50;
-        std::vector<uint32_t> fifoIndices(2);
-        uint32_t fifoHeadIndex = 0, fifoTailIndex = 0;
+        std::vector<uint32_t> fifoIndices(3);
+        uint32_t fifoHeadIndex = 0, fifoTailIndex = 0, fifoSize = 0;
 
-        auto retVal = readGpuMemory(vmHandle, reinterpret_cast<char *>(fifoIndices.data()), fifoIndices.size() * sizeof(uint32_t), gpuVa + offsetHead);
+        auto retVal = readGpuMemory(vmHandle, reinterpret_cast<char *>(fifoIndices.data()), fifoIndices.size() * sizeof(uint32_t), gpuVa + offsetFifoSize);
         if (retVal != ZE_RESULT_SUCCESS) {
             PRINT_DEBUGGER_ERROR_LOG("Reading FIFO indices failed, error = %d\n", retVal);
             return retVal;
         }
-        fifoHeadIndex = fifoIndices[0];
-        fifoTailIndex = fifoIndices[1];
+        fifoSize = fifoIndices[0];
+        fifoHeadIndex = fifoIndices[1];
+        fifoTailIndex = fifoIndices[2];
 
         if (lastHead != fifoHeadIndex) {
             drainRetries++;
         }
+        PRINT_DEBUGGER_FIFO_LOG("fifoHeadIndex: %u fifoTailIndex: %u fifoSize: %u lastHead: %u drainRetries: %u\n",
+                                fifoHeadIndex, fifoTailIndex, fifoSize, lastHead, drainRetries);
 
+        lastHead = fifoHeadIndex;
+        bool updateTailIndex = false;
         while (fifoTailIndex != fifoHeadIndex) {
-            uint32_t readSize = fifoTailIndex < fifoHeadIndex ? fifoHeadIndex - fifoTailIndex : stateSaveAreaHeader->regHeaderV3.fifo_size - fifoTailIndex;
+            uint32_t readSize = fifoTailIndex < fifoHeadIndex ? fifoHeadIndex - fifoTailIndex : fifoSize - fifoTailIndex;
             std::vector<SIP::fifo_node> nodes(readSize);
             uint64_t currentFifoOffset = offsetFifo + (sizeof(SIP::fifo_node) * fifoTailIndex);
 
@@ -1715,8 +1700,21 @@ ze_result_t DebugSessionImp::readFifo(uint64_t vmHandle, std::vector<EuThread::T
                 return retVal;
             }
             for (uint32_t i = 0; i < readSize; i++) {
-                PRINT_DEBUGGER_INFO_LOG("Validate entry at index %u in SW Fifo\n", (i + fifoTailIndex));
-                UNRECOVERABLE_IF(!isValidNode(vmHandle, currentFifoOffset + (i * sizeof(SIP::fifo_node)), nodes[i]));
+                const uint64_t gpuVa = currentFifoOffset + (i * sizeof(SIP::fifo_node));
+                PRINT_DEBUGGER_FIFO_LOG("Validate entry at index %u in SW Fifo:: vmHandle: %" SCNx64
+                                        " gpuVa = %" SCNx64
+                                        " valid = %" SCNx8
+                                        " slice = %" SCNx8
+                                        " subslice = %" SCNx8
+                                        " eu = %" SCNx8
+                                        " thread = %" SCNx8
+                                        "\n",
+                                        (i + fifoTailIndex), vmHandle, gpuVa, nodes[i].valid, nodes[i].slice_id, nodes[i].subslice_id, nodes[i].eu_id, nodes[i].thread_id);
+                retVal = isValidNode(vmHandle, gpuVa, nodes[i]);
+                if (retVal != ZE_RESULT_SUCCESS) {
+                    return retVal;
+                }
+                UNRECOVERABLE_IF(!nodes[i].valid);
                 threadsWithAttention.emplace_back(0, nodes[i].slice_id, nodes[i].subslice_id, nodes[i].eu_id, nodes[i].thread_id);
                 nodes[i].valid = 0;
             }
@@ -1729,24 +1727,58 @@ ze_result_t DebugSessionImp::readFifo(uint64_t vmHandle, std::vector<EuThread::T
             if (fifoTailIndex < fifoHeadIndex) {
                 // then we read to the head and are done
                 fifoTailIndex = fifoHeadIndex;
-                retVal = writeGpuMemory(vmHandle, reinterpret_cast<char *>(&fifoTailIndex), sizeof(uint32_t), gpuVa + offsetTail);
-                if (retVal != ZE_RESULT_SUCCESS) {
-                    PRINT_DEBUGGER_ERROR_LOG("Writing FIFO failed, error = %d\n", retVal);
-                    return retVal;
-                }
             } else {
                 // wrap around
                 fifoTailIndex = 0;
             }
+            updateTailIndex = true;
         }
-        retVal = readGpuMemory(vmHandle, reinterpret_cast<char *>(&lastHead), sizeof(uint32_t), gpuVa + offsetHead);
-        if (retVal != ZE_RESULT_SUCCESS) {
-            PRINT_DEBUGGER_ERROR_LOG("Reading fifo_head failed, error = %d\n", retVal);
-            return retVal;
+
+        if (updateTailIndex) {
+            retVal = writeGpuMemory(vmHandle, reinterpret_cast<char *>(&fifoTailIndex), sizeof(uint32_t), gpuVa + offsetTail);
+            if (retVal != ZE_RESULT_SUCCESS) {
+                PRINT_DEBUGGER_ERROR_LOG("Writing FIFO failed, error = %d\n", retVal);
+                return retVal;
+            }
+            NEO::sleep(std::chrono::milliseconds(failsafeTimeoutWait));
+        } else {
+            break;
         }
-        NEO::sleep(std::chrono::milliseconds(failsafeTimeoutWait));
     }
     return ZE_RESULT_SUCCESS;
+}
+
+void DebugSessionImp::pollFifo() {
+    if (attentionEventContext.empty()) {
+        return;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto currentTime = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+
+    auto timeSinceLastFifoRead = currentTime - lastFifoReadTime;
+    if (timeSinceLastFifoRead.count() > fifoPollInterval) {
+        PRINT_DEBUGGER_FIFO_LOG("%s", "Polling FIFO start\n");
+        handleStoppedThreads();
+        PRINT_DEBUGGER_FIFO_LOG("%s", "Polling FIFO ends\n");
+    }
+}
+
+void DebugSessionImp::handleStoppedThreads() {
+    for (const auto &entry : attentionEventContext) {
+        auto vmHandle = entry.first;
+        std::vector<EuThread::ThreadId> threadsWithAttention;
+        auto result = readFifo(vmHandle, threadsWithAttention);
+        if (result != ZE_RESULT_SUCCESS) {
+            return;
+        }
+        auto now = std::chrono::steady_clock::now();
+        lastFifoReadTime = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch());
+
+        if (threadsWithAttention.empty()) {
+            return;
+        }
+        updateStoppedThreadsAndCheckTriggerEvents(entry.second, 0, threadsWithAttention);
+    }
 }
 
 } // namespace L0

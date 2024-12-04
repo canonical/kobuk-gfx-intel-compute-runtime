@@ -25,10 +25,11 @@ cl_int CommandQueueHw<GfxFamily>::enqueueCopyImageToBuffer(
     const cl_event *eventWaitList,
     cl_event *event) {
 
-    const bool useStateless = forceStateless(dstBuffer->getSize());
-    const bool useHeapless = false;
-    auto builtInType = EBuiltInOps::adjustBuiltinType<EBuiltInOps::copyImage3dToBuffer>(useStateless, useHeapless);
-
+    bool isStateless = isForceStateless;
+    if (dstBuffer->getSize() >= 4ull * MemoryConstants::gigaByte) {
+        isStateless = true;
+    }
+    auto builtInType = EBuiltInOps::adjustBuiltinType<EBuiltInOps::copyImage3dToBuffer>(isStateless, this->heaplessModeEnabled);
     auto &builder = BuiltInDispatchBuilderOp::getBuiltinDispatchInfoBuilder(builtInType,
                                                                             this->getClDevice());
     BuiltInOwnershipWrapper builtInLock(builder, this->context);

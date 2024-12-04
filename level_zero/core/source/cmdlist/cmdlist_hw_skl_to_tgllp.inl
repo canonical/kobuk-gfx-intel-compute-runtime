@@ -110,6 +110,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     }
 
     appendEventForProfiling(event, nullptr, true, false, false, false);
+
     auto perThreadScratchSize = std::max<std::uint32_t>(this->getCommandListPerThreadScratchSize(0u),
                                                         kernel->getImmutableData()->getDescriptor().kernelAttributes.perThreadScratchSize[0]);
     this->setCommandListPerThreadScratchSize(0u, perThreadScratchSize);
@@ -294,9 +295,12 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     }
 
     if (this->isInOrderExecutionEnabled() && !launchParams.isKernelSplitOperation) {
-        NEO::PipeControlArgs args;
+        if (!event || !event->getAllocation(this->device)) {
+            NEO::PipeControlArgs args;
+            args.dcFlushEnable = getDcFlushRequired(true);
 
-        NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
+            NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
+        }
         appendSignalInOrderDependencyCounter(event, false);
     }
 
@@ -339,15 +343,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelSplit(Kernel
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
-void CommandListCoreFamily<gfxCoreFamily>::appendEventForProfilingAllWalkers(Event *event, void **syncCmdBuffer, CommandToPatchContainer *outTimeStampSyncCmds, bool beforeWalker, bool singlePacketEvent, bool skipAddingEventToResidency, bool copyOperation) {
-    if (beforeWalker) {
-        appendEventForProfiling(event, outTimeStampSyncCmds, true, false, skipAddingEventToResidency, copyOperation);
-    } else {
-        appendSignalEventPostWalker(event, syncCmdBuffer, outTimeStampSyncCmds, false, skipAddingEventToResidency, copyOperation);
-    }
-}
-
-template <GFXCORE_FAMILY gfxCoreFamily>
 inline NEO::PreemptionMode CommandListCoreFamily<gfxCoreFamily>::obtainKernelPreemptionMode(Kernel *kernel) {
     NEO::PreemptionFlags flags = NEO::PreemptionHelper::createPreemptionLevelFlags(*device->getNEODevice(), &kernel->getImmutableData()->getDescriptor());
     return NEO::PreemptionHelper::taskPreemptionMode(device->getDevicePreemptionMode(), flags);
@@ -355,6 +350,11 @@ inline NEO::PreemptionMode CommandListCoreFamily<gfxCoreFamily>::obtainKernelPre
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandListCoreFamily<gfxCoreFamily>::appendDispatchOffsetRegister(bool workloadPartitionEvent, bool beforeProfilingCmds) {
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+bool CommandListCoreFamily<gfxCoreFamily>::singleEventPacketRequired(bool inputSinglePacketEventRequest) const {
+    return true;
 }
 
 } // namespace L0

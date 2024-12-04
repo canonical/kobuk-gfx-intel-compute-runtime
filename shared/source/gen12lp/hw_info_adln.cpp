@@ -37,11 +37,10 @@ const RuntimeCapabilityTable ADLN::capabilityTable{
     {0, 0, 0, 0, false, false, false, false},       // kmdNotifyProperties
     MemoryConstants::max64BitAppAddress,            // gpuAddressSpace
     0,                                              // sharedSystemMemCapabilities
-    83.333,                                         // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                      // requiredPreemptionSurfaceSize
     "",                                             // deviceName
     nullptr,                                        // preferredPlatformName
-    PreemptionMode::MidThread,                      // defaultPreemptionMode
+    PreemptionMode::ThreadGroup,                    // defaultPreemptionMode
     aub_stream::ENGINE_RCS,                         // defaultEngineType
     0,                                              // maxRenderFrequency
     30,                                             // clVersionSupport
@@ -81,7 +80,8 @@ const RuntimeCapabilityTable ADLN::capabilityTable{
     true,                                           // fusedEuEnabled
     false,                                          // l0DebuggerSupported;
     true,                                           // supportsFloatAtomics
-    0                                               // cxlType
+    0,                                              // cxlType
+    2048                                            // syncNumRTStacksPerDSS
 };
 
 WorkaroundTable ADLN::workaroundTable = {};

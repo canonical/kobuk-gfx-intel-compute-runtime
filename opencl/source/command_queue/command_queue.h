@@ -389,7 +389,10 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     bool isBcs() const { return isCopyOnly; };
 
     cl_int enqueueStagingBufferMemcpy(cl_bool blockingCopy, void *dstPtr, const void *srcPtr, size_t size, cl_event *event);
+    cl_int enqueueStagingWriteImage(Image *dstImage, cl_bool blockingCopy, const size_t *globalOrigin, const size_t *globalRegion,
+                                    size_t inputRowPitch, size_t inputSlicePitch, const void *ptr, cl_event *event);
     bool isValidForStagingBufferCopy(Device &device, void *dstPtr, const void *srcPtr, size_t size, bool hasDependencies);
+    bool isValidForStagingWriteImage(Image *image, const void *ptr, bool hasDependencies);
 
   protected:
     void *enqueueReadMemObjForMap(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &errcodeRet);
@@ -432,6 +435,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     void unregisterBcsCsrClient(CommandStreamReceiver &bcsCsr);
 
     void unregisterGpgpuAndBcsCsrClients();
+
+    cl_int postStagingTransferSync(cl_event *event, const Event &profilingEvent, bool isSingleTransfer, bool isBlocking);
 
     Context *context = nullptr;
     ClDevice *device = nullptr;
@@ -486,6 +491,7 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     bool gpgpuCsrClientRegistered = false;
     bool heaplessModeEnabled = false;
     bool heaplessStateInitEnabled = false;
+    bool isForceStateless = false;
 };
 
 template <typename PtrType>

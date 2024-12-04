@@ -21,32 +21,17 @@
 namespace {
 
 const char *source = R"===(
-typedef ulong16 TYPE;
-__attribute__((reqd_work_group_size(32, 1, 1)))  // force LWS to 32
-__attribute__((intel_reqd_sub_group_size(16)))   // force SIMD to 16
+
 __kernel void kernel_copy(__global char *dst, __global char *src){
     uint gid = get_global_id(0);
     dst[gid] = src[gid];
-
-    __local TYPE locMem[32];
-    {
-        size_t lid = get_local_id(0);
-        size_t gid = get_global_id(0);
-
-        TYPE res1 = (TYPE)(src[gid]);
-        TYPE res2 = (TYPE)(src[gid] + 1);
-        TYPE res3 = (TYPE)(src[gid] + 2);
-
-        locMem[lid] = res1;
-        barrier(CLK_LOCAL_MEM_FENCE);
-        barrier(CLK_GLOBAL_MEM_FENCE);
-    
-        TYPE res = (locMem[src[gid] % 32] * res3) * res2 + res1;
-        src[0] += (char)res[lid % 16];
-    }
-    barrier(CLK_GLOBAL_MEM_FENCE);
-    src[0] = dst[0];
 }
+
+__kernel void kernel_fill(__global char *dst, char value){
+    uint gid = get_global_id(0);
+    dst[gid] = value;
+}
+
 )===";
 
 const char *source2 = R"===(
@@ -107,7 +92,7 @@ __kernel void image_read_sampler_oob(__global float4 *dst, image2d_t img, sample
     int2 coord = {get_global_id(0) + 1, get_global_id(1) + 1};
     size_t dstOffset = get_global_id(1) * get_image_width(img) + get_global_id(0);
     dst[dstOffset] = read_imagef(img, sampler, coord);
-    printf(" gid[ %d, %d]  %.2f , %.2f , %.2f , %.2f \n", get_global_id(0), get_global_id(1), dst[dstOffset].x, dst[dstOffset].y, dst[dstOffset].z, dst[dstOffset].w );
+    printf(" gid[ %zu, %zu]  %.2f , %.2f , %.2f , %.2f \n", get_global_id(0), get_global_id(1), dst[dstOffset].x, dst[dstOffset].y, dst[dstOffset].z, dst[dstOffset].w );
 }
 )===";
 
@@ -353,9 +338,9 @@ bool testBindlessBufferCopy(ze_context_handle_t context, ze_device_handle_t devi
     ze_module_handle_t module = nullptr;
     ze_module_handle_t module2 = nullptr;
     createModule(source, AddressingMode::bindless, context, device, deviceId, revisionId, module, "", false);
-    createModule(source2, AddressingMode::bindful, context, device, deviceId, revisionId, module2, "", false);
+    createModule(source, AddressingMode::bindful, context, device, deviceId, revisionId, module2, "", false);
 
-    ExecutionMode executionModes[] = {ExecutionMode::commandQueue, ExecutionMode::immSyncCmdList};
+    ExecutionMode executionModes[] = {ExecutionMode::immSyncCmdList, ExecutionMode::commandQueue};
     ze_kernel_handle_t copyKernel = nullptr;
     ze_kernel_handle_t fillKernel = nullptr;
     createKernel(module, copyKernel, kernelName.c_str());
@@ -513,7 +498,7 @@ bool testBindlessBindfulKernel(ze_context_handle_t context, ze_device_handle_t d
 }
 
 bool testBindlessImages(ze_context_handle_t context, ze_device_handle_t device, const std::string &deviceId, const std::string &revisionId,
-                        int imageCount, AddressingMode mode) {
+                        int imageCount, AddressingMode mode, ExecutionMode execMode) {
     bool outputValidated = false;
 
     ze_module_handle_t module = nullptr;
@@ -523,7 +508,7 @@ bool testBindlessImages(ze_context_handle_t context, ze_device_handle_t device, 
     createKernel(module, copyKernel, kernelName3.c_str());
 
     LevelZeroBlackBoxTests::CommandHandler commandHandler;
-    bool isImmediateCmdList = false;
+    bool isImmediateCmdList = execMode == ExecutionMode::immSyncCmdList ? true : false;
 
     SUCCESS_OR_TERMINATE(commandHandler.create(context, device, isImmediateCmdList));
 
@@ -629,6 +614,33 @@ bool testBindlessImages(ze_context_handle_t context, ze_device_handle_t device, 
     SUCCESS_OR_TERMINATE(zeModuleDestroy(module));
 
     return outputValidated;
+}
+
+bool testBindlessBindfulImageKernel(ze_context_handle_t context, ze_device_handle_t device, const std::string &deviceId, const std::string &revisionId) {
+
+    ExecutionMode executionModes[] = {ExecutionMode::commandQueue, ExecutionMode::immSyncCmdList};
+
+    std::tuple<AddressingMode, AddressingMode, std::string> kernelOrder[2] = {{AddressingMode::bindless, AddressingMode::bindful, "First Bindless Then Bindful"},
+                                                                              {AddressingMode::bindful, AddressingMode::bindless, "First Bindful Then Bindless"}};
+
+    for (auto kernelMode : kernelOrder) {
+
+        for (auto mode : executionModes) {
+
+            bool result1 = testBindlessImages(context, device, deviceId, revisionId, 0, std::get<0>(kernelMode), mode);
+            bool result2 = testBindlessImages(context, device, deviceId, revisionId, 0, std::get<1>(kernelMode), mode);
+
+            if (!result1 || !result2) {
+                std::cout << "testBindlessBindfulImageKernel with mode " << static_cast<uint32_t>(mode) << " " << std::get<2>(kernelMode) << " FAILED.\n"
+                          << std::endl;
+                return false;
+            } else {
+                std::cout << "testBindlessBindfulKernel with mode " << static_cast<uint32_t>(mode) << " " << std::get<2>(kernelMode) << " PASSED.\n"
+                          << std::endl;
+            }
+        }
+    }
+    return true;
 }
 
 bool testBindlessImageSampled(ze_context_handle_t context, ze_device_handle_t device, const std::string &deviceId,
@@ -1301,7 +1313,7 @@ int main(int argc, char *argv[]) {
     ze_device_uuid_t uuid = deviceProperties.uuid;
     std::string revisionId = std::to_string(reinterpret_cast<uint16_t *>(uuid.id)[2]);
 
-    int numTests = 7;
+    int numTests = 8;
     int testCase = -1;
     testCase = LevelZeroBlackBoxTests::getParamValue(argc, argv, "", "--test-case", -1);
     if (testCase < -1 || testCase >= numTests) {
@@ -1342,7 +1354,7 @@ int main(int argc, char *argv[]) {
                     std::cout << "--bindless-images " << std::endl;
                 }
 
-                outputValidated &= testBindlessImages(context, device, ss.str(), revisionId, imageCount, mode);
+                outputValidated &= testBindlessImages(context, device, ss.str(), revisionId, imageCount, mode, ExecutionMode::commandQueue);
             } else {
                 std::cout << "Skipped. testBindlessImages case not supported\n";
             }
@@ -1436,6 +1448,18 @@ int main(int argc, char *argv[]) {
                       << std::endl;
 
             outputValidated &= testBindlessBindfulKernel(context, device, ss.str(), revisionId);
+            break;
+        case 7:
+
+            if (is2dImageSupported) {
+                std::cout << "\ntest case: testBindlessBindfulImageKernel\n"
+                          << std::endl;
+
+                outputValidated &= testBindlessBindfulImageKernel(context, device, ss.str(), revisionId);
+            } else {
+                std::cout << "Skipped. testBindlessBindfulImageKernel case not supported\n";
+            }
+
             break;
         }
 

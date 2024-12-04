@@ -110,9 +110,6 @@ bool Wddm::init() {
     hardwareInfo->capabilityTable.instrumentationEnabled =
         (hardwareInfo->capabilityTable.instrumentationEnabled && instrumentationEnabled);
 
-    if (!hardwareInfo->capabilityTable.slmSize) {
-        hardwareInfo->capabilityTable.slmSize = gtSystemInfo->SLMSizeInKb;
-    }
     rootDeviceEnvironment.initProductHelper();
     rootDeviceEnvironment.initCompilerProductHelper();
     auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
@@ -822,7 +819,9 @@ bool Wddm::destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationC
     if ((0U == allocationCount) && (0U == resourceHandle)) {
         return true;
     }
+
     NTSTATUS status = STATUS_SUCCESS;
+
     D3DKMT_DESTROYALLOCATION2 destroyAllocation = {};
     DEBUG_BREAK_IF(!(allocationCount <= 1 || resourceHandle == 0));
 
@@ -830,10 +829,15 @@ bool Wddm::destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationC
     destroyAllocation.hResource = resourceHandle;
     destroyAllocation.phAllocationList = handles;
     destroyAllocation.AllocationCount = allocationCount;
+    destroyAllocation.Flags.AssumeNotInUse = debugManager.flags.SetAssumeNotInUse.get();
 
-    destroyAllocation.Flags.AssumeNotInUse = 1;
+    DeallocateGmm deallocateGmm{&destroyAllocation, getGdi()};
 
-    status = getGdi()->destroyAllocation2(&destroyAllocation);
+    if (debugManager.flags.DestroyAllocationsViaGmm.get()) {
+        status = static_cast<NTSTATUS>(this->rootDeviceEnvironment.getGmmClientContext()->deallocate2(&deallocateGmm));
+    } else {
+        status = getGdi()->destroyAllocation2(&destroyAllocation);
+    }
 
     return status == STATUS_SUCCESS;
 }

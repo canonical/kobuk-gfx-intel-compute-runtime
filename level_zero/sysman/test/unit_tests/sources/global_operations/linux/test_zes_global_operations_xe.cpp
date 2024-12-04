@@ -26,6 +26,8 @@ class SysmanGlobalOperationsFixtureXe : public SysmanDeviceFixture {
 
     void SetUp() override {
         SysmanDeviceFixture::SetUp();
+        pLinuxSysmanImp->getParentSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime = MockOSTime::create();
+        pLinuxSysmanImp->getParentSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime->setDeviceTimerResolution();
 
         pSysmanKmdInterface = new MockSysmanKmdInterfaceXe(pLinuxSysmanImp->getSysmanProductHelper());
         pSysfsAccess = new MockGlobalOperationsSysfsAccess();

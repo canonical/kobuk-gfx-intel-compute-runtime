@@ -10,7 +10,6 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/libult/linux/drm_mock_helper.h"
-#include "shared/test/common/libult/linux/drm_query_mock.h"
 #include "shared/test/common/mocks/linux/debug_mock_drm_xe.h"
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
@@ -149,11 +148,14 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
     using L0::DebugSessionImp::allThreads;
     using L0::DebugSessionImp::apiEvents;
     using L0::DebugSessionImp::expectedAttentionEvents;
+    using L0::DebugSessionImp::fifoPollInterval;
     using L0::DebugSessionImp::interruptSent;
+    using L0::DebugSessionImp::interruptTimeout;
     using L0::DebugSessionImp::readFifo;
     using L0::DebugSessionImp::stateSaveAreaHeader;
     using L0::DebugSessionImp::triggerEvents;
     using L0::DebugSessionLinux::getClientConnection;
+    using L0::DebugSessionLinux::maxRetries;
     using L0::DebugSessionLinux::updateStoppedThreadsAndCheckTriggerEvents;
     using L0::DebugSessionLinuxXe::addThreadToNewlyStoppedFromRaisedAttentionForTileSession;
     using L0::DebugSessionLinuxXe::asyncThread;
@@ -223,6 +225,21 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
             readInternalEventsAsync();
         }
         return DebugSessionLinuxXe::getInternalEvent();
+    }
+
+    bool pushApiEventValidateAckEvents = false;
+    bool pushApiEventAckEventsFound = false;
+    void pushApiEvent(zet_debug_event_t &debugEvent, uint64_t moduleHandle) override {
+        if (pushApiEventValidateAckEvents) {
+            auto connection = clientHandleToConnection[clientHandle].get();
+            for (auto module : connection->metaDataToModule) {
+                if (module.second.ackEvents[0].size() > 0) {
+                    pushApiEventAckEventsFound = true;
+                    break;
+                }
+            }
+        }
+        return DebugSessionLinux::pushApiEvent(debugEvent, moduleHandle);
     }
 
     bool readSystemRoutineIdentFromMemory(EuThread *thread, const void *stateSaveArea, SIP::sr_ident &srIdent) override {

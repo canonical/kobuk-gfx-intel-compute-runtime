@@ -70,7 +70,10 @@ struct VirtualMemoryReservation {
     MemoryFlags flags;
     std::map<void *, MemoryMappedRange *> mappedAllocations;
     uint32_t rootDeviceIndex;
+    bool isSvmReservation;
     size_t reservationSize;
+    uint64_t reservationBase;
+    size_t reservationTotalSize;
 };
 
 struct PhysicalMemoryAllocation {
@@ -248,6 +251,9 @@ class MemoryManager {
     virtual AddressRange reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) = 0;
     virtual size_t selectAlignmentAndHeap(size_t size, HeapIndex *heap) = 0;
     virtual void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) = 0;
+    virtual AddressRange reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) = 0;
+    AddressRange reserveCpuAddressWithZeroBaseRetry(const uint64_t requiredStartAddress, size_t size);
+    virtual void freeCpuAddress(AddressRange addressRange) = 0;
     static HeapIndex selectInternalHeap(bool useLocalMemory);
     static HeapIndex selectExternalHeap(bool useLocalMemory);
 
@@ -303,8 +309,8 @@ class MemoryManager {
     virtual bool allocateInterrupt(uint32_t &outHandle, uint32_t rootDeviceIndex) { return false; }
     virtual bool releaseInterrupt(uint32_t outHandle, uint32_t rootDeviceIndex) { return false; }
 
-    virtual bool createMediaContext(uint32_t rootDeviceIndex, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, uint64_t &outDoorbell) { return false; }
-    virtual bool releaseMediaContext(uint32_t rootDeviceIndex, uint64_t doorbellHandle) { return false; }
+    virtual bool createMediaContext(uint32_t rootDeviceIndex, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, void *&outDoorbell) { return false; }
+    virtual bool releaseMediaContext(uint32_t rootDeviceIndex, void *doorbellHandle) { return false; }
 
     virtual uint32_t getNumMediaDecoders(uint32_t rootDeviceIndex) const { return 0; }
     virtual uint32_t getNumMediaEncoders(uint32_t rootDeviceIndex) const { return 0; }
@@ -315,6 +321,8 @@ class MemoryManager {
     size_t getUsedLocalMemorySize(uint32_t rootDeviceIndex) const { return localMemAllocsSize[rootDeviceIndex]; }
     size_t getUsedSystemMemorySize() const { return sysMemAllocsSize; }
     uint32_t getFirstContextIdForRootDevice(uint32_t rootDeviceIndex);
+
+    virtual void getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) { return; }
 
   protected:
     bool getAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const void *hostPtr, const StorageInfo &storageInfo);

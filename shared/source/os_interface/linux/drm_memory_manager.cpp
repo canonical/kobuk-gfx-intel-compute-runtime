@@ -27,8 +27,6 @@
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/gfx_partition.h"
 #include "shared/source/memory_manager/host_ptr_manager.h"
-#include "shared/source/memory_manager/local_memory_usage.h"
-#include "shared/source/memory_manager/memory_banks.h"
 #include "shared/source/memory_manager/memory_pool.h"
 #include "shared/source/memory_manager/multi_graphics_allocation.h"
 #include "shared/source/memory_manager/residency.h"
@@ -47,7 +45,6 @@
 #include "shared/source/os_interface/product_helper.h"
 
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <sys/ioctl.h>
 
@@ -95,6 +92,7 @@ DrmMemoryManager::DrmMemoryManager(GemCloseWorkerMode mode,
         const auto heapIndex = customAlignment >= MemoryConstants::pageSize2M ? HeapIndex::heapStandard2MB : HeapIndex::heapStandard64KB;
         alignmentSelector.addCandidateAlignment(customAlignment, true, AlignmentSelector::anyWastage, heapIndex);
     }
+    osMemory = OSMemory::create();
 
     initialize(mode);
 }
@@ -1231,7 +1229,9 @@ void DrmMemoryManager::freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation,
         return;
     }
     DrmAllocation *drmAlloc = static_cast<DrmAllocation *>(gfxAllocation);
-    this->unregisterAllocation(gfxAllocation);
+    if (Sharing::nonSharedResource == gfxAllocation->peekSharedHandle()) {
+        this->unregisterAllocation(gfxAllocation);
+    }
     auto rootDeviceIndex = gfxAllocation->getRootDeviceIndex();
     for (auto &engine : getRegisteredEngines(rootDeviceIndex)) {
         auto memoryOperationsInterface = static_cast<DrmMemoryOperationsHandler *>(executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.get());
@@ -1523,6 +1523,18 @@ AddressRange DrmMemoryManager::reserveGpuAddressOnHeap(const uint64_t requiredSt
 
 void DrmMemoryManager::freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) {
     releaseGpuRange(reinterpret_cast<void *>(addressRange.address), addressRange.size, rootDeviceIndex);
+}
+
+AddressRange DrmMemoryManager::reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) {
+    void *ptr = osMemory->osReserveCpuAddressRange(addrToPtr(requiredStartAddress), size, false);
+    if (ptr == MAP_FAILED) {
+        ptr = nullptr;
+    }
+    return {castToUint64(ptr), size};
+}
+
+void DrmMemoryManager::freeCpuAddress(AddressRange addressRange) {
+    osMemory->osReleaseCpuAddressRange(addrToPtr(addressRange.address), addressRange.size);
 }
 
 std::unique_lock<std::mutex> DrmMemoryManager::acquireAllocLock() {
@@ -2753,12 +2765,12 @@ bool DrmMemoryManager::releaseInterrupt(uint32_t outHandle, uint32_t rootDeviceI
     return getDrm(rootDeviceIndex).getIoctlHelper()->releaseInterrupt(outHandle);
 }
 
-bool DrmMemoryManager::createMediaContext(uint32_t rootDeviceIndex, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, uint64_t &outDoorbell) {
+bool DrmMemoryManager::createMediaContext(uint32_t rootDeviceIndex, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, void *&outDoorbell) {
     auto &drm = getDrm(rootDeviceIndex);
     return drm.getIoctlHelper()->createMediaContext(drm.getVirtualMemoryAddressSpace(0), controlSharedMemoryBuffer, controlSharedMemoryBufferSize, controlBatchBuffer, controlBatchBufferSize, outDoorbell);
 }
 
-bool DrmMemoryManager::releaseMediaContext(uint32_t rootDeviceIndex, uint64_t doorbellHandle) {
+bool DrmMemoryManager::releaseMediaContext(uint32_t rootDeviceIndex, void *doorbellHandle) {
     return getDrm(rootDeviceIndex).getIoctlHelper()->releaseMediaContext(doorbellHandle);
 }
 
@@ -2780,6 +2792,10 @@ bool DrmMemoryManager::usmCompressionSupported(Device *device) {
         return !!NEO::debugManager.flags.RenderCompressedBuffersEnabled.get();
     }
     return false;
+}
+
+void DrmMemoryManager::getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) {
+    getDrm(rootDeviceIndex).getIoctlHelper()->queryDeviceParams(moduleId, serverType);
 }
 
 } // namespace NEO

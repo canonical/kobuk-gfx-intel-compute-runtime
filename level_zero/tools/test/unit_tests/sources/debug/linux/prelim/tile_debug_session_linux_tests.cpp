@@ -112,7 +112,7 @@ TEST(TileDebugSessionLinuxi915Test, GivenTileDebugSessionWhenReadingContextState
     EXPECT_TRUE(session->stateSaveAreaHeader.empty());
 
     const char *header = "cssa";
-    rootSession->stateSaveAreaHeader.assign(header, header + sizeof(header));
+    rootSession->stateSaveAreaHeader.assign(header, header + strlen(header) + 1);
 
     session->readStateSaveAreaHeader();
     EXPECT_FALSE(session->stateSaveAreaHeader.empty());
@@ -134,7 +134,7 @@ TEST(TileDebugSessionLinuxi915Test, GivenTileDebugSessionWhenReadingContextState
     ASSERT_NE(nullptr, session);
 
     const char *header = "cssa";
-    rootSession->stateSaveAreaHeader.assign(header, header + sizeof(header));
+    rootSession->stateSaveAreaHeader.assign(header, header + strlen(header) + 1);
     rootSession->sipSupportsSlm = false;
 
     session->readStateSaveAreaHeader();
@@ -1149,7 +1149,7 @@ using TileAttachAsyncThreadTest = Test<TileAttachFixture<>>;
 
 TEST_F(TileAttachAsyncThreadTest, GivenInterruptedThreadsWhenNoAttentionEventIsReadThenThreadUnavailableEventIsGenerated) {
     rootSession->tileSessions[0].second = true;
-    tileSessions[0]->returnTimeDiff = DebugSessionLinuxi915::interruptTimeout * 10;
+    tileSessions[0]->returnTimeDiff = rootSession->interruptTimeout * 10;
 
     ze_device_thread_t thread = {0, 0, 0, 0};
     auto result = tileSessions[0]->interrupt(thread);

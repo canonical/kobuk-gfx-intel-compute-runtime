@@ -349,12 +349,6 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedForDefaultEngineTypeAdjus
     EXPECT_FALSE(productHelper->isDefaultEngineTypeAdjustmentRequired(pInHwInfo));
 }
 
-HWTEST_F(ProductHelperTest, whenCallingGetDeviceMemoryNameThenDdrIsReturned) {
-
-    auto deviceMemoryName = productHelper->getDeviceMemoryName();
-    EXPECT_TRUE(hasSubstr(deviceMemoryName, std::string("DDR")));
-}
-
 HWCMDTEST_F(IGFX_GEN12LP_CORE, ProductHelperTest, givenProductHelperWhenAdditionalKernelExecInfoSupportCheckedThenCorrectValueIsReturned) {
 
     EXPECT_FALSE(productHelper->isDisableOverdispatchAvailable(pInHwInfo));
@@ -374,11 +368,6 @@ HWTEST_F(ProductHelperTest, givenVariousDebugKeyValuesWhenGettingLocalMemoryAcce
     EXPECT_EQ(LocalMemoryAccessMode::cpuAccessAllowed, productHelper->getLocalMemoryAccessMode(pInHwInfo));
     debugManager.flags.ForceLocalMemoryAccessMode.set(3);
     EXPECT_EQ(LocalMemoryAccessMode::cpuAccessDisallowed, productHelper->getLocalMemoryAccessMode(pInHwInfo));
-}
-
-HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfAllocationSizeAdjustmentIsRequiredThenFalseIsReturned) {
-
-    EXPECT_FALSE(productHelper->isAllocationSizeAdjustmentRequired(pInHwInfo));
 }
 
 HWTEST_F(ProductHelperTest, WhenCheckAssignEngineRoundRobinSupportedThenReturnFalse) {
@@ -451,10 +440,6 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfStorageInfoAdjustmentIs
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallUseGemCreateExtInAllocateMemoryByKMDThenFalseIsReturned, IsBeforeXeHpgCore) {
     EXPECT_FALSE(productHelper->useGemCreateExtInAllocateMemoryByKMD());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallIsFlatRingBufferSupportedThenTrueIsReturned, IsAtMostXeHpgCore) {
-    EXPECT_TRUE(productHelper->isFlatRingBufferSupported());
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfBlitterForImagesIsSupportedThenFalseIsReturned) {
@@ -646,11 +631,6 @@ HWTEST_F(ProductHelperTest, WhenFillingStateBaseAddressPropertiesSupportThenExpe
 
     productHelper->fillStateBaseAddressPropertiesSupportStructure(stateBaseAddressPropertiesSupport);
     EXPECT_EQ(productHelper->getStateBaseAddressPropertyBindingTablePoolBaseAddressSupport(), stateBaseAddressPropertiesSupport.bindingTablePoolBaseAddress);
-}
-
-HWTEST_F(ProductHelperTest, givenProductHelperWhenIsAdjustProgrammableIdPreferredSlmSizeRequiredThenFalseIsReturned) {
-
-    EXPECT_FALSE(productHelper->isAdjustProgrammableIdPreferredSlmSizeRequired(*defaultHwInfo));
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenIsGlobalFenceInCommandStreamRequiredThenFalseIsReturned) {
@@ -1017,18 +997,6 @@ HWTEST2_F(ProductHelperTest, givenPatIndexWhenCheckIsCoherentAllocationThenRetur
     }
 }
 
-TEST(ProductHelperPreemptionSettingTest, whenSipClassIsForcedToBuiltinThenRequiredPreemptionSizeIsNotAdjusted) {
-    MockExecutionEnvironment executionEnvironment{};
-    DebugManagerStateRestore restorer;
-    debugManager.flags.ForceSipClass.set(static_cast<int32_t>(SipClassType::builtins));
-    auto hwInfo = *defaultHwInfo;
-    hwInfo.gtSystemInfo.CsrSizeInMb = 1;
-    constexpr uint32_t initialPreemptionSurfaceSize = 0xdeadbeef;
-    hwInfo.capabilityTable.requiredPreemptionSurfaceSize = initialPreemptionSurfaceSize;
-    MockProductHelper::setupPreemptionSurfaceSize(hwInfo, *executionEnvironment.rootDeviceEnvironments[0]);
-    EXPECT_EQ(initialPreemptionSurfaceSize, hwInfo.capabilityTable.requiredPreemptionSurfaceSize);
-}
-
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenItsPreXe2ThenCacheLineSizeIs64Bytes, IsAtMostPVC) {
     EXPECT_EQ(productHelper->getCacheLineSize(), 64u);
 }
@@ -1057,22 +1025,22 @@ TEST_F(ProductHelperTest, whenGettingMaxSubSliceSpaceThenValueIsNotSmallerThanMa
     EXPECT_EQ(maxSupportedSubSlices, productHelper->computeMaxNeededSubSliceSpace(hwInfo));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnFalse, IsAtMostDg2) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnFalse, IsBeforeXeHpcCore) {
 
     EXPECT_FALSE(productHelper->supports2DBlockLoad());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnFalse, IsAtMostDg2) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnFalse, IsBeforeXeHpcCore) {
 
     EXPECT_FALSE(productHelper->supports2DBlockStore());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnTrue, IsAtLeastPVC) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnTrue, IsAtLeastXeHpcCore) {
 
     EXPECT_TRUE(productHelper->supports2DBlockLoad());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnTrue, IsAtLeastPVC) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnTrue, IsAtLeastXeHpcCore) {
 
     EXPECT_TRUE(productHelper->supports2DBlockStore());
 }

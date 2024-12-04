@@ -50,7 +50,6 @@ const RuntimeCapabilityTable PVC::capabilityTable{
     {0, 0, 0, 0, false, false, false, false},                  // kmdNotifyProperties
     maxNBitValue(57),                                          // gpuAddressSpace
     0,                                                         // sharedSystemMemCapabilities
-    83.333,                                                    // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                                 // requiredPreemptionSurfaceSize
     "",                                                        // deviceName
     nullptr,                                                   // preferredPlatformName
@@ -94,7 +93,8 @@ const RuntimeCapabilityTable PVC::capabilityTable{
     false,                                                     // fusedEuEnabled
     true,                                                      // l0DebuggerSupported;
     true,                                                      // supportsFloatAtomics
-    0                                                          // cxlType
+    0,                                                         // cxlType
+    2048                                                       // syncNumRTStacksPerDSS
 };
 
 void PVC::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {

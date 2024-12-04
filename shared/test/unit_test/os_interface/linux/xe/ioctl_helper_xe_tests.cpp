@@ -53,49 +53,67 @@ TEST(IoctlHelperXeTest, whenChangingBufferBindingThenWaitIsNeededAlways) {
     EXPECT_TRUE(ioctlHelper.isWaitBeforeBindRequired(false));
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateExtWithRegionsThenDummyValueIsReturned) {
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    ASSERT_NE(nullptr, xeIoctlHelper);
+struct GemCreateExtFixture {
 
-    std::vector<MemoryRegion> regionInfo(2);
-    regionInfo[0].region = {0, 0};
-    regionInfo[0].probedSize = 8 * MemoryConstants::gigaByte;
-    regionInfo[1].region = {1, 0};
-    regionInfo[1].probedSize = 16 * MemoryConstants::gigaByte;
-    MemRegionsVec memRegions = {regionInfo[0].region, regionInfo[1].region};
+    GemCreateExtFixture() : hwInfo{*executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo()},
+                            drm{DrmMockXe::create(*executionEnvironment.rootDeviceEnvironments[0])} {}
 
+    void setUp() {
+        xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+    }
+    void tearDown() {}
+
+    MockExecutionEnvironment executionEnvironment{};
+    const HardwareInfo &hwInfo;
+    std::unique_ptr<DrmMockXe> drm;
+    MockIoctlHelperXe *xeIoctlHelper{nullptr};
+
+    MemoryClassInstance systemMemory = {drm_xe_memory_class::DRM_XE_MEM_REGION_CLASS_SYSMEM, 0};
+    MemoryClassInstance localMemory = {drm_xe_memory_class::DRM_XE_MEM_REGION_CLASS_VRAM, 1};
+
+    size_t allocSize = 0u;
     uint32_t handle = 0u;
-    uint32_t numOfChunks = 0;
+    uint32_t numOfChunks = 0u;
+    uint64_t patIndex = 0u;
+    int32_t pairHandle = -1;
+    bool isChunked = false;
+    bool isCoherent = false;
+};
+using IoctlHelperXeGemCreateExtTests = Test<GemCreateExtFixture>;
+
+TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExtWithRegionsThenDummyValueIsReturned) {
+    MemRegionsVec memRegions = {systemMemory, localMemory};
 
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
-    EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, 0u, handle, 0, {}, -1, false, numOfChunks, std::nullopt, std::nullopt, false));
+    EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, allocSize, handle, patIndex, std::nullopt, pairHandle, isChunked, numOfChunks, std::nullopt, std::nullopt, isCoherent));
     EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateExtWithRegionsAndVmIdThenDummyValueIsReturned) {
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    ASSERT_NE(nullptr, xeIoctlHelper);
-
-    std::vector<MemoryRegion> regionInfo(2);
-    regionInfo[0].region = {0, 0};
-    regionInfo[0].probedSize = 8 * MemoryConstants::gigaByte;
-    regionInfo[1].region = {1, 0};
-    regionInfo[1].probedSize = 16 * MemoryConstants::gigaByte;
-    MemRegionsVec memRegions = {regionInfo[0].region, regionInfo[1].region};
-
-    uint32_t handle = 0u;
-    uint32_t numOfChunks = 0;
+TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExtWithRegionsAndVmIdThenDummyValueIsReturned) {
+    MemRegionsVec memRegions = {systemMemory, localMemory};
 
     GemVmControl test = {};
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
-    EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, 0u, handle, 0, test.vmId, -1, false, numOfChunks, std::nullopt, std::nullopt, false));
+    EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, allocSize, handle, patIndex, test.vmId, pairHandle, isChunked, numOfChunks, std::nullopt, std::nullopt, isCoherent));
     EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
+}
+
+TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExtWithRegionsAndCoherencyThenUncachedCPUCachingIsUsed) {
+    MemRegionsVec memRegions = {systemMemory, localMemory};
+    bool isCoherent = true;
+
+    EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, allocSize, handle, patIndex, std::nullopt, pairHandle, isChunked, numOfChunks, std::nullopt, std::nullopt, isCoherent));
+    EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
+}
+
+TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExtWithOnlySystemRegionAndCoherencyThenWriteBackCPUCachingIsUsed) {
+    MemRegionsVec memRegions = {systemMemory};
+    bool isCoherent = true;
+
+    EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, allocSize, handle, patIndex, std::nullopt, pairHandle, isChunked, numOfChunks, std::nullopt, std::nullopt, isCoherent));
+    EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WB, drm->createParamsCpuCaching);
 }
 
 TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndNoLocalMemoryThenProperValuesSet) {
@@ -188,6 +206,44 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndLocalMemoryThenPro
     EXPECT_EQ(handle, testValueGemCreate);
 }
 
+TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithRegionsAndCoherencyThenUncachedCPUCachingIsUsed) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableLocalMemory.set(1);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+
+    xeIoctlHelper->initialize();
+    drm->memoryInfo.reset(xeIoctlHelper->createMemoryInfo().release());
+    ASSERT_NE(nullptr, xeIoctlHelper);
+
+    bool isCoherent = true;
+    uint64_t size = 1234;
+    uint32_t memoryBanks = 3u;
+
+    EXPECT_EQ(testValueGemCreate, xeIoctlHelper->createGem(size, memoryBanks, isCoherent));
+    EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
+}
+
+TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithOnlySystemRegionAndCoherencyThenWriteBackCPUCachingIsUsed) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableLocalMemory.set(0);
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+
+    xeIoctlHelper->initialize();
+    drm->memoryInfo.reset(xeIoctlHelper->createMemoryInfo().release());
+    ASSERT_NE(nullptr, xeIoctlHelper);
+
+    bool isCoherent = true;
+    uint64_t size = 1234;
+    uint32_t memoryBanks = 3u;
+
+    EXPECT_EQ(testValueGemCreate, xeIoctlHelper->createGem(size, memoryBanks, isCoherent));
+    EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WB, drm->createParamsCpuCaching);
+}
+
 TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallSetGemTilingThenAlwaysTrue) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -267,8 +323,6 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIsRe
     EXPECT_TRUE(xeIoctlHelper->setVmBoAdviseForChunking(0, 0, 0, 0, nullptr));
 
     EXPECT_FALSE(xeIoctlHelper->isChunkingAvailable());
-
-    EXPECT_FALSE(xeIoctlHelper->setVmPrefetch(0, 0, 0, 0));
 
     EXPECT_EQ(0u, xeIoctlHelper->getDirectSubmissionFlag());
 
@@ -1731,10 +1785,11 @@ TEST(IoctlHelperXeTest, whenXeShowBindTableIsCalledThenBindLogsArePrinted) {
     debugManager.flags.PrintXeLogs.set(false);
 
     std::string output = testing::internal::GetCapturedStderr();
-    std::string expectedOutput = R"(show bind: (<index> <handle> <userptr> <addr> <size>)
-   0 x00000001 x0000000000000002 x0000000000000003 x0000000000000004
-)";
-    EXPECT_STREQ(expectedOutput.c_str(), output.c_str());
+    std::string expectedOutput1 = "show bind: (<index> <handle> <userptr> <addr> <size>)\n";
+    std::string expectedOutput2 = "0 x00000001 x0000000000000002 x0000000000000003 x0000000000000004";
+
+    EXPECT_NE(std::string::npos, output.find(expectedOutput1));
+    EXPECT_NE(std::string::npos, output.find(expectedOutput2, expectedOutput1.size()));
 }
 
 TEST(IoctlHelperXeTest, whenFillBindInfoForIpcHandleIsCalledThenBindInfoIsCorrect) {
@@ -1914,9 +1969,9 @@ TEST(IoctlHelperXeTest, whenBindingDrmContextWithoutVirtualEnginesThenProperEngi
     uint16_t tileId = 1u;
     uint16_t expectedGtId = 2u;
 
-    EXPECT_EQ(expectedValue, drm->bindDrmContext(0, tileId, aub_stream::EngineType::ENGINE_CCS, true));
+    EXPECT_EQ(expectedValue, drm->bindDrmContext(0, tileId, aub_stream::EngineType::ENGINE_CCS));
 
-    EXPECT_EQ(1u, ioctlHelper->contextParamEngine.size());
+    EXPECT_EQ(4u, ioctlHelper->contextParamEngine.size());
     auto expectedEngine = drm->getEngineInfo()->getEngineInstance(1, aub_stream::EngineType::ENGINE_CCS);
     auto notExpectedEngine = drm->getEngineInfo()->getEngineInstance(0, aub_stream::EngineType::ENGINE_CCS);
     EXPECT_NE(expectedEngine->engineInstance, notExpectedEngine->engineInstance);
@@ -1938,7 +1993,7 @@ TEST(IoctlHelperXeTest, whenBindingDrmContextWithVirtualEnginesThenProperEngines
     unsigned int expectedValue = DRM_XE_ENGINE_CLASS_COMPUTE;
     uint16_t tileId = 1u;
     uint16_t expectedGtId = 2u;
-    EXPECT_EQ(expectedValue, drm->bindDrmContext(0, tileId, aub_stream::EngineType::ENGINE_CCS, false));
+    EXPECT_EQ(expectedValue, drm->bindDrmContext(0, tileId, aub_stream::EngineType::ENGINE_CCS));
 
     EXPECT_EQ(2u, ioctlHelper->contextParamEngine.size());
     {
@@ -2474,4 +2529,88 @@ TEST(IoctlHelperXeTest, givenIoctlHelperWhenGettingFenceAddressThenReturnCorrect
     OsContextLinux osContext(*drm, 0, 5u, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_CCS, EngineUsage::lowPriority}));
     fenceAddr = ioctlHelper.getPagingFenceAddress(0, &osContext);
     EXPECT_EQ(osContext.getFenceAddr(0), fenceAddr);
+}
+
+TEST(IoctlHelperXeTest, givenIoctlWhenQueryDeviceParamsIsCalledThenFalseIsReturned) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+
+    uint32_t moduleId = 0;
+    uint16_t serverType = 0;
+    EXPECT_FALSE(xeIoctlHelper->queryDeviceParams(&moduleId, &serverType));
+}
+
+TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchThenVmBindIsCalled) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableLocalMemory.set(1);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+    xeIoctlHelper->initialize();
+
+    uint64_t start = 0x12u;
+    uint64_t length = 0x34u;
+    uint32_t subDeviceId = 0u;
+    uint32_t vmId = 1u;
+
+    auto memoryInfo = xeIoctlHelper->createMemoryInfo();
+    MemoryClassInstance targetMemoryRegion = memoryInfo->getLocalMemoryRegions()[subDeviceId].region;
+    ASSERT_NE(nullptr, memoryInfo);
+    drm->memoryInfo.reset(memoryInfo.release());
+
+    EXPECT_TRUE(xeIoctlHelper->setVmPrefetch(start, length, subDeviceId, vmId));
+    EXPECT_EQ(1u, drm->vmBindInputs.size());
+
+    EXPECT_EQ(drm->vmBindInputs[0].vm_id, vmId);
+    EXPECT_EQ(drm->vmBindInputs[0].bind.addr, start);
+    EXPECT_EQ(drm->vmBindInputs[0].bind.range, length);
+    EXPECT_EQ(drm->vmBindInputs[0].bind.prefetch_mem_region_instance, targetMemoryRegion.memoryInstance);
+}
+
+TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchOnSecondTileThenVmBindIsCalled) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableLocalMemory.set(1);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+    xeIoctlHelper->initialize();
+
+    uint64_t start = 0x12u;
+    uint64_t length = 0x34u;
+    uint32_t subDeviceId = 1u;
+    uint32_t vmId = 1u;
+
+    auto memoryInfo = xeIoctlHelper->createMemoryInfo();
+    MemoryClassInstance targetMemoryRegion = memoryInfo->getLocalMemoryRegions()[subDeviceId].region;
+    ASSERT_NE(nullptr, memoryInfo);
+    drm->memoryInfo.reset(memoryInfo.release());
+
+    EXPECT_TRUE(xeIoctlHelper->setVmPrefetch(start, length, subDeviceId, vmId));
+    EXPECT_EQ(1u, drm->vmBindInputs.size());
+
+    EXPECT_EQ(drm->vmBindInputs[0].vm_id, vmId);
+    EXPECT_EQ(drm->vmBindInputs[0].bind.addr, start);
+    EXPECT_EQ(drm->vmBindInputs[0].bind.range, length);
+    EXPECT_EQ(drm->vmBindInputs[0].bind.prefetch_mem_region_instance, targetMemoryRegion.memoryInstance);
+}
+
+TEST(IoctlHelperXeTest, givenIoctlFailureWhenCallingSetVmPrefetchThenFalseIsReturned) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableLocalMemory.set(1);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+    xeIoctlHelper->initialize();
+
+    auto memoryInfo = xeIoctlHelper->createMemoryInfo();
+    ASSERT_NE(nullptr, memoryInfo);
+    drm->memoryInfo.reset(memoryInfo.release());
+    drm->testMode(1, -1);
+
+    EXPECT_FALSE(xeIoctlHelper->setVmPrefetch(0u, 0u, 0u, 0u));
+    EXPECT_EQ(0u, drm->vmBindInputs.size());
 }

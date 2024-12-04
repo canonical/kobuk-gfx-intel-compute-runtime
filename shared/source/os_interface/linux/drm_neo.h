@@ -106,7 +106,7 @@ class Drm : public DriverModel {
     int queryVmId(uint32_t drmContextId, uint32_t &vmId);
     void setLowPriorityContextParam(uint32_t drmContextId);
 
-    MOCKABLE_VIRTUAL unsigned int bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, aub_stream::EngineType engineType, bool engineInstancedDevice);
+    MOCKABLE_VIRTUAL unsigned int bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, aub_stream::EngineType engineType);
 
     MOCKABLE_VIRTUAL int getErrno();
     bool setQueueSliceCount(uint64_t sliceCount);
@@ -212,9 +212,8 @@ class Drm : public DriverModel {
 
     static Drm *create(std::unique_ptr<HwDeviceIdDrm> &&hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
     static void overrideBindSupport(bool &useVmBind);
-    std::string getPciPath() {
-        return hwDeviceId->getPciPath();
-    }
+    std::string getPciPath() { return hwDeviceId->getPciPath(); }
+    std::string getDeviceNode() { return hwDeviceId->getDeviceNode(); }
 
     void waitForBind(uint32_t vmHandleId);
     uint64_t getNextFenceVal(uint32_t vmHandleId) { return fenceVal[vmHandleId] + 1; }

@@ -25,6 +25,7 @@
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/os_interface/linux/sys_calls_linux_ult.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
@@ -1003,7 +1004,10 @@ TEST_F(DebugApiLinuxTest, GivenDebuggerLogsWhenOpenDebuggerFailsThenCorrectMessa
     EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, result);
 
     auto errorMessage = ::testing::internal::GetCapturedStderr();
-    EXPECT_EQ(std::string("\nERROR: PRELIM_DRM_IOCTL_I915_DEBUGGER_OPEN failed: open.pid: 4660, open.events: 0, retCode: -1, errno: 22\n"), errorMessage);
+    // Trim errorMessage and remove timestamp + first space
+    size_t pos = errorMessage.find(']');
+    errorMessage.erase(0, pos + 2);
+    EXPECT_EQ(std::string("ERROR: PRELIM_DRM_IOCTL_I915_DEBUGGER_OPEN failed: open.pid: 4660, open.events: 0, retCode: -1, errno: 22\n"), errorMessage);
 }
 
 TEST_F(DebugApiLinuxTest, WhenOpenDebuggerFailsThenCorrectErrorIsReturned) {
@@ -1147,7 +1151,10 @@ TEST_F(DebugApiLinuxTest, GivenPrintDebugMessagesWhenDebugSessionClosesConnectio
     NEO::SysCalls::closeFuncRetVal = 0;
 
     auto errorMessage = ::testing::internal::GetCapturedStderr();
-    EXPECT_EQ(std::string("\nERROR: Debug connection close() on fd: 10 failed: retCode: -1\n"), errorMessage);
+    // Trim errorMessage and remove timestamp + first space
+    size_t pos = errorMessage.find(']');
+    errorMessage.erase(0, pos + 2);
+    EXPECT_EQ(std::string("ERROR: Debug connection close() on fd: 10 failed: retCode: -1\n"), errorMessage);
 }
 
 TEST_F(DebugApiLinuxTest, GivenDebugSessionWhenCallingIoctlThenIoctlHandlerIsInvokedWithDebugFd) {
@@ -5034,8 +5041,8 @@ TEST_F(DebugApiLinuxTest, GivenNonClassUuidEventWithoutPayloadWhenHandlingEventT
     session->handleEvent(reinterpret_cast<prelim_drm_i915_debug_event *>(&uuid));
 
     EXPECT_EQ(50u, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].classHandle);
-    EXPECT_EQ(uuid.handle, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].handle);
-    EXPECT_EQ(uuid.class_handle, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].classHandle);
+    EXPECT_EQ_VAL(uuid.handle, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].handle);
+    EXPECT_EQ_VAL(uuid.class_handle, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].classHandle);
     EXPECT_EQ(nullptr, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].data);
     EXPECT_EQ(0u, session->clientHandleToConnection[MockDebugSessionLinuxi915::mockClientHandle]->uuidMap[uuid.handle].dataSize);
 
@@ -5076,7 +5083,10 @@ TEST_F(DebugApiLinuxTest, GivenDebuggerLogsAndFailingReadUuidEventIoctlWhenHandl
     EXPECT_EQ(0u, session->getClassHandleToIndex().size());
 
     auto errorMessage = ::testing::internal::GetCapturedStderr();
-    EXPECT_EQ(std::string("\nERROR: PRELIM_I915_DEBUG_IOCTL_READ_UUID ret = -1 errno = 0\n"), errorMessage);
+    // Trim errorMessage and remove timestamp + first space
+    size_t pos = errorMessage.find(']');
+    errorMessage.erase(0, pos + 2);
+    EXPECT_EQ(std::string("ERROR: PRELIM_I915_DEBUG_IOCTL_READ_UUID ret = -1 errno = 0\n"), errorMessage);
 }
 
 TEST_F(DebugApiLinuxTest, GivenEventsAvailableWhenReadingEventThenEventsAreReturned) {
@@ -5316,7 +5326,10 @@ TEST_F(DebugApiLinuxTest, GivenDebuggerErrorLogsWhenContextParamWithInvalidConte
               session->clientHandleToConnection[contextParamEvent.client_handle]->contextsCreated.find(77));
 
     auto errorMessage = ::testing::internal::GetCapturedStderr();
-    EXPECT_EQ(std::string("\nERROR: CONTEXT handle does not exist\n"), errorMessage);
+    // Trim errorMessage and remove timestamp + first space
+    size_t pos = errorMessage.find(']');
+    errorMessage.erase(0, pos + 2);
+    EXPECT_EQ(std::string("ERROR: CONTEXT handle does not exist\n"), errorMessage);
 }
 
 TEST_F(DebugApiLinuxTest, GivenDebuggerInfoLogsWhenHandlingContextParamEventWithUnknownParamThenInfoIsPrinted) {
@@ -5487,16 +5500,23 @@ TEST_F(DebugApiLinuxTest, GivenStoppedAndRunningThreadWhenCheckStoppedThreadsAnd
     handler->outputBitmask = std::move(bitmask);
 
     sessionMock->checkStoppedThreadsAndGenerateEvents(threads, memoryHandle, 0);
-
-    EXPECT_EQ(3, handler->ioctlCalled);
-    EXPECT_EQ(1u, handler->euControlArgs.size());
-    EXPECT_EQ(2u, sessionMock->numThreadsPassedToThreadControl);
-    EXPECT_EQ(uint32_t(PRELIM_I915_DEBUG_EU_THREADS_CMD_STOPPED), handler->euControlArgs[0].euControl.cmd);
-    EXPECT_NE(0u, handler->euControlArgs[0].euControl.bitmask_size);
-    EXPECT_NE(0u, handler->euControlArgs[0].euControl.bitmask_ptr);
+    if (l0GfxCoreHelper.isThreadControlStoppedSupported()) {
+        EXPECT_EQ(3, handler->ioctlCalled);
+        EXPECT_EQ(1u, handler->euControlArgs.size());
+        EXPECT_EQ(2u, sessionMock->numThreadsPassedToThreadControl);
+        EXPECT_EQ(uint32_t(PRELIM_I915_DEBUG_EU_THREADS_CMD_STOPPED), handler->euControlArgs[0].euControl.cmd);
+        EXPECT_NE(0u, handler->euControlArgs[0].euControl.bitmask_size);
+        EXPECT_NE(0u, handler->euControlArgs[0].euControl.bitmask_ptr);
+    } else {
+        EXPECT_EQ(2, handler->ioctlCalled);
+        EXPECT_EQ(0u, handler->euControlArgs.size());
+        EXPECT_EQ(0u, sessionMock->numThreadsPassedToThreadControl);
+    }
 
     l0GfxCoreHelper.getAttentionBitmaskForSingleThreads(threads, hwInfo, bitmask, bitmaskSize);
-    EXPECT_EQ(0, memcmp(handler->euControlArgs[0].euControlBitmask.get(), bitmask.get(), bitmaskSize));
+    if (l0GfxCoreHelper.isThreadControlStoppedSupported()) {
+        EXPECT_EQ(0, memcmp(handler->euControlArgs[0].euControlBitmask.get(), bitmask.get(), bitmaskSize));
+    }
 
     EXPECT_TRUE(sessionMock->allThreads[thread.packed]->isStopped());
     EXPECT_TRUE(sessionMock->allThreads[thread1.packed]->isStopped());
@@ -5565,7 +5585,11 @@ TEST_F(DebugApiLinuxTest, GivenStoppedThreadResumeCausingPageFaultAndFEBitSetWhe
     EXPECT_EQ(0u, sessionMock->apiEvents.size());
 }
 
-TEST_F(DebugApiLinuxTest, GivenNoAttentionBitsWhenMultipleThreadsPassedToCheckStoppedThreadsAndGenerateEventsThenThreadsStateNotCheckedAndEventsNotGenerated) {
+HWTEST2_F(DebugApiLinuxTest, GivenNoAttentionBitsWhenMultipleThreadsPassedToCheckStoppedThreadsAndGenerateEventsThenThreadsStateNotCheckedAndEventsNotGenerated, MatchAny) {
+    MockL0GfxCoreHelperSupportsThreadControlStopped<FamilyType> mockL0GfxCoreHelper;
+    std::unique_ptr<ApiGfxCoreHelper> l0GfxCoreHelperBackup(static_cast<ApiGfxCoreHelper *>(&mockL0GfxCoreHelper));
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->apiGfxCoreHelper.swap(l0GfxCoreHelperBackup);
+
     zet_debug_config_t config = {};
     config.pid = 0x1234;
 
@@ -5612,6 +5636,8 @@ TEST_F(DebugApiLinuxTest, GivenNoAttentionBitsWhenMultipleThreadsPassedToCheckSt
     EXPECT_FALSE(sessionMock->allThreads[thread2.packed]->isStopped());
 
     EXPECT_EQ(0u, sessionMock->apiEvents.size());
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->apiGfxCoreHelper.swap(l0GfxCoreHelperBackup);
+    l0GfxCoreHelperBackup.release();
 }
 
 TEST_F(DebugApiLinuxTest, GivenNoAttentionBitsWhenSingleThreadPassedToCheckStoppedThreadsAndGenerateEventsThenThreadStoppedEventsGeneratedOnlyForNewlyStoppedThreadFromPassedVector) {
@@ -5670,7 +5696,11 @@ TEST_F(DebugApiLinuxTest, GivenNoAttentionBitsWhenSingleThreadPassedToCheckStopp
     EXPECT_EQ(0u, sessionMock->apiEvents.size());
 }
 
-TEST_F(DebugApiLinuxTest, GivenErrorFromSynchronousAttScanWhenMultipleThreadsPassedToCheckStoppedThreadsAndGenerateEventsThenThreadsStateNotChecked) {
+HWTEST2_F(DebugApiLinuxTest, GivenErrorFromSynchronousAttScanWhenMultipleThreadsPassedToCheckStoppedThreadsAndGenerateEventsThenThreadsStateNotChecked, MatchAny) {
+    MockL0GfxCoreHelperSupportsThreadControlStopped<FamilyType> mockL0GfxCoreHelper;
+    std::unique_ptr<ApiGfxCoreHelper> l0GfxCoreHelperBackup(static_cast<ApiGfxCoreHelper *>(&mockL0GfxCoreHelper));
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->apiGfxCoreHelper.swap(l0GfxCoreHelperBackup);
+
     zet_debug_config_t config = {};
     config.pid = 0x1234;
 
@@ -5715,6 +5745,8 @@ TEST_F(DebugApiLinuxTest, GivenErrorFromSynchronousAttScanWhenMultipleThreadsPas
     EXPECT_FALSE(sessionMock->allThreads[thread1.packed]->isStopped());
 
     EXPECT_EQ(0u, sessionMock->apiEvents.size());
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->apiGfxCoreHelper.swap(l0GfxCoreHelperBackup);
+    l0GfxCoreHelperBackup.release();
 }
 
 TEST_F(DebugApiLinuxTest, GivenResumeWARequiredWhenCallingResumeThenWaIsAppliedToBitmask) {
@@ -5877,7 +5909,7 @@ TEST_F(DebugApiLinuxTest, givenEnginesEventHandledThenLrcToContextHandleMapIsFil
     session->handleEvent(&client.base);
 
     unsigned char bytes1[sizeof(prelim_drm_i915_debug_event_engines) + 2 * sizeof(prelim_drm_i915_debug_engine_info)];
-    prelim_drm_i915_debug_event_engines *engines1 = reinterpret_cast<prelim_drm_i915_debug_event_engines *>(bytes1);
+    prelim_drm_i915_debug_event_engines *engines1 = new (bytes1) prelim_drm_i915_debug_event_engines;
     engines1->base.type = PRELIM_DRM_I915_DEBUG_EVENT_ENGINES;
     engines1->base.flags = PRELIM_DRM_I915_DEBUG_EVENT_CREATE;
     engines1->client_handle = clientHandle;
@@ -5887,7 +5919,7 @@ TEST_F(DebugApiLinuxTest, givenEnginesEventHandledThenLrcToContextHandleMapIsFil
     engines1->engines[1].lrc_handle = 2;
 
     unsigned char bytes2[sizeof(prelim_drm_i915_debug_event_engines) + 4 * sizeof(prelim_drm_i915_debug_engine_info)];
-    prelim_drm_i915_debug_event_engines *engines2 = reinterpret_cast<prelim_drm_i915_debug_event_engines *>(bytes2);
+    prelim_drm_i915_debug_event_engines *engines2 = new (bytes2) prelim_drm_i915_debug_event_engines;
     engines2->base.type = PRELIM_DRM_I915_DEBUG_EVENT_ENGINES;
     engines2->base.flags = PRELIM_DRM_I915_DEBUG_EVENT_CREATE;
     engines2->client_handle = clientHandle;
@@ -7153,7 +7185,7 @@ TEST_F(DebugApiLinuxAsyncThreadTest, GivenInterruptedThreadsWhenNoAttentionEvent
 
     auto handler = new MockIoctlHandlerI915;
     session->ioctlHandler.reset(handler);
-    session->returnTimeDiff = DebugSessionLinuxi915::interruptTimeout * 10;
+    session->returnTimeDiff = session->interruptTimeout * 10;
     session->synchronousInternalEventRead = true;
 
     ze_device_thread_t thread = {0, 0, 0, UINT32_MAX};

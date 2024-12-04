@@ -6,6 +6,7 @@
  */
 
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/mocks/mock_ostime.h"
 #include "shared/test/common/mocks/mock_product_helper.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
@@ -28,6 +29,8 @@ class SysmanGlobalOperationsFixture : public SysmanDeviceFixture {
 
     void SetUp() override {
         SysmanDeviceFixture::SetUp();
+        pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime = MockOSTime::create();
+        pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime->setDeviceTimerResolution();
     }
 
     void init(bool allowSetCalls) {
@@ -149,6 +152,32 @@ TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetProper
     EXPECT_TRUE(0 == expectedDeviceName.str().compare(properties.core.name));
 }
 
+TEST_F(SysmanGlobalOperationsFixture, GivenValidDeviceHandleWhenCallingGetPropertiesThenCorrectTimerResolutionInCorePropertiesAreReturned) {
+    init(true);
+    pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime.reset(new NEO::MockOSTimeWithConstTimestamp());
+    double mockedTimerResolution = pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironment().osTime->getDynamicDeviceTimerResolution();
+
+    zes_device_properties_t properties = {};
+    ze_result_t result = zesDeviceGetProperties(pSysmanDevice->toHandle(), &properties);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(properties.core.timerResolution, static_cast<uint64_t>(mockedTimerResolution));
+
+    properties = {};
+    ze_device_properties_t coreProperties = {};
+    coreProperties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2;
+    properties.core = coreProperties;
+    result = zesDeviceGetProperties(pSysmanDevice->toHandle(), &properties);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(properties.core.timerResolution, static_cast<uint64_t>(1000000000.0 / mockedTimerResolution));
+
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.UseCyclesPerSecondTimer.set(1);
+    properties = {};
+    result = zesDeviceGetProperties(pSysmanDevice->toHandle(), &properties);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_EQ(properties.core.timerResolution, static_cast<uint64_t>(1000000000.0 / mockedTimerResolution));
+}
+
 TEST_F(SysmanGlobalOperationsFixture, WhenGettingDevicePropertiesThenSubslicesPerSliceIsBasedOnSubslicesSupported) {
     init(true);
     auto pHwInfo = pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironment().getMutableHardwareInfo();
@@ -185,6 +214,8 @@ class SysmanGlobalOperationsUuidFixture : public SysmanDeviceFixture {
     L0::Sysman::SysmanDeviceImp *device = nullptr;
     void SetUp() override {
         SysmanDeviceFixture::SetUp();
+        pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime = MockOSTime::create();
+        pWddmSysmanImp->getSysmanDeviceImp()->getRootDeviceEnvironmentRef().osTime->setDeviceTimerResolution();
         pGlobalOperationsImp = static_cast<L0::Sysman::GlobalOperationsImp *>(pSysmanDeviceImp->pGlobalOperations);
         device = pSysmanDeviceImp;
     }

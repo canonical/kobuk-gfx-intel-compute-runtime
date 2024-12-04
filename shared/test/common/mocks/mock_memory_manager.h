@@ -63,6 +63,10 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     using MemoryManager::reservedMemory;
     using MemoryManager::secondaryEngines;
 
+    static constexpr osHandle invalidSharedHandle = -1;
+    static const unsigned int moduleId;
+    static const unsigned int serverType;
+
     MockMemoryManager(ExecutionEnvironment &executionEnvironment) : MockMemoryManager(false, executionEnvironment) {}
 
     MockMemoryManager(bool enableLocalMemory, ExecutionEnvironment &executionEnvironment);
@@ -130,6 +134,17 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
             return nullptr;
         }
         return OsAgnosticMemoryManager::reserveCpuAddressRange(size, rootDeviceIndex);
+    }
+
+    AddressRange reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) override {
+        if (failReserveAddress) {
+            return {};
+        }
+        return OsAgnosticMemoryManager::reserveCpuAddress(requiredStartAddress, size);
+    }
+
+    void freeCpuAddress(AddressRange addressRange) override {
+        return OsAgnosticMemoryManager::freeCpuAddress(addressRange);
     }
 
     void *createMultiGraphicsAllocationInSystemMemoryPool(RootDeviceIndicesContainer &rootDeviceIndices,
@@ -217,6 +232,15 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
         return OsAgnosticMemoryManager::mapPhysicalToVirtualMemory(physicalAllocation, gpuRange, bufferSize);
     };
 
+    void registerIpcExportedAllocation(GraphicsAllocation *graphicsAllocation) override {
+        registerIpcExportedAllocationCalled++;
+    }
+
+    void getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) override {
+        *moduleId = MockMemoryManager::moduleId;
+        *serverType = MockMemoryManager::serverType;
+    }
+
     MockGraphicsAllocation *mockGa;
     size_t ipcAllocationSize = 4096u;
     uint32_t copyMemoryToAllocationBanksCalled = 0u;
@@ -227,6 +251,7 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     uint32_t lockResourceCalled = 0u;
     uint32_t createGraphicsAllocationFromExistingStorageCalled = 0u;
     uint32_t allocInUseCalled = 0u;
+    uint32_t registerIpcExportedAllocationCalled = 0;
     int32_t overrideAllocateAsPackReturn = -1;
     std::vector<GraphicsAllocation *> allocationsFromExistingStorage{};
     AllocationData alignAllocationData;
@@ -237,7 +262,6 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     uint32_t waitForEnginesCompletionCalled = 0u;
     uint32_t allocateGraphicsMemoryWithPropertiesCount = 0;
     osHandle capturedSharedHandle = 0u;
-    osHandle invalidSharedHandle = -1;
     bool allocationCreated = false;
     bool allocation64kbPageCreated = false;
     bool allocationInDevicePoolCreated = false;

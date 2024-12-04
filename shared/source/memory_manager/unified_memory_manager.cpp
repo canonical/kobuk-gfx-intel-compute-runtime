@@ -7,6 +7,7 @@
 
 #include "shared/source/memory_manager/unified_memory_manager.h"
 
+#include "shared/source/ail/ail_configuration.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/device/sub_device.h"
 #include "shared/source/execution_environment/execution_environment.h"
@@ -44,6 +45,9 @@ void SVMAllocsManager::MapBasedAllocationTracker::remove(const SvmAllocationData
 }
 
 bool SVMAllocsManager::SvmAllocationCache::insert(size_t size, void *ptr) {
+    if (false == sizeAllowed(size)) {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(this->mtx);
     if (size + this->totalSize > this->maxSize) {
         return false;
@@ -53,11 +57,25 @@ bool SVMAllocsManager::SvmAllocationCache::insert(size_t size, void *ptr) {
     return true;
 }
 
+bool SVMAllocsManager::SvmAllocationCache::allocUtilizationAllows(size_t requestedSize, size_t reuseCandidateSize) {
+    if (reuseCandidateSize >= SvmAllocationCache::minimalSizeToCheckUtilization) {
+        const auto allocUtilization = static_cast<double>(requestedSize) / reuseCandidateSize;
+        return allocUtilization >= SvmAllocationCache::minimalAllocUtilization;
+    }
+    return true;
+}
+
 void *SVMAllocsManager::SvmAllocationCache::get(size_t size, const UnifiedMemoryProperties &unifiedMemoryProperties, SVMAllocsManager *svmAllocsManager) {
+    if (false == sizeAllowed(size)) {
+        return nullptr;
+    }
     std::lock_guard<std::mutex> lock(this->mtx);
     for (auto allocationIter = std::lower_bound(allocations.begin(), allocations.end(), size);
          allocationIter != allocations.end();
          ++allocationIter) {
+        if (false == allocUtilizationAllows(size, allocationIter->allocationSize)) {
+            break;
+        }
         void *allocationPtr = allocationIter->allocation;
         SvmAllocationData *svmAllocData = svmAllocsManager->getSVMAlloc(allocationPtr);
         UNRECOVERABLE_IF(!svmAllocData);
@@ -696,7 +714,9 @@ void SVMAllocsManager::freeZeroCopySvmAllocation(SvmAllocationData *svmData) {
 void SVMAllocsManager::initUsmDeviceAllocationsCache(Device &device) {
     this->usmDeviceAllocationsCache.allocations.reserve(128u);
     const auto totalDeviceMemory = device.getGlobalMemorySize(static_cast<uint32_t>(device.getDeviceBitfield().to_ulong()));
-    auto fractionOfTotalMemoryForRecycling = 0.08;
+    auto ailConfiguration = device.getAilConfigurationHelper();
+    const bool limitDeviceMemoryForReuse = ailConfiguration && ailConfiguration->limitAmountOfDeviceMemoryForRecycling();
+    auto fractionOfTotalMemoryForRecycling = limitDeviceMemoryForReuse ? 0.02 : 0.08;
     if (debugManager.flags.ExperimentalEnableDeviceAllocationCache.get() != -1) {
         fractionOfTotalMemoryForRecycling = 0.01 * std::min(100, debugManager.flags.ExperimentalEnableDeviceAllocationCache.get());
     }
@@ -791,11 +811,11 @@ void SVMAllocsManager::prepareIndirectAllocationForDestruction(SvmAllocationData
                 continue;
             }
 
-            // Marking gpuAllocation task count as objectNotUsed means we will not wait for GPU completion.
+            // If this is non blocking free, we will wait for latest known usage of this allocation.
             // However, if this is blocking free, we must select "safest" task count to wait for.
             TaskCountType desiredTaskCount = std::max(internalAllocationsHandling.second.latestSentTaskCount, gpuAllocation->getTaskCount(commandStreamReceiver->getOsContext().getContextId()));
             if (isNonBlockingFree) {
-                desiredTaskCount = GraphicsAllocation::objectNotUsed;
+                desiredTaskCount = gpuAllocation->getTaskCount(commandStreamReceiver->getOsContext().getContextId());
             }
             if (gpuAllocation->isAlwaysResident(commandStreamReceiver->getOsContext().getContextId())) {
                 gpuAllocation->updateResidencyTaskCount(GraphicsAllocation::objectNotResident, commandStreamReceiver->getOsContext().getContextId());

@@ -119,12 +119,17 @@ XE2_HPG_CORETEST_F(L0GfxCoreHelperTestXe2Hpg, GivenXe2HpgWhenGettingSupportedRTA
 
 XE2_HPG_CORETEST_F(L0GfxCoreHelperTestXe2Hpg, GivenXe2HpgWhenGettingCmdlistUpdateCapabilityThenReturnCorrectValue) {
     const auto &l0GfxCoreHelper = getHelper<L0GfxCoreHelper>();
-    EXPECT_EQ(63u, l0GfxCoreHelper.getPlatformCmdListUpdateCapabilities());
+    EXPECT_EQ(127u, l0GfxCoreHelper.getPlatformCmdListUpdateCapabilities());
 }
 
 XE2_HPG_CORETEST_F(L0GfxCoreHelperTestXe2Hpg, GivenXe2HpgWhenCallingThreadResumeRequiresUnlockThenReturnFalse) {
     const auto &l0GfxCoreHelper = getHelper<L0GfxCoreHelper>();
     EXPECT_FALSE(l0GfxCoreHelper.threadResumeRequiresUnlock());
+}
+
+XE2_HPG_CORETEST_F(L0GfxCoreHelperTestXe2Hpg, GivenXe3pWhenCallingisThreadControlStoppedSupportedThenReturnTrue) {
+    const auto &l0GfxCoreHelper = getHelper<L0GfxCoreHelper>();
+    EXPECT_TRUE(l0GfxCoreHelper.isThreadControlStoppedSupported());
 }
 
 XE2_HPG_CORETEST_F(L0GfxCoreHelperTestXe2Hpg, GivenXe2HpgWhenCheckingL0HelperForDeletingIpSamplingEntryWithNullValuesThenMapRemainstheSameSize) {

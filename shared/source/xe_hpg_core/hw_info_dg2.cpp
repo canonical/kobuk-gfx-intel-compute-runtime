@@ -40,7 +40,6 @@ const RuntimeCapabilityTable DG2::capabilityTable{
     {0, 0, 0, 0, false, false, false, false},                  // kmdNotifyProperties
     MemoryConstants::max48BitAddress,                          // gpuAddressSpace
     0,                                                         // sharedSystemMemCapabilities
-    83.333,                                                    // defaultProfilingTimerResolution
     MemoryConstants::pageSize,                                 // requiredPreemptionSurfaceSize
     "",                                                        // deviceName
     nullptr,                                                   // preferredPlatformName
@@ -84,7 +83,8 @@ const RuntimeCapabilityTable DG2::capabilityTable{
     true,                                                      // fusedEuEnabled
     true,                                                      // l0DebuggerSupported
     true,                                                      // supportsFloatAtomics
-    0                                                          // cxlType
+    0,                                                         // cxlType
+    2048                                                       // syncNumRTStacksPerDSS
 };
 
 WorkaroundTable DG2::workaroundTable = {};

@@ -22,10 +22,10 @@ using CompilerProductHelperFixture = Test<DeviceFixture>;
 
 HWTEST_F(CompilerProductHelperFixture, WhenIsMidThreadPreemptionIsSupportedIsCalledThenCorrectResultIsReturned) {
     auto &hwInfo = *pDevice->getRootDeviceEnvironment().getMutableHardwareInfo();
-    UnitTestHelper<FamilyType>::setExtraMidThreadPreemptionFlag(hwInfo, false);
+    hwInfo.featureTable.flags.ftrWalkerMTP = false;
     auto &compilerProductHelper = pDevice->getCompilerProductHelper();
     EXPECT_FALSE(compilerProductHelper.isMidThreadPreemptionSupported(hwInfo));
-    UnitTestHelper<FamilyType>::setExtraMidThreadPreemptionFlag(hwInfo, true);
+    hwInfo.featureTable.flags.ftrWalkerMTP = true;
     EXPECT_TRUE(compilerProductHelper.isMidThreadPreemptionSupported(hwInfo));
 }
 
@@ -380,17 +380,6 @@ HWTEST_F(CompilerProductHelperFixture, givenProductHelperWhenGetAndOverrideHwIpV
     debugManager.flags.OverrideHwIpVersion.set(config);
     hwInfo.ipVersion.value = 0x5678;
     EXPECT_EQ(compilerProductHelper.getHwIpVersion(hwInfo), config);
-}
-
-HWTEST2_F(CompilerProductHelperFixture, givenCompilerProductHelperWhenAdjustingHwInfoThenHwInfoIsCorrected, IsAtMostXe2HpgCore) {
-    auto hwInfo = *pDevice->getRootDeviceEnvironment().getHardwareInfo();
-    auto &compilerProductHelper = pDevice->getCompilerProductHelper();
-
-    const auto maxSubSlices = hwInfo.gtSystemInfo.MaxSubSlicesSupported;
-    const auto maxDualSubSlices = hwInfo.gtSystemInfo.MaxDualSubSlicesSupported;
-    compilerProductHelper.applyDeviceBlobFixesOnHwInfo(hwInfo);
-    EXPECT_EQ(maxSubSlices, hwInfo.gtSystemInfo.MaxSubSlicesSupported);
-    EXPECT_EQ(maxDualSubSlices, hwInfo.gtSystemInfo.MaxDualSubSlicesSupported);
 }
 
 HWTEST_F(CompilerProductHelperFixture, givenCompilerProductHelperWhenIsHeaplessModeEnabledThenFalseIsReturned) {

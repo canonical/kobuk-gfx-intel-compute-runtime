@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/device_binary_format/yaml/yaml_parser.h"
 #include "shared/source/utilities/const_stringref.h"
 
 #include <array>
@@ -81,6 +82,7 @@ inline constexpr ConstStringRef hintSuffix("_hint");
 
 namespace DebugEnv {
 inline constexpr ConstStringRef debugSurfaceBTI("sip_surface_bti");
+inline constexpr ConstStringRef debugSurfaceOffset("sip_surface_offset");
 } // namespace DebugEnv
 
 namespace PayloadArgument {
@@ -348,6 +350,9 @@ using IndirectStatelessCountT = int32_t;
 using HasSampleT = bool;
 using PrivateSizeT = int32_t;
 using SpillSizeT = int32_t;
+using AdditionalSizeT = int32_t;
+using WalkOrderT = int32_t;
+using PartitionDimT = int32_t;
 
 namespace Defaults {
 inline constexpr BarrierCountT barrierCount = 0;
@@ -379,6 +384,9 @@ inline constexpr IndirectStatelessCountT indirectStatelessCount = 0;
 inline constexpr HasSampleT hasSample = false;
 inline constexpr PrivateSizeT privateSize = 0;
 inline constexpr SpillSizeT spillSize = 0;
+inline constexpr AdditionalSizeT additionalSize = -1;
+inline constexpr WalkOrderT walkOrder = -1;
+inline constexpr PartitionDimT partitionDim = -1;
 } // namespace Defaults
 
 inline constexpr ConstStringRef required[] = {
@@ -414,6 +422,9 @@ struct ExecutionEnvBaseT {
     HasSampleT hasSample = Defaults::hasSample;
     PrivateSizeT privateSize = Defaults::privateSize;
     SpillSizeT spillSize = Defaults::spillSize;
+    AdditionalSizeT additionalSize = Defaults::additionalSize;
+    WalkOrderT walkOrder = Defaults::walkOrder;
+    PartitionDimT partitionDim = Defaults::partitionDim;
 };
 
 struct ExperimentalPropertiesBaseT {
@@ -452,13 +463,16 @@ struct AttributesBaseT {
 
 namespace DebugEnv {
 using DebugSurfaceBTIT = int32_t;
+using DebugSurfaceOffset = int32_t;
 
 namespace Defaults {
 inline constexpr DebugSurfaceBTIT debugSurfaceBTI = -1;
+inline constexpr DebugSurfaceOffset debugSurfaceOffset = -1;
 } // namespace Defaults
 
 struct DebugEnvBaseT {
     DebugSurfaceBTIT debugSurfaceBTI = Defaults::debugSurfaceBTI;
+    DebugSurfaceOffset debugSurfaceOffset = Defaults::debugSurfaceOffset;
 };
 } // namespace DebugEnv
 

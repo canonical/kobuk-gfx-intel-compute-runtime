@@ -106,12 +106,12 @@ enum class CompareOperation : uint32_t {
 struct EncodeWalkerArgs {
     EncodeWalkerArgs() = delete;
 
-    KernelExecutionType kernelExecutionType = KernelExecutionType::defaultType;
-    bool requiredSystemFence = false;
     const KernelDescriptor &kernelDescriptor;
+    KernelExecutionType kernelExecutionType = KernelExecutionType::defaultType;
     NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder = NEO::RequiredDispatchWalkOrder::none;
     uint32_t additionalSizeParam = NEO::additionalKernelLaunchSizeParamNotSet;
     uint32_t maxFrontEndThreads = 0;
+    bool requiredSystemFence = false;
 };
 
 template <typename GfxFamily>
@@ -129,8 +129,11 @@ struct EncodeDispatchKernel {
     static void encodeAdditionalWalkerFields(const RootDeviceEnvironment &rootDeviceEnvironment, WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs);
 
     template <typename InterfaceDescriptorType>
-    static void appendAdditionalIDDFields(InterfaceDescriptorType *pInterfaceDescriptor, const RootDeviceEnvironment &rootDeviceEnvironment,
-                                          const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy);
+    static void setupPreferredSlmSize(InterfaceDescriptorType *pInterfaceDescriptor, const RootDeviceEnvironment &rootDeviceEnvironment,
+                                      const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy);
+
+    static uint32_t getThreadCountPerSubslice(const HardwareInfo &hwInfo);
+    static uint32_t alignPreferredSlmSize(uint32_t slmSize);
 
     template <typename InterfaceDescriptorType>
     static void encodeEuSchedulingPolicy(InterfaceDescriptorType *pInterfaceDescriptor, const KernelDescriptor &kernelDesc, int32_t defaultPipelinedThreadArbitrationPolicy);
@@ -169,10 +172,9 @@ struct EncodeDispatchKernel {
     static void programBarrierEnable(InterfaceDescriptorType &interfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
 
     template <typename WalkerType, typename InterfaceDescriptorType>
-    static void adjustInterfaceDescriptorData(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t grfCount, WalkerType &walkerCmd);
-
-    template <typename WalkerType, typename InterfaceDescriptorType>
-    static void adjustInterfaceDescriptorDataForOverdispatch(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo, const uint32_t threadGroupCount, const uint32_t grfCount, WalkerType &walkerCmd);
+    static void encodeThreadGroupDispatch(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo,
+                                          const uint32_t *threadGroupDimensions, const uint32_t threadGroupCount, const uint32_t grfCount, const uint32_t threadsPerThreadGroup,
+                                          WalkerType &walkerCmd);
 
     static void adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount);
 
@@ -224,6 +226,13 @@ struct EncodeDispatchKernel {
     static uint32_t computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize);
 
     static bool singleTileExecImplicitScalingRequired(bool cooperativeKernel);
+
+    template <typename WalkerType, typename InterfaceDescriptorType>
+    static void overrideDefaultValues(WalkerType &walkerCmd, InterfaceDescriptorType &interfaceDescriptor);
+    template <typename WalkerType>
+    static void encodeWalkerPostSyncFields(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs);
+    template <typename WalkerType>
+    static void encodeComputeDispatchAllWalker(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs);
 };
 
 template <typename GfxFamily>

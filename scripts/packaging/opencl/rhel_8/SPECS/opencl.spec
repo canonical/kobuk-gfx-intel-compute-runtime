@@ -5,6 +5,8 @@
 %global NEO_OCL_VERSION_MINOR xxx
 %global NEO_OCL_VERSION_BUILD xxx
 %global NEO_RELEASE_WITH_REGKEYS FALSE
+%global NEO_ENABLE_I915_PRELIM_DETECTION FALSE
+%global NEO_ENABLE_XE_PRELIM_DETECTION FALSE
 %global NEO_ENABLE_XE_EU_DEBUG_SUPPORT FALSE
 %global NEO_I915_PRELIM_HEADERS_DIR %{nil}
 
@@ -27,7 +29,7 @@ Source2: uapi.tar.xz
 %endif
 
 Requires:      intel-gmmlib
-Requires:      intel-igc-opencl
+Requires:      intel-igc-opencl-2
 
 BuildRequires: libva-devel gcc-c++ cmake ninja-build make
 BuildRequires: intel-gmmlib-devel
@@ -38,7 +40,7 @@ Intel(R) Graphics Compute Runtime for OpenCL(TM) is a open source project to con
 
 %package       -n intel-ocloc
 Summary:       ocloc package for opencl
-Requires:      intel-igc-opencl
+Requires:      intel-igc-opencl-2
 %description   -n intel-ocloc
 Intel(R) Graphics Compute Runtime for OpenCL(TM) is a open source project to converge Intel's development efforts on OpenCL(TM) compute stacks supporting the GEN graphics hardware architecture.
 
@@ -62,7 +64,8 @@ cd build
    -DCMAKE_BUILD_TYPE=Release \
    -DBUILD_WITH_L0=FALSE \
    -DNEO_SKIP_UNIT_TESTS=TRUE \
-   -DNEO_ENABLE_i915_PRELIM_DETECTION=TRUE \
+   -DNEO_ENABLE_I915_PRELIM_DETECTION=%{NEO_ENABLE_I915_PRELIM_DETECTION} \
+   -DNEO_ENABLE_XE_PRELIM_DETECTION=%{NEO_ENABLE_XE_PRELIM_DETECTION} \
    -DNEO_ENABLE_XE_EU_DEBUG_SUPPORT=%{NEO_ENABLE_XE_EU_DEBUG_SUPPORT} \
    -DRELEASE_WITH_REGKEYS=%{NEO_RELEASE_WITH_REGKEYS} \
    -DCMAKE_VERBOSE_MAKEFILE=FALSE \

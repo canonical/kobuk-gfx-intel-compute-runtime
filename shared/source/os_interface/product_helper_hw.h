@@ -46,11 +46,9 @@ class ProductHelperHw : public ProductHelper {
     uint32_t getAubStreamSteppingFromHwRevId(const HardwareInfo &hwInfo) const override;
     std::optional<aub_stream::ProductFamily> getAubStreamProductFamily() const override;
     bool isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const override;
-    std::string getDeviceMemoryName() const override;
     bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const override;
     bool allowCompression(const HardwareInfo &hwInfo) const override;
     LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
-    bool isAllocationSizeAdjustmentRequired(const HardwareInfo &hwInfo) const override;
     bool isNewResidencyModelSupported() const override;
     bool isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const override;
     bool isDirectSubmissionConstantCacheInvalidationNeeded(const HardwareInfo &hwInfo) const override;
@@ -89,7 +87,6 @@ class ProductHelperHw : public ProductHelper {
     bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const override;
-    bool isAdjustProgrammableIdPreferredSlmSizeRequired(const HardwareInfo &hwInfo) const override;
     uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const override;
     size_t getSvmCpuAlignment() const override;
     bool isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const override;
@@ -98,7 +95,6 @@ class ProductHelperHw : public ProductHelper {
     bool isGrfNumReportedWithScm() const override;
     bool isThreadArbitrationPolicyReportedWithScm() const override;
     bool isCopyBufferRectSplitSupported() const override;
-    bool isFlatRingBufferSupported() const override;
     bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const override;
     bool isTimestampWaitSupportedForEvents() const override;
     bool isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const override;
@@ -121,7 +117,6 @@ class ProductHelperHw : public ProductHelper {
     bool isPlatformQuerySupported() const override;
     bool isNonBlockingGpuSubmissionSupported() const override;
     bool isResolveDependenciesByPipeControlsSupported(const HardwareInfo &hwInfo, bool isOOQ, TaskCountType queueTaskCount, const CommandStreamReceiver &queueCsr) const override;
-    bool isMidThreadPreemptionDisallowedForRayTracingKernels() const override;
     bool isBufferPoolAllocatorSupported() const override;
     bool isUsmPoolAllocatorSupported() const override;
     bool isDeviceUsmAllocationReuseSupported() const override;

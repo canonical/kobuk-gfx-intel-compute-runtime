@@ -111,13 +111,12 @@ struct DebugSessionLinuxi915 : DebugSessionLinux {
 
     bool handleInternalEvent() override;
 
-    void updateContextAndLrcHandlesForThreadsWithAttention(EuThread::ThreadId threadId, AttentionEventFields &attention) override {}
+    void updateContextAndLrcHandlesForThreadsWithAttention(EuThread::ThreadId threadId, const AttentionEventFields &attention) override {}
     uint64_t getVmHandleFromClientAndlrcHandle(uint64_t clientHandle, uint64_t lrcHandle) override;
     bool handleVmBindEvent(prelim_drm_i915_debug_event_vm_bind *vmBind);
     void handleContextParamEvent(prelim_drm_i915_debug_event_context_param *contextParam);
     void handleAttentionEvent(prelim_drm_i915_debug_event_eu_attention *attention);
     void handleEnginesEvent(prelim_drm_i915_debug_event_engines *engines);
-    void handlePageFaultEvent(prelim_drm_i915_debug_event_page_fault *pf);
     int eventAckIoctl(EventToAck &event) override;
     Module &getModule(uint64_t moduleHandle) override {
         auto connection = clientHandleToConnection[clientHandle].get();
@@ -133,6 +132,8 @@ struct DebugSessionLinuxi915 : DebugSessionLinux {
                                                                   uint64_t memoryHandle,
                                                                   const void *stateSaveArea,
                                                                   uint32_t tileIndex) override;
+    void pushApiEventForTileSession(uint32_t tileIndex, zet_debug_event_t &debugEvent) override;
+    void setPageFaultForTileSession(uint32_t tileIndex, EuThread::ThreadId threadId, bool hasPageFault) override;
 
     void attachTile() override {
         UNRECOVERABLE_IF(true);

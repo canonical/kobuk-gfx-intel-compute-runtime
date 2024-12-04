@@ -1229,14 +1229,6 @@ TEST_F(GfxCoreHelperTest, WhenGettingIsCpuImageTransferPreferredThenFalseIsRetur
     EXPECT_FALSE(gfxCoreHelper.isCpuImageTransferPreferred(*defaultHwInfo));
 }
 
-TEST_F(GfxCoreHelperTest, whenFtrGpGpuMidThreadLevelPreemptFeatureDisabledThenFalseIsReturned) {
-    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    FeatureTable featureTable = {};
-    featureTable.flags.ftrGpGpuMidThreadLevelPreempt = false;
-    bool result = gfxCoreHelper.isAdditionalFeatureFlagRequired(&featureTable);
-    EXPECT_FALSE(result);
-}
-
 HWTEST_F(GfxCoreHelperTest, whenSetCompressedFlagThenProperFlagSet) {
     auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
     auto gmm = std::make_unique<MockGmm>(pDevice->getGmmHelper());
@@ -1404,33 +1396,6 @@ HWTEST2_F(GfxCoreHelperTest, givenGfxCoreHelperWhenFlagSetAndCallGetAmountOfAllo
 
     debugManager.flags.SetAmountOfReusableAllocations.set(1);
     EXPECT_EQ(gfxCoreHelper.getAmountOfAllocationsToFill(), 1u);
-}
-
-HWTEST2_F(GfxCoreHelperTest, GivenVariousValuesAndXeHpOrXeHpgCoreWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned, IsXeHpOrXeHpgCore) {
-    std::array<std::pair<uint32_t, uint32_t>, 3> grfTestInputs = {{{64, 8},
-                                                                   {128, 8},
-                                                                   {256, 4}}};
-
-    const auto &hwInfo = *defaultHwInfo;
-    const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    for (const auto &[grfCount, expectedThreadCountPerEu] : grfTestInputs) {
-        auto expected = expectedThreadCountPerEu * hwInfo.gtSystemInfo.EUCount;
-        auto result = gfxCoreHelper.calculateAvailableThreadCount(hwInfo, grfCount);
-        EXPECT_EQ(expected, result);
-    }
-}
-
-HWTEST2_F(GfxCoreHelperTest, GivenModifiedGtSystemInfoAndXeHpOrXeHpgCoreWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned, IsXeHpOrXeHpgCore) {
-    std::array<std::tuple<uint32_t, uint32_t, uint32_t>, 3> testInputs = {{{1, 64, 1},
-                                                                           {5, 128, 5},
-                                                                           {8, 256, 4}}};
-    const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    auto hwInfo = hardwareInfo;
-    for (const auto &[threadCount, grfCount, expectedThreadCount] : testInputs) {
-        hwInfo.gtSystemInfo.ThreadCount = threadCount;
-        auto result = gfxCoreHelper.calculateAvailableThreadCount(hwInfo, grfCount);
-        EXPECT_EQ(expectedThreadCount, result);
-    }
 }
 
 HWTEST2_F(GfxCoreHelperTest, givenAtMostGen12lpPlatformWhenGettingMinimalScratchSpaceSizeThen1024IsReturned, IsGen12LP) {
@@ -1646,22 +1611,22 @@ HWTEST_F(GfxCoreHelperTest, GivenCooperativeEngineSupportedAndNotUsedWhenAdjustM
                                             ((engineGroupType == EngineGroupType::compute) && isRcsEnabled);
                     bool applyLimitation = engineGroupType != EngineGroupType::cooperativeCompute;
                     if (disallowDispatch) {
-                        EXPECT_EQ(1u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment, false));
-                        EXPECT_EQ(1u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment, false));
+                        EXPECT_EQ(1u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment));
+                        EXPECT_EQ(1u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment));
                     } else if (applyLimitation) {
                         hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 4;
-                        EXPECT_EQ(1u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment, false));
-                        EXPECT_EQ(256u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment, false));
+                        EXPECT_EQ(1u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment));
+                        EXPECT_EQ(256u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment));
                         hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 2;
-                        EXPECT_EQ(2u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment, false));
-                        EXPECT_EQ(512u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment, false));
+                        EXPECT_EQ(2u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment));
+                        EXPECT_EQ(512u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment));
                     } else {
-                        EXPECT_EQ(4u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment, false));
-                        EXPECT_EQ(1024u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment, false));
+                        EXPECT_EQ(4u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment));
+                        EXPECT_EQ(1024u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment));
                     }
                 } else {
-                    EXPECT_EQ(4u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment, false));
-                    EXPECT_EQ(1024u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment, false));
+                    EXPECT_EQ(4u, gfxCoreHelper.adjustMaxWorkGroupCount(4u, engineGroupType, rootDeviceEnvironment));
+                    EXPECT_EQ(1024u, gfxCoreHelper.adjustMaxWorkGroupCount(1024u, engineGroupType, rootDeviceEnvironment));
                 }
             }
         }
@@ -1857,6 +1822,48 @@ HWTEST_F(GfxCoreHelperTest, whenEncodeAdditionalTimestampOffsetsThenNothingEncod
     EXPECT_EQ(0u, storeRegMemList.size());
 }
 
+HWTEST2_F(GfxCoreHelperTest, GivenVariousValuesWhenCallingCalculateAvailableThreadCountAndThreadCountAvailableIsBiggerThenCorrectValueIsReturned, IsAtMostXe2HpgCore) {
+    std::array<std::pair<uint32_t, uint32_t>, 2> grfTestInputs = {{{128, 8},
+                                                                   {256, 4}}};
+    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    for (const auto &[grfCount, expectedThreadCountPerEu] : grfTestInputs) {
+        auto expected = expectedThreadCountPerEu * hardwareInfo.gtSystemInfo.EUCount;
+        // force allways bigger Thread Count available
+        hardwareInfo.gtSystemInfo.ThreadCount = 2 * expected;
+        auto result = gfxCoreHelper.calculateAvailableThreadCount(hardwareInfo, grfCount);
+        EXPECT_EQ(expected, result);
+    }
+}
+
+HWTEST2_F(GfxCoreHelperTest, GivenVariousValuesWhenCallingCalculateAvailableThreadCountAndThreadCountAvailableIsSmallerThenThreadCountIsReturned, IsAtMostXe2HpgCore) {
+    std::array<std::pair<uint32_t, uint32_t>, 2> grfTestInputs = {{
+        {128, 8},
+        {256, 4},
+    }};
+    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    for (const auto &[grfCount, expectedThreadCountPerEu] : grfTestInputs) {
+        auto calculatedThreadCount = expectedThreadCountPerEu * hardwareInfo.gtSystemInfo.EUCount;
+        // force thread count smaller than calculation
+        hardwareInfo.gtSystemInfo.ThreadCount = calculatedThreadCount / 2;
+        auto result = gfxCoreHelper.calculateAvailableThreadCount(hardwareInfo, grfCount);
+        EXPECT_EQ(hardwareInfo.gtSystemInfo.ThreadCount, result);
+    }
+}
+
+HWTEST2_F(GfxCoreHelperTest, GivenModifiedGtSystemInfoWhenCallingCalculateAvailableThreadCountThenCorrectValueIsReturned, IsAtMostXe2HpgCore) {
+    std::array<std::pair<uint32_t, uint32_t>, 2> testInputs = {{{64, 256},
+                                                                {128, 512}}};
+    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    auto hwInfo = hardwareInfo;
+    for (const auto &[euCount, expectedThreadCount] : testInputs) {
+        // force thread count bigger than expected
+        hwInfo.gtSystemInfo.ThreadCount = 1024;
+        hwInfo.gtSystemInfo.EUCount = euCount;
+        auto result = gfxCoreHelper.calculateAvailableThreadCount(hwInfo, 256);
+        EXPECT_EQ(expectedThreadCount, result);
+    }
+}
+
 HWTEST_F(GfxCoreHelperTest, givenGetDeviceTimestampWidthCalledThenReturnCorrectValue) {
     DebugManagerStateRestore restore;
 
@@ -1865,4 +1872,12 @@ HWTEST_F(GfxCoreHelperTest, givenGetDeviceTimestampWidthCalledThenReturnCorrectV
 
     debugManager.flags.OverrideTimestampWidth.set(64);
     EXPECT_EQ(64u, helper.getDeviceTimestampWidth());
+}
+
+HWTEST2_F(GfxCoreHelperTest, givenHwHelperWhenAligningThreadGroupCountToDssSizeThenThreadGroupCountDoesNotChange, IsAtMostXe2HpgCore) {
+    auto &helper = getHelper<GfxCoreHelper>();
+    uint32_t threadGroupCountBefore = 4096;
+    uint32_t threadCount = threadGroupCountBefore;
+    helper.alignThreadGroupCountToDssSize(threadCount, 1, 1, 1);
+    EXPECT_EQ(threadGroupCountBefore, threadCount);
 }

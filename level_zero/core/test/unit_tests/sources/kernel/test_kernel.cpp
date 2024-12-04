@@ -19,6 +19,7 @@
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/program/kernel_info_from_patchtokens.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/stackvec.h"
 #include "shared/test/common/compiler_interface/linker_mock.h"
 #include "shared/test/common/device_binary_format/patchtokens_tests.h"
@@ -29,6 +30,7 @@
 #include "shared/test/common/mocks/mock_bindless_heaps_helper.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 
@@ -104,7 +106,50 @@ TEST_F(KernelInitTest, givenKernelToInitWhenItHasUnknownArgThenUnknowKernelArgHa
     kernel->initialize(&desc);
     EXPECT_EQ(kernel->kernelArgHandlers[0], &KernelImp::setArgUnknown);
     EXPECT_EQ(mockKernelImmData->getDescriptor().payloadMappings.explicitArgs[0].type, NEO::ArgDescriptor::argTUnknown);
-    EXPECT_EQ(getHelper<ProductHelper>().isMidThreadPreemptionDisallowedForRayTracingKernels(), kernel->isMidThreadPreemptionDisallowedForRayTracingKernels());
+}
+
+TEST_F(KernelInitTest, givenKernelToInitAndPreemptionEnabledWhenItHasUnknownArgThenUnknowKernelArgHandlerAssigned) {
+    uint32_t perHwThreadPrivateMemorySizeRequested = 32u;
+
+    std::unique_ptr<MockImmutableData> mockKernelImmData =
+        std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
+
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
+    kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
+
+    auto releaseHelper = std::make_unique<MockReleaseHelper>();
+    module.get()->getDevice()->getNEODevice()->getRootDeviceEnvironmentRef().releaseHelper = std::move(releaseHelper);
+
+    ze_kernel_desc_t desc = {};
+    desc.pKernelName = kernelName.c_str();
+    mockKernelImmData->resizeExplicitArgs(1);
+
+    kernel->initialize(&desc);
+    EXPECT_EQ(kernel->kernelArgHandlers[0], &KernelImp::setArgUnknown);
+    EXPECT_EQ(mockKernelImmData->getDescriptor().payloadMappings.explicitArgs[0].type, NEO::ArgDescriptor::argTUnknown);
+}
+
+TEST_F(KernelInitTest, givenKernelToInitAndPreemptionDisabledWhenItHasUnknownArgThenUnknowKernelArgHandlerAssigned) {
+    uint32_t perHwThreadPrivateMemorySizeRequested = 32u;
+
+    std::unique_ptr<MockImmutableData> mockKernelImmData =
+        std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
+
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
+    kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
+
+    auto releaseHelper = std::make_unique<MockReleaseHelper>();
+    module.get()->getDevice()->getNEODevice()->getRootDeviceEnvironmentRef().releaseHelper = std::move(releaseHelper);
+
+    ze_kernel_desc_t desc = {};
+    desc.pKernelName = kernelName.c_str();
+    mockKernelImmData->resizeExplicitArgs(1);
+
+    kernel->initialize(&desc);
+    EXPECT_EQ(kernel->kernelArgHandlers[0], &KernelImp::setArgUnknown);
+    EXPECT_EQ(mockKernelImmData->getDescriptor().payloadMappings.explicitArgs[0].type, NEO::ArgDescriptor::argTUnknown);
 }
 
 TEST_F(KernelInitTest, givenKernelToInitWhenItHasTooBigPrivateSizeThenOutOfMemoryIsRetutned) {
@@ -140,6 +185,35 @@ TEST_F(KernelInitTest, givenKernelToInitWhenItHasTooBigScratchSizeThenInvalidBin
     desc.pKernelName = kernelName.c_str();
     mockKernelImmData->resizeExplicitArgs(1);
     EXPECT_EQ(kernel->initialize(&desc), ZE_RESULT_ERROR_INVALID_NATIVE_BINARY);
+}
+
+TEST_F(KernelInitTest, givenKernelToInitWhenPrivateSurfaceAllocationFailsThenOutOfDeviceMemoryIsRetutned) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.PrintDebugMessages.set(true);
+    ::testing::internal::CaptureStderr();
+
+    uint32_t perHwThreadPrivateMemorySizeRequested = 32u;
+
+    std::unique_ptr<MockImmutableData> mockKernelImmData =
+        std::make_unique<MockImmutableData>(perHwThreadPrivateMemorySizeRequested);
+
+    createModuleFromMockBinary(perHwThreadPrivateMemorySizeRequested, false, mockKernelImmData.get());
+    std::unique_ptr<ModuleImmutableDataFixture::MockKernel> kernel;
+    kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
+    ze_kernel_desc_t desc = {};
+    desc.pKernelName = kernelName.c_str();
+    mockKernelImmData->resizeExplicitArgs(1);
+
+    std::unique_ptr<NEO::MemoryManager> otherMemoryManager = std::make_unique<NEO::FailMemoryManager>(0, *device->getNEODevice()->getExecutionEnvironment());
+    device->getNEODevice()->getExecutionEnvironment()->memoryManager.swap(otherMemoryManager);
+
+    EXPECT_EQ(kernel->initialize(&desc), ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY);
+
+    device->getNEODevice()->getExecutionEnvironment()->memoryManager.swap(otherMemoryManager);
+
+    auto output = ::testing::internal::GetCapturedStderr();
+    std::string errorMsg = "Failed to allocate private surface";
+    EXPECT_NE(std::string::npos, output.find(errorMsg));
 }
 
 using KernelBaseAddressTests = Test<ModuleImmutableDataFixture>;

@@ -179,7 +179,7 @@ void MetricsLibrary::release() {
 
 bool MetricsLibrary::load() {
     // Load library.
-    handle = NEO::OsLibrary::loadFunc(getFilename());
+    handle = NEO::OsLibrary::loadFunc({getFilename()});
 
     // Load exported functions.
     if (handle) {
@@ -626,9 +626,9 @@ bool OaMetricQueryPoolImp::allocateGpuMemory() {
 
 bool OaMetricQueryPoolImp::createMetricQueryPool() {
     // Validate metric group query - only event based is supported.
-    zet_metric_group_properties_t metricGroupProperites = {ZET_STRUCTURE_TYPE_METRIC_GROUP_PROPERTIES, nullptr};
-    OaMetricGroupImp::getProperties(hMetricGroup, &metricGroupProperites);
-    const bool validMetricGroup = metricGroupProperites.samplingType == ZET_METRIC_GROUP_SAMPLING_TYPE_FLAG_EVENT_BASED;
+    zet_metric_group_properties_t metricGroupProperties = {ZET_STRUCTURE_TYPE_METRIC_GROUP_PROPERTIES, nullptr};
+    OaMetricGroupImp::getProperties(hMetricGroup, &metricGroupProperties);
+    const bool validMetricGroup = metricGroupProperties.samplingType == ZET_METRIC_GROUP_SAMPLING_TYPE_FLAG_EVENT_BASED;
 
     if (!validMetricGroup) {
         return false;
@@ -942,5 +942,14 @@ MetricQuery *MetricQuery::fromHandle(zet_metric_query_handle_t handle) {
 }
 
 zet_metric_query_handle_t MetricQuery::toHandle() { return this; }
+
+StatusCode ML_STDCALL MetricsLibrary::flushCommandBufferCallback(ClientHandle_1_0 handle) {
+    Device *device = static_cast<Device *>(handle.data);
+    if (device) {
+        device->getNEODevice()->stopDirectSubmissionAndWaitForCompletion();
+        return StatusCode::Success;
+    }
+    return StatusCode::Failed;
+}
 
 } // namespace L0

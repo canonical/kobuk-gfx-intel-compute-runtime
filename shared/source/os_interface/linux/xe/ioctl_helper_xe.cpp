@@ -631,11 +631,15 @@ int IoctlHelperXe::createGemExt(const MemRegionsVec &memClassInstances, size_t a
     create.size = allocSize;
     MemoryClassInstance mem = memClassInstances[regionsSize - 1];
     std::bitset<32> memoryInstances{};
+    bool isSysMemOnly = true;
     for (const auto &memoryClassInstance : memClassInstances) {
         memoryInstances.set(memoryClassInstance.memoryInstance);
+        if (memoryClassInstance.memoryClass != drm_xe_memory_class::DRM_XE_MEM_REGION_CLASS_SYSMEM) {
+            isSysMemOnly = false;
+        }
     }
     create.placement = static_cast<uint32_t>(memoryInstances.to_ulong());
-    create.cpu_caching = this->getCpuCachingMode(isCoherent, mem.memoryClass == drm_xe_memory_class::DRM_XE_MEM_REGION_CLASS_SYSMEM);
+    create.cpu_caching = this->getCpuCachingMode(isCoherent, isSysMemOnly);
 
     printDebugString(debugManager.flags.PrintBOCreateDestroyResult.get(), stdout, "Performing DRM_IOCTL_XE_GEM_CREATE with {vmid=0x%x size=0x%lx flags=0x%x placement=0x%x caching=%hu }",
                      create.vm_id, create.size, create.flags, create.placement, create.cpu_caching);
@@ -661,10 +665,14 @@ uint32_t IoctlHelperXe::createGem(uint64_t size, uint32_t memoryBanks, std::opti
     auto banks = std::bitset<4>(memoryBanks);
     size_t currentBank = 0;
     size_t i = 0;
+    bool isSysMemOnly = true;
     while (i < banks.count()) {
         if (banks.test(currentBank)) {
             auto regionClassAndInstance = memoryInfo->getMemoryRegionClassAndInstance(1u << currentBank, *pHwInfo);
             memoryInstances.set(regionClassAndInstance.memoryInstance);
+            if (regionClassAndInstance.memoryClass != drm_xe_memory_class::DRM_XE_MEM_REGION_CLASS_SYSMEM) {
+                isSysMemOnly = false;
+            }
             i++;
         }
         currentBank++;
@@ -674,7 +682,7 @@ uint32_t IoctlHelperXe::createGem(uint64_t size, uint32_t memoryBanks, std::opti
         memoryInstances.set(regionClassAndInstance.memoryInstance);
     }
     create.placement = static_cast<uint32_t>(memoryInstances.to_ulong());
-    create.cpu_caching = this->getCpuCachingMode(isCoherent, create.placement == drm_xe_memory_class::DRM_XE_MEM_REGION_CLASS_SYSMEM);
+    create.cpu_caching = this->getCpuCachingMode(isCoherent, isSysMemOnly);
 
     printDebugString(debugManager.flags.PrintBOCreateDestroyResult.get(), stdout, "Performing DRM_IOCTL_XE_GEM_CREATE with {vmid=0x%x size=0x%lx flags=0x%x placement=0x%x caching=%hu }",
                      create.vm_id, create.size, create.flags, create.placement, create.cpu_caching);
@@ -770,8 +778,40 @@ bool IoctlHelperXe::setVmBoAdviseForChunking(int32_t handle, uint64_t start, uin
 }
 
 bool IoctlHelperXe::setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) {
-    xeLog(" -> IoctlHelperXe::%s\n", __FUNCTION__);
-    return false;
+    xeLog(" -> IoctlHelperXe::%s s=0x%llx l=0x%llx vmid=0x%x\n", __FUNCTION__, start, length, vmId);
+    drm_xe_vm_bind bind = {};
+    bind.vm_id = vmId;
+    bind.num_binds = 1;
+
+    bind.bind.range = length;
+    bind.bind.addr = start;
+    bind.bind.op = DRM_XE_VM_BIND_OP_PREFETCH;
+
+    auto pHwInfo = this->drm.getRootDeviceEnvironment().getHardwareInfo();
+    constexpr uint32_t subDeviceMaskSize = DeviceBitfield().size();
+    constexpr uint32_t subDeviceMaskMax = (1u << subDeviceMaskSize) - 1u;
+    uint32_t subDeviceId = region & subDeviceMaskMax;
+    DeviceBitfield subDeviceMask = (1u << subDeviceId);
+    MemoryClassInstance regionInstanceClass = this->drm.getMemoryInfo()->getMemoryRegionClassAndInstance(subDeviceMask, *pHwInfo);
+    bind.bind.prefetch_mem_region_instance = regionInstanceClass.memoryInstance;
+
+    int ret = IoctlHelper::ioctl(DrmIoctl::gemVmBind, &bind);
+
+    xeLog(" vm=%d addr=0x%lx range=0x%lx region=0x%x operation=%d(%s) ret=%d\n",
+          bind.vm_id,
+          bind.bind.addr,
+          bind.bind.range,
+          bind.bind.prefetch_mem_region_instance,
+          bind.bind.op,
+          xeGetBindOperationName(bind.bind.op),
+          ret);
+
+    if (ret != 0) {
+        xeLog("error: %s ret=%d\n", xeGetBindOperationName(bind.bind.op), ret);
+        return false;
+    }
+
+    return true;
 }
 
 uint32_t IoctlHelperXe::getDirectSubmissionFlag() {
@@ -1242,7 +1282,7 @@ int IoctlHelperXe::createDrmContext(Drm &drm, OsContextLinux &osContext, uint32_
     uint32_t drmContextId = 0;
 
     xeLog("createDrmContext VM=0x%x\n", drmVmId);
-    drm.bindDrmContext(drmContextId, deviceIndex, osContext.getEngineType(), osContext.isEngineInstanced());
+    drm.bindDrmContext(drmContextId, deviceIndex, osContext.getEngineType());
 
     UNRECOVERABLE_IF(contextParamEngine.empty());
 

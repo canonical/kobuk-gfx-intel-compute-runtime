@@ -43,8 +43,6 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_aot_config_bdw_and_later.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_bdw_and_later.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_bdw_to_icllp.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_before_xe_hp.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_before_xe_hpc.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_disable_subgroup_local_block_io.inl
@@ -154,6 +152,7 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/string.h
     ${CMAKE_CURRENT_SOURCE_DIR}/string_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/surface_format_info.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/timestamp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet.h
     ${CMAKE_CURRENT_SOURCE_DIR}/timestamp_packet_container.h
@@ -218,7 +217,6 @@ endif()
 if(SUPPORT_XE2_AND_LATER)
   list(APPEND NEO_CORE_HELPERS
        ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_xe2_and_later.inl
-       ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_xe2_hpg_and_later.inl
        ${CMAKE_CURRENT_SOURCE_DIR}/preamble_xe2_hpg_and_later.inl
   )
 endif()

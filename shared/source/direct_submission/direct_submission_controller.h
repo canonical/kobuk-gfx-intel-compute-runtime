@@ -27,11 +27,12 @@ class Thread;
 class ProductHelper;
 
 using SteadyClock = std::chrono::steady_clock;
+using HighResolutionClock = std::chrono::high_resolution_clock;
 
 struct TimeoutParams {
     std::chrono::microseconds maxTimeout;
     std::chrono::microseconds timeout;
-    int timeoutDivisor;
+    int32_t timeoutDivisor;
     bool directSubmissionEnabled;
 };
 
@@ -40,9 +41,16 @@ struct WaitForPagingFenceRequest {
     uint64_t pagingFenceValue;
 };
 
+enum class TimeoutElapsedMode {
+    notElapsed,
+    bcsOnly,
+    fullyElapsed
+};
+
 class DirectSubmissionController {
   public:
     static constexpr size_t defaultTimeout = 5'000;
+    static constexpr size_t timeToPollTagUpdateNS = 20'000;
     DirectSubmissionController();
     virtual ~DirectSubmissionController();
 
@@ -86,6 +94,7 @@ class DirectSubmissionController {
 
     static void *controlDirectSubmissionsState(void *self);
     void checkNewSubmissions();
+    bool isDirectSubmissionIdle(CommandStreamReceiver *csr, std::unique_lock<std::recursive_mutex> &csrLock);
     MOCKABLE_VIRTUAL bool sleep(std::unique_lock<std::mutex> &lock);
     MOCKABLE_VIRTUAL SteadyClock::time_point getCpuTimestamp();
 
@@ -96,7 +105,8 @@ class DirectSubmissionController {
     size_t getTimeoutParamsMapKey(QueueThrottle throttle, bool acLineStatus);
 
     void handlePagingFenceRequests(std::unique_lock<std::mutex> &lock, bool checkForNewSubmissions);
-    MOCKABLE_VIRTUAL bool timeoutElapsed();
+    MOCKABLE_VIRTUAL TimeoutElapsedMode timeoutElapsed();
+    std::chrono::microseconds getSleepValue() const { return std::chrono::microseconds(this->timeout / this->bcsTimeoutDivisor); }
 
     uint32_t maxCcsCount = 1u;
     std::array<uint32_t, DeviceBitfield().size()> ccsCount = {};
@@ -109,12 +119,15 @@ class DirectSubmissionController {
 
     SteadyClock::time_point timeSinceLastCheck{};
     SteadyClock::time_point lastTerminateCpuTimestamp{};
+    HighResolutionClock::time_point lastHangCheckTime{};
     std::chrono::microseconds maxTimeout{defaultTimeout};
     std::chrono::microseconds timeout{defaultTimeout};
-    int timeoutDivisor = 1;
+    int32_t timeoutDivisor = 1;
+    int32_t bcsTimeoutDivisor = 1;
     std::unordered_map<size_t, TimeoutParams> timeoutParamsMap;
     QueueThrottle lowestThrottleSubmitted = QueueThrottle::HIGH;
     bool adjustTimeoutOnThrottleAndAcLineStatus = false;
+    bool isCsrIdleDetectionEnabled = false;
 
     std::condition_variable condVar;
     std::mutex condVarMutex;

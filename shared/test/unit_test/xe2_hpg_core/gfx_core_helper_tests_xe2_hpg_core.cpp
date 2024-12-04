@@ -31,9 +31,9 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenAskingFor
     EXPECT_EQ(expectedAlignment, gfxCoreHelper.getTimestampPacketAllocatorAlignment());
 }
 
-XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenCheckTimestampWaitSupportThenReturnTrue) {
+XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenCheckTimestampWaitSupportThenReturnFalse) {
     auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    EXPECT_TRUE(gfxCoreHelper.isTimestampWaitSupportedForQueues());
+    EXPECT_FALSE(gfxCoreHelper.isTimestampWaitSupportedForQueues());
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenXe2HpgCoreWhenAskedForMinimialSimdThen16IsReturned) {
@@ -417,7 +417,7 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenAskedIfFe
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDefaultMemorySynchronizationCommandsWhenGettingSizeForAdditionalSynchronizationThenCorrectValueIsReturned) {
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
 
-    EXPECT_EQ(sizeof(MI_MEM_FENCE), MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getRootDeviceEnvironment()));
+    EXPECT_EQ(!pDevice->getHardwareInfo().capabilityTable.isIntegratedDevice * sizeof(MI_MEM_FENCE), MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getRootDeviceEnvironment()));
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDebugMemorySynchronizationCommandsWhenGettingSizeForAdditionalSynchronizationThenCorrectValueIsReturned) {
@@ -425,7 +425,7 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDebugMemorySynchronization
     debugManager.flags.DisablePipeControlPrecedingPostSyncCommand.set(1);
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
 
-    EXPECT_EQ(2 * sizeof(MI_MEM_FENCE), MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getRootDeviceEnvironment()));
+    EXPECT_EQ(!pDevice->getHardwareInfo().capabilityTable.isIntegratedDevice * 2 * sizeof(MI_MEM_FENCE), MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(pDevice->getRootDeviceEnvironment()));
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDontProgramGlobalFenceAsMiMemFenceCommandInCommandStreamWhenGettingSizeForAdditionalSynchronizationThenCorrectValueIsReturned) {
@@ -456,12 +456,14 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDefaultMemorySynchronizati
 
     MemorySynchronizationCommands<FamilyType>::addAdditionalSynchronization(commandStream, 0x0, false, rootDeviceEnvironment);
 
-    HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(commandStream);
-    EXPECT_EQ(1u, hwParser.cmdList.size());
-    auto fenceCmd = genCmdCast<MI_MEM_FENCE *>(*hwParser.cmdList.begin());
-    ASSERT_NE(nullptr, fenceCmd);
-    EXPECT_EQ(MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE, fenceCmd->getFenceType());
+    if (MemorySynchronizationCommands<FamilyType>::getSizeForAdditonalSynchronization(rootDeviceEnvironment) > 0) {
+        HardwareParse hwParser;
+        hwParser.parseCommands<FamilyType>(commandStream);
+        EXPECT_EQ(1u, hwParser.cmdList.size());
+        auto fenceCmd = genCmdCast<MI_MEM_FENCE *>(*hwParser.cmdList.begin());
+        ASSERT_NE(nullptr, fenceCmd);
+        EXPECT_EQ(MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE, fenceCmd->getFenceType());
+    }
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDontProgramGlobalFenceAsMiMemFenceCommandInCommandStreamWhenAddingAdditionalSynchronizationThenSemaphoreWaitIsCalled) {
@@ -728,11 +730,6 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenParamsWhenCalculateNumThre
     for (auto &[grfSize, simtSize, isHwLocalIdGeneration, expectedNumThdreadsPerThreadGroup] : values) {
         EXPECT_EQ(expectedNumThdreadsPerThreadGroup, gfxCoreHelper.calculateNumThreadsPerThreadGroup(simtSize, totalWgSize, grfSize, isHwLocalIdGeneration, rootDeviceEnvironment));
     }
-}
-
-XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenXe2HpgWhenLargeGrfModeSupportedIsQueriedThenTrueIsReturned) {
-    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    EXPECT_TRUE(gfxCoreHelper.largeGrfModeSupported());
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenFlagSetAndCallGetAmountOfAllocationsToFillThenReturnCorrectValue) {

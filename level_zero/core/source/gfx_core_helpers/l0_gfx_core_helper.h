@@ -88,6 +88,7 @@ class L0GfxCoreHelper : public NEO::ApiGfxCoreHelper {
     virtual void getAttentionBitmaskForSingleThreads(const std::vector<EuThread::ThreadId> &threads, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) const = 0;
     virtual std::vector<EuThread::ThreadId> getThreadsFromAttentionBitmask(const NEO::HardwareInfo &hwInfo, uint32_t tile, const uint8_t *bitmask, const size_t bitmaskSize) const = 0;
     virtual bool threadResumeRequiresUnlock() const = 0;
+    virtual bool isThreadControlStoppedSupported() const = 0;
     virtual bool alwaysAllocateEventInLocalMem() const = 0;
     virtual bool platformSupportsCmdListHeapSharing() const = 0;
     virtual bool platformSupportsStateComputeModeTracking() const = 0;
@@ -102,6 +103,7 @@ class L0GfxCoreHelper : public NEO::ApiGfxCoreHelper {
     virtual ze_rtas_format_exp_t getSupportedRTASFormat() const = 0;
     virtual bool platformSupportsImmediateComputeFlushTask() const = 0;
     virtual zet_debug_regset_type_intel_gpu_t getRegsetTypeForLargeGrfDetection() const = 0;
+    virtual uint32_t getGrfRegisterCount(uint32_t *regPtr) const = 0;
     virtual uint32_t getCmdListWaitOnMemoryDataSize() const = 0;
     virtual bool hasUnifiedPostSyncAllocationLayout() const = 0;
     virtual uint32_t getImmediateWritePostSyncOffset() const = 0;
@@ -139,6 +141,7 @@ class L0GfxCoreHelperHw : public L0GfxCoreHelper {
     void getAttentionBitmaskForSingleThreads(const std::vector<EuThread::ThreadId> &threads, const NEO::HardwareInfo &hwInfo, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) const override;
     std::vector<EuThread::ThreadId> getThreadsFromAttentionBitmask(const NEO::HardwareInfo &hwInfo, uint32_t tile, const uint8_t *bitmask, const size_t bitmaskSize) const override;
     bool threadResumeRequiresUnlock() const override;
+    bool isThreadControlStoppedSupported() const override;
     bool alwaysAllocateEventInLocalMem() const override;
     bool platformSupportsCmdListHeapSharing() const override;
     bool platformSupportsStateComputeModeTracking() const override;
@@ -153,6 +156,7 @@ class L0GfxCoreHelperHw : public L0GfxCoreHelper {
     ze_rtas_format_exp_t getSupportedRTASFormat() const override;
     bool platformSupportsImmediateComputeFlushTask() const override;
     zet_debug_regset_type_intel_gpu_t getRegsetTypeForLargeGrfDetection() const override;
+    uint32_t getGrfRegisterCount(uint32_t *regPtr) const override;
     uint32_t getCmdListWaitOnMemoryDataSize() const override;
     bool hasUnifiedPostSyncAllocationLayout() const override;
     uint32_t getImmediateWritePostSyncOffset() const override;

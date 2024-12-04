@@ -7,6 +7,7 @@
 
 #pragma once
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/timestamp.h"
 #include "shared/source/os_interface/linux/drm_debug.h"
 #include "shared/source/os_interface/linux/engine_info.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
@@ -18,9 +19,9 @@
 namespace NEO {
 
 namespace XeDrm {
-struct drm_xe_engine_class_instance;
-struct drm_xe_query_gt_list;
-struct drm_xe_query_config;
+struct drm_xe_engine_class_instance; // NOLINT(readability-identifier-naming)
+struct drm_xe_query_gt_list;         // NOLINT(readability-identifier-naming)
+struct drm_xe_query_config;          // NOLINT(readability-identifier-naming)
 } // namespace XeDrm
 
 enum class EngineClass : uint16_t;
@@ -225,7 +226,10 @@ class IoctlHelperXe : public IoctlHelper {
 
 template <typename... XeLogArgs>
 void IoctlHelperXe::xeLog(XeLogArgs &&...args) const {
-    PRINT_DEBUG_STRING(debugManager.flags.PrintXeLogs.get(), stderr, args...);
+    if (debugManager.flags.PrintXeLogs.get()) {
+        PRINT_DEBUG_STRING(debugManager.flags.PrintXeLogs.get(), stderr, TimestampHelper::getTimestamp().c_str());
+        PRINT_DEBUG_STRING(debugManager.flags.PrintXeLogs.get(), stderr, args...);
+    }
 }
 
 } // namespace NEO

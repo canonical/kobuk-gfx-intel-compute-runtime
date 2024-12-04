@@ -11,6 +11,7 @@
 #include "shared/source/xe2_hpg_core/hw_cmds_bmg.h"
 #include "shared/source/xe2_hpg_core/hw_info_xe2_hpg_core.h"
 #include "shared/test/common/helpers/default_hw_info.h"
+#include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/test_macros/header/per_product_test_definitions.h"
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/unit_test/os_interface/product_helper_tests.h"
@@ -30,11 +31,6 @@ BMGTEST_F(BmgProductHelper, whenGettingAubstreamProductFamilyThenProperEnumValue
 BMGTEST_F(BmgProductHelper, givenProductHelperWhenGettingEvictIfNecessaryFlagSupportedThenExpectTrue) {
 
     EXPECT_TRUE(productHelper->isEvictionIfNecessaryFlagSupported());
-}
-
-BMGTEST_F(BmgProductHelper, whenGettingMidThreadPreemptionSupportForRtKernelsThenExpectNoSupport) {
-
-    EXPECT_TRUE(productHelper->isMidThreadPreemptionDisallowedForRayTracingKernels());
 }
 
 BMGTEST_F(BmgProductHelper, givenBmgProductHelperWhenIsInitBuiltinAsyncSupportedThenReturnFalse) {
@@ -89,8 +85,8 @@ BMGTEST_F(BmgProductHelper, givenProductHelperWhenAdditionalKernelExecInfoSuppor
     EXPECT_TRUE(fePropertiesSupport.disableOverdispatch);
 }
 
-BMGTEST_F(BmgProductHelper, givenCompilerProductHelperWhenGetDefaultHwIpVersionThenCorrectValueIsSet) {
-    EXPECT_EQ(compilerProductHelper->getDefaultHwIpVersion(), AOT::BMG_G21_B0);
+BMGTEST_F(BmgProductHelper, givenCompilerProductHelperWhenGetDefaultHwIpVersonThenCorrectValueIsSet) {
+    EXPECT_EQ(compilerProductHelper->getDefaultHwIpVersion(), AOT::BMG_G21_A0);
 }
 
 BMGTEST_F(BmgProductHelper, givenCompilerProductHelperWhenGetMidThreadPreemptionSupportThenCorrectValueIsSet) {

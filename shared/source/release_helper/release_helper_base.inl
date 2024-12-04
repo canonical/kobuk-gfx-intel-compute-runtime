@@ -40,11 +40,6 @@ bool ReleaseHelperHw<releaseType>::isProgramAllStateComputeCommandFieldsWARequir
 }
 
 template <ReleaseType releaseType>
-bool ReleaseHelperHw<releaseType>::isPrefetchDisablingRequired() const {
-    return false;
-}
-
-template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isSplitMatrixMultiplyAccumulateSupported() const {
     return false;
 }
@@ -57,11 +52,6 @@ bool ReleaseHelperHw<releaseType>::isBFloat16ConversionSupported() const {
 template <ReleaseType releaseType>
 inline bool ReleaseHelperHw<releaseType>::isAuxSurfaceModeOverrideRequired() const {
     return false;
-}
-
-template <ReleaseType releaseType>
-int ReleaseHelperHw<releaseType>::getProductMaxPreferredSlmSize(int preferredEnumValue) const {
-    return preferredEnumValue;
 }
 
 template <ReleaseType releaseType>
@@ -153,7 +143,24 @@ uint32_t ReleaseHelperHw<releaseType>::getAdditionalExtraCaps() const {
 }
 
 template <ReleaseType releaseType>
+uint32_t ReleaseHelperHw<releaseType>::getStackSizePerRay() const {
+    return 0u;
+}
+
+template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isLocalOnlyAllowed() const {
     return true;
 }
+
+template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::isDisablingMsaaRequired() const {
+    return false;
+}
+
+template <ReleaseType releaseType>
+const SizeToPreferredSlmValueArray &ReleaseHelperHw<releaseType>::getSizeToPreferredSlmValue(bool isHeapless) const {
+    static const SizeToPreferredSlmValueArray sizeToPreferredSlmValue = {};
+    return sizeToPreferredSlmValue;
+}
+
 } // namespace NEO

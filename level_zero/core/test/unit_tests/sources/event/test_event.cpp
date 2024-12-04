@@ -12,7 +12,6 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/variable_backup.h"
-#include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
@@ -89,6 +88,8 @@ class MemoryManagerEventPoolFailMock : public NEO::MemoryManager {
         return MemoryConstants::pageSize64k;
     }
     void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override{};
+    AddressRange reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) override { return {}; }
+    void freeCpuAddress(AddressRange addressRange) override{};
     NEO::GraphicsAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const NEO::AllocationData &allocationData) override { return nullptr; };
     NEO::GraphicsAllocation *allocateGraphicsMemoryForNonSvmHostPtr(const NEO::AllocationData &allocationData) override { return nullptr; };
     NEO::GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const NEO::AllocationData &allocationData) override { return nullptr; };
@@ -4421,7 +4422,7 @@ HWTEST2_F(EventMultiTileDynamicPacketUseTest, givenEventCounterBasedUsedCreatedO
     inOrderExecInfo0->setLastWaitedCounterValue(1);
     event0->updateInOrderExecState(inOrderExecInfo0, 1, 0);
 
-    auto inOrderExecInfo1 = NEO::InOrderExecInfo::createFromExternalAllocation(*device->getNEODevice(), 0x1, nullptr, nullptr, 1);
+    auto inOrderExecInfo1 = NEO::InOrderExecInfo::createFromExternalAllocation(*device->getNEODevice(), nullptr, 0x1, nullptr, nullptr, 1, 1, 1);
     inOrderExecInfo1->setLastWaitedCounterValue(1);
     event1->updateInOrderExecState(inOrderExecInfo1, 1, 0);
 

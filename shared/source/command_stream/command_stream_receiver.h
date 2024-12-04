@@ -544,8 +544,12 @@ class CommandStreamReceiver {
     uint32_t getRequiredScratchSlot1Size() { return requiredScratchSlot1Size; }
     virtual bool submitDependencyUpdate(TagNodeBase *tag) = 0;
 
-    bool isBusy() {
+    MOCKABLE_VIRTUAL bool isBusy() {
         return !testTaskCountReady(getTagAddress(), this->taskCount);
+    }
+
+    bool isBusyWithoutHang(TimeType &lastHangCheckTime) {
+        return isBusy() && !this->checkGpuHangDetected(std::chrono::high_resolution_clock::now(), lastHangCheckTime);
     }
 
     bool canUse4GbHeaps() const {
@@ -696,7 +700,6 @@ class CommandStreamReceiver {
     bool doubleSbaWa = false;
     bool dshSupported = false;
     bool heaplessModeEnabled = false;
-    bool requiresBlockingResidencyHandling = true;
     bool use4GbHeaps = true;
     bool csrSurfaceProgrammingDone = false;
 };

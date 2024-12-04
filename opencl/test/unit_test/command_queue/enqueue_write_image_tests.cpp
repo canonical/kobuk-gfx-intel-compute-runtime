@@ -234,14 +234,13 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage1DarrayWhenReadWriteImageIsCalledThenH
     EnqueueWriteImageHelper<>::enqueueWriteImage(pCmdQ, dstImage2.get(), CL_FALSE, origin, region);
 
     auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
-
     auto temporaryAllocation1 = csr.getTemporaryAllocations().peekHead();
     ASSERT_NE(nullptr, temporaryAllocation1);
-
     EXPECT_EQ(temporaryAllocation1->getUnderlyingBufferSize(), imageSize);
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, dstImage2.get(), CL_FALSE, origin, region);
     auto temporaryAllocation2 = temporaryAllocation1->next;
+
     ASSERT_NE(nullptr, temporaryAllocation2);
     EXPECT_EQ(temporaryAllocation2->getUnderlyingBufferSize(), imageSize);
 }
@@ -298,13 +297,12 @@ HWTEST_F(EnqueueWriteImageTest, GivenImage2DarrayWhenReadWriteImageIsCalledThenH
 
     auto temporaryAllocation1 = csr.getTemporaryAllocations().peekHead();
     ASSERT_NE(nullptr, temporaryAllocation1);
-
     EXPECT_EQ(temporaryAllocation1->getUnderlyingBufferSize(), imageSize);
 
     EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ, dstImage.get(), CL_FALSE, origin, region);
     auto temporaryAllocation2 = temporaryAllocation1->next;
     ASSERT_NE(nullptr, temporaryAllocation2);
-    EXPECT_EQ(temporaryAllocation1->getUnderlyingBufferSize(), imageSize);
+    EXPECT_EQ(temporaryAllocation2->getUnderlyingBufferSize(), imageSize);
 }
 
 HWTEST_F(EnqueueWriteImageTest, GivenImage1DAndImageShareTheSameStorageWithHostPtrWhenReadWriteImageIsCalledThenImageIsNotWritten) {
@@ -746,4 +744,186 @@ HWTEST_F(EnqueueWriteImageTest, givenMultiRootDeviceImageWhenNonBlockedEnqueueWr
 
     pCmdQ1->release();
     pImage->release();
+}
+
+HWTEST_F(EnqueueWriteImageTest, whenEnqueueWriteImageWithUsmPtrThenDontImportAllocation) {
+    bool svmSupported = pDevice->getHardwareInfo().capabilityTable.ftrSvm;
+    if (!svmSupported) {
+        GTEST_SKIP();
+    }
+    auto svmManager = pCmdQ->getContext().getSVMAllocsManager();
+
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::hostUnifiedMemory, 4096, pCmdQ->getContext().getRootDeviceIndices(), pCmdQ->getContext().getDeviceBitfields());
+    unifiedMemoryProperties.device = pDevice;
+    auto usmPtr = svmManager->createHostUnifiedMemoryAllocation(MemoryConstants::pageSize, unifiedMemoryProperties);
+
+    auto res = EnqueueWriteImageHelper<>::enqueueWriteImage(pCmdQ, dstImage, CL_FALSE,
+                                                            EnqueueWriteImageTraits::origin,
+                                                            EnqueueWriteImageTraits::region,
+                                                            EnqueueWriteImageTraits::rowPitch,
+                                                            EnqueueWriteImageTraits::slicePitch,
+                                                            usmPtr,
+                                                            nullptr,
+                                                            0u,
+                                                            nullptr,
+                                                            nullptr);
+    EXPECT_EQ(res, CL_SUCCESS);
+    pCmdQ->finish();
+
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+    svmManager->freeSVMAlloc(usmPtr);
+}
+
+HWTEST_F(EnqueueWriteImageTest, whenEnqueueWriteImageWithUsmPtrAndSizeLowerThanRequiredThenFail) {
+    bool svmSupported = pDevice->getHardwareInfo().capabilityTable.ftrSvm;
+    if (!svmSupported) {
+        GTEST_SKIP();
+    }
+    auto svmManager = pCmdQ->getContext().getSVMAllocsManager();
+
+    SVMAllocsManager::UnifiedMemoryProperties unifiedMemoryProperties(InternalMemoryType::hostUnifiedMemory, 4096, pCmdQ->getContext().getRootDeviceIndices(), pCmdQ->getContext().getDeviceBitfields());
+    unifiedMemoryProperties.device = pDevice;
+    auto usmPtr = svmManager->createHostUnifiedMemoryAllocation(1, unifiedMemoryProperties);
+
+    auto res = EnqueueWriteImageHelper<>::enqueueWriteImage(pCmdQ, dstImage, CL_FALSE,
+                                                            EnqueueWriteImageTraits::origin,
+                                                            EnqueueWriteImageTraits::region,
+                                                            EnqueueWriteImageTraits::rowPitch,
+                                                            EnqueueWriteImageTraits::slicePitch,
+                                                            usmPtr,
+                                                            nullptr,
+                                                            0u,
+                                                            nullptr,
+                                                            nullptr);
+    EXPECT_EQ(res, CL_INVALID_OPERATION);
+    pCmdQ->finish();
+    svmManager->freeSVMAlloc(usmPtr);
+}
+
+HWTEST_F(EnqueueWriteImageTest, whenIsValidForStagingWriteImageCalledThenReturnCorrectValue) {
+    bool svmSupported = pDevice->getHardwareInfo().capabilityTable.ftrSvm;
+    if (!svmSupported) {
+        GTEST_SKIP();
+    }
+    unsigned char ptr[16];
+
+    std::unique_ptr<Image> image(Image1dHelper<>::create(context));
+    EXPECT_FALSE(pCmdQ->isValidForStagingWriteImage(image.get(), ptr, false));
+
+    image.reset(Image2dHelper<>::create(context));
+    EXPECT_FALSE(pCmdQ->isValidForStagingWriteImage(image.get(), ptr, false));
+
+    image.reset(Image3dHelper<>::create(context));
+    EXPECT_FALSE(pCmdQ->isValidForStagingWriteImage(image.get(), ptr, false));
+}
+
+struct WriteImageStagingBufferTest : public EnqueueWriteImageTest {
+    void SetUp() override {
+        REQUIRE_SVM_OR_SKIP(defaultHwInfo);
+        EnqueueWriteImageTest::SetUp();
+        ptr = new unsigned char[writeSize];
+        device.reset(new MockClDevice{MockClDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr)});
+    }
+
+    void TearDown() override {
+        if (defaultHwInfo->capabilityTable.ftrSvm == false) {
+            return;
+        }
+        delete[] ptr;
+        EnqueueWriteImageTest::TearDown();
+    }
+
+    static constexpr size_t stagingBufferSize = MemoryConstants::megaByte * 2;
+    static constexpr size_t writeSize = stagingBufferSize * 4;
+    unsigned char *ptr;
+    size_t origin[3] = {0, 0, 0};
+    size_t region[3] = {4, 8, 1};
+    std::unique_ptr<ClDevice> device;
+    cl_queue_properties props = {};
+};
+
+HWTEST_F(WriteImageStagingBufferTest, whenEnqueueStagingWriteImageCalledThenReturnSuccess) {
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, false, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, nullptr);
+
+    EXPECT_EQ(res, CL_SUCCESS);
+    EXPECT_EQ(4ul, mockCommandQueueHw.enqueueWriteImageCounter);
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    EXPECT_EQ(0u, csr.createAllocationForHostSurfaceCalled);
+}
+
+HWTEST_F(WriteImageStagingBufferTest, whenBlockingEnqueueStagingWriteImageCalledThenFinishCalled) {
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, true, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, nullptr);
+
+    EXPECT_EQ(res, CL_SUCCESS);
+    EXPECT_EQ(1u, mockCommandQueueHw.finishCalledCount);
+}
+
+HWTEST_F(WriteImageStagingBufferTest, whenEnqueueStagingWriteImageCalledWithEventThenReturnValidEvent) {
+    constexpr cl_command_type expectedLastCmd = CL_COMMAND_WRITE_IMAGE;
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    cl_event event;
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, false, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, &event);
+    EXPECT_EQ(res, CL_SUCCESS);
+
+    auto pEvent = (Event *)event;
+    EXPECT_EQ(expectedLastCmd, mockCommandQueueHw.lastCommandType);
+    EXPECT_EQ(expectedLastCmd, pEvent->getCommandType());
+
+    clReleaseEvent(event);
+}
+
+HWTEST_F(WriteImageStagingBufferTest, givenOutOfOrderQueueWhenEnqueueStagingWriteImageCalledWithEventThenReturnValidEvent) {
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    mockCommandQueueHw.setOoqEnabled();
+    cl_event event;
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, false, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, &event);
+    EXPECT_EQ(res, CL_SUCCESS);
+
+    auto pEvent = (Event *)event;
+    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_BARRIER), mockCommandQueueHw.lastCommandType);
+    EXPECT_EQ(static_cast<cl_command_type>(CL_COMMAND_WRITE_IMAGE), pEvent->getCommandType());
+
+    clReleaseEvent(event);
+}
+
+HWTEST_F(WriteImageStagingBufferTest, givenOutOfOrderQueueWhenEnqueueStagingWriteImageCalledWithSingleTransferThenNoBarrierEnqueued) {
+    constexpr cl_command_type expectedLastCmd = CL_COMMAND_WRITE_IMAGE;
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    mockCommandQueueHw.setOoqEnabled();
+    cl_event event;
+    region[1] = 1;
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, false, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, &event);
+    EXPECT_EQ(res, CL_SUCCESS);
+
+    auto pEvent = (Event *)event;
+    EXPECT_EQ(expectedLastCmd, mockCommandQueueHw.lastCommandType);
+    EXPECT_EQ(expectedLastCmd, pEvent->getCommandType());
+
+    clReleaseEvent(event);
+}
+
+HWTEST_F(WriteImageStagingBufferTest, givenCmdQueueWithProfilingWhenEnqueueStagingWriteImageThenTimestampsSetCorrectly) {
+    cl_event event;
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    mockCommandQueueHw.setProfilingEnabled();
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, false, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, &event);
+    EXPECT_EQ(res, CL_SUCCESS);
+
+    auto pEvent = (Event *)event;
+    EXPECT_FALSE(pEvent->isCPUProfilingPath());
+    EXPECT_TRUE(pEvent->isProfilingEnabled());
+
+    clReleaseEvent(event);
+}
+
+HWTEST_F(WriteImageStagingBufferTest, whenEnqueueStagingWriteImageFailedThenPropagateErrorCode) {
+    MockCommandQueueHw<FamilyType> mockCommandQueueHw(context, device.get(), &props);
+    mockCommandQueueHw.enqueueWriteImageCallBase = false;
+    auto res = mockCommandQueueHw.enqueueStagingWriteImage(dstImage, false, origin, region, MemoryConstants::megaByte, MemoryConstants::megaByte, ptr, nullptr);
+
+    EXPECT_EQ(res, CL_INVALID_OPERATION);
+    EXPECT_EQ(1ul, mockCommandQueueHw.enqueueWriteImageCounter);
 }

@@ -68,6 +68,8 @@ class AILConfiguration {
 
     virtual bool isContextSyncFlagRequired() = 0;
 
+    virtual bool is256BPrefetchDisableRequired() = 0;
+
     virtual bool isBufferPoolEnabled() = 0;
 
     virtual ~AILConfiguration() = default;
@@ -79,6 +81,8 @@ class AILConfiguration {
     virtual bool handleDivergentBarriers() = 0;
 
     virtual bool disableBindlessAddressing() = 0;
+
+    virtual bool limitAmountOfDeviceMemoryForRecycling() = 0;
 
   protected:
     virtual void applyExt(RuntimeCapabilityTable &runtimeCapabilityTable) = 0;
@@ -93,6 +97,9 @@ class AILConfiguration {
 extern const std::set<std::string_view> applicationsContextSyncFlag;
 extern const std::set<std::string_view> applicationsForceRcsDg2;
 extern const std::set<std::string_view> applicationsBufferPoolDisabled;
+extern const std::set<std::string_view> applicationsBufferPoolDisabledDg2;
+extern const std::set<std::string_view> applicationsOverfetchDisabled;
+extern const std::set<std::string_view> applicationsDeviceUSMRecyclingLimited;
 
 template <PRODUCT_FAMILY product>
 class AILConfigurationHw : public AILConfiguration {
@@ -106,11 +113,13 @@ class AILConfigurationHw : public AILConfiguration {
 
     void modifyKernelIfRequired(std::string &kernel) override;
     bool isContextSyncFlagRequired() override;
+    bool is256BPrefetchDisableRequired() override;
     bool isBufferPoolEnabled() override;
     bool useLegacyValidationLogic() override;
     bool forceRcs() override;
     bool handleDivergentBarriers() override;
     bool disableBindlessAddressing() override;
+    bool limitAmountOfDeviceMemoryForRecycling() override;
 
     bool shouldForceRcs = false;
     bool shouldHandleDivergentBarriers = false;

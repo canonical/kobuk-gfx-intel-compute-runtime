@@ -9,7 +9,7 @@
 #include "shared/source/command_stream/device_command_stream.h"
 #include "shared/source/command_stream/submission_status.h"
 
-struct COMMAND_BUFFER_HEADER_REC;
+struct COMMAND_BUFFER_HEADER_REC; // NOLINT(readability-identifier-naming), forward declaration from sharedata_wrapper.h
 
 namespace NEO {
 class GmmPageTableMngr;
@@ -44,8 +44,12 @@ class WddmCommandStreamReceiver : public DeviceCommandStreamReceiver<GfxFamily> 
   protected:
     void kmDafLockAllocations(ResidencyContainer &allocationsForResidency);
     void addToEvictionContainer(GraphicsAllocation &gfxAllocation) override;
+    bool validForEnqueuePagingFence(uint64_t pagingFenceValue) const;
 
     Wddm *wddm;
     COMMAND_BUFFER_HEADER_REC *commandBufferHeader;
+
+    bool requiresBlockingResidencyHandling = true;
+    uint64_t lastEnqueuedPagingFenceValue = 0;
 };
 } // namespace NEO

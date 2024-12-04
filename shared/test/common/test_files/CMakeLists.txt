@@ -74,25 +74,23 @@ macro(macro_for_each_platform)
     list(REMOVE_ITEM KERNELS_TO_COMPILE ${TEST_KERNELS_IMAGES})
   endif()
 
-  set(HEAPLES_SUPPORT FALSE)
-  CORE_CONTAINS_PLATFORM("SUPPORTED_HEAPLESS" ${CORE_TYPE} ${PLATFORM_IT} HEAPLES_SUPPORT)
-
-  set(PREVIOUS_TARGET)
+  set(STATELESS_SUPPORT FALSE)
+  CORE_CONTAINS_PLATFORM("SUPPORTED_STATELESS" ${CORE_TYPE} ${PLATFORM_IT} STATELESS_SUPPORT)
 
   foreach(REVISION_CONFIG ${${PLATFORM_IT}_${CORE_TYPE}_REVISIONS})
     parse_revision_config(${REVISION_CONFIG} ${PLATFORM_IT_LOWER} DEVICE_ID REVISION_ID)
     compile_kernels_gen(${DEVICE_ID} ${REVISION_ID} ${PLATFORM_IT_LOWER} FALSE ${KERNELS_TO_COMPILE})
 
-    if(${HEAPLES_SUPPORT})
+    if(${STATELESS_SUPPORT})
       compile_kernels_gen(${DEVICE_ID} ${REVISION_ID} ${PLATFORM_IT_LOWER} TRUE ${KERNELS_TO_COMPILE})
     endif()
 
-    add_custom_target(prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID} DEPENDS ${compiled_kernels_${PLATFORM_IT_LOWER}_${REVISION_ID}})
+    add_custom_target(prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID} DEPENDS ${compiled_kernels_${PLATFORM_IT_LOWER}_${REVISION_ID}} ${PREVIOUS_TARGET})
     set_target_properties(prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID} PROPERTIES FOLDER "${SHARED_TEST_PROJECTS_FOLDER}/${SHARED_TEST_PROJECTS_SUB_FOLDER}/${PLATFORM_SPECIFIC_TEST_TARGETS_FOLDER}/${PLATFORM_IT_LOWER}/${REVISION_ID}")
-    add_dependencies(prepare_test_kernels_for_shared prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID} ${PREVIOUS_TARGET})
+    add_dependencies(prepare_test_kernels_for_shared prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID})
 
     if(NEO_SERIALIZED_BUILTINS_COMPILATION)
-      set(PREVIOUS_TARGET ${prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID}})
+      set(PREVIOUS_TARGET "prepare_test_kernels_for_shared_${PLATFORM_IT_LOWER}_${REVISION_ID}")
     endif()
   endforeach()
 endmacro()
@@ -101,4 +99,5 @@ macro(macro_for_each_core_type)
   apply_macro_for_each_platform("TESTED")
 endmacro()
 
+set(PREVIOUS_TARGET "")
 apply_macro_for_each_core_type("TESTED")

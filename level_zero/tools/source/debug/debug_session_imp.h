@@ -70,7 +70,6 @@ struct DebugSessionImp : DebugSession {
     static const SIP::regset_desc *getDebugScratchRegsetDesc();
     static const SIP::regset_desc *getThreadScratchRegsetDesc();
     static uint32_t typeToRegsetFlags(uint32_t type);
-    constexpr static int64_t interruptTimeout = 2000;
 
     using ApiEventQueue = std::queue<zet_debug_event_t>;
 
@@ -120,7 +119,7 @@ struct DebugSessionImp : DebugSession {
     void validateAndSetStateSaveAreaHeader(uint64_t vmHandle, uint64_t gpuVa);
     virtual void readStateSaveAreaHeader(){};
     MOCKABLE_VIRTUAL ze_result_t readFifo(uint64_t vmHandle, std::vector<EuThread::ThreadId> &threadsWithAttention);
-    MOCKABLE_VIRTUAL bool isValidNode(uint64_t vmHandle, uint64_t gpuVa, SIP::fifo_node &node);
+    MOCKABLE_VIRTUAL ze_result_t isValidNode(uint64_t vmHandle, uint64_t gpuVa, SIP::fifo_node &node);
 
     virtual uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) = 0;
     virtual size_t getContextStateSaveAreaSize(uint64_t memoryHandle) = 0;
@@ -165,6 +164,21 @@ struct DebugSessionImp : DebugSession {
             stateSaveAreaMemory.resize(size);
         }
     }
+
+    struct AttentionEventFields {
+        uint64_t clientHandle;
+        uint64_t contextHandle;
+        uint64_t lrcHandle;
+        uint32_t bitmaskSize;
+        uint8_t *bitmask;
+    };
+    void handleStoppedThreads();
+    void pollFifo();
+    int32_t fifoPollInterval = 150;
+    int64_t interruptTimeout = 2000;
+    std::unordered_map<uint64_t, AttentionEventFields> attentionEventContext{};
+    std::chrono::milliseconds lastFifoReadTime = std::chrono::milliseconds(0);
+    virtual void updateStoppedThreadsAndCheckTriggerEvents(const AttentionEventFields &attention, uint32_t tileIndex, std::vector<EuThread::ThreadId> &threadsWithAttention) = 0;
 
     std::chrono::high_resolution_clock::time_point interruptTime;
     std::atomic<bool> interruptSent = false;

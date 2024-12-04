@@ -20,6 +20,7 @@ TEST(DirectSubmissionControllerTestsMt, givenDirectSubmissionControllerWhenTimeo
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(1);
     executionEnvironment.initializeMemoryManager();
+    executionEnvironment.rootDeviceEnvironments[0]->initOsTime();
 
     DeviceBitfield deviceBitfield(1);
     MockCommandStreamReceiver csr(executionEnvironment, 0, deviceBitfield);
@@ -33,7 +34,7 @@ TEST(DirectSubmissionControllerTestsMt, givenDirectSubmissionControllerWhenTimeo
 
     DirectSubmissionControllerMock controller;
     executionEnvironment.directSubmissionController.reset(&controller);
-    controller.timeoutElapsedReturnValue.store(true);
+    controller.timeoutElapsedReturnValue.store(TimeoutElapsedMode::fullyElapsed);
     controller.startThread();
     csr.startControllingDirectSubmissions();
     controller.registerDirectSubmission(&csr);
@@ -82,6 +83,7 @@ TEST(DirectSubmissionControllerTestsMt, givenDirectSubmissionControllerWhenEnque
     MockExecutionEnvironment executionEnvironment;
     executionEnvironment.prepareRootDeviceEnvironments(1);
     executionEnvironment.initializeMemoryManager();
+    executionEnvironment.rootDeviceEnvironments[0]->initOsTime();
 
     DeviceBitfield deviceBitfield(1);
     MockCommandStreamReceiver csr(executionEnvironment, 0, deviceBitfield);

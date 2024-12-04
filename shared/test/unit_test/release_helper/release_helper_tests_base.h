@@ -21,7 +21,6 @@ struct ReleaseHelperTestsBase : public ::testing::Test {
 
     ReleaseHelperTestsBase();
     ~ReleaseHelperTestsBase() override;
-    void whenGettingMaxPreferredSlmSizeThenSizeIsNotModified();
     void whenShouldAdjustCalledThenTrueReturned();
     void whenShouldAdjustCalledThenFalseReturned();
     void whenGettingSupportedNumGrfsThenValues128And256Returned();
@@ -31,7 +30,7 @@ struct ReleaseHelperTestsBase : public ::testing::Test {
     void whenGettingAdditionalExtraKernelCapabilitiesThenReturnNoCapabilities();
     void whenIsLocalOnlyAllowedCalledThenTrueReturned();
     void whenIsLocalOnlyAllowedCalledThenFalseReturned();
-
+    void whenGettingPreferredSlmSizeThenAllEntriesEmpty();
     virtual std::vector<uint32_t> getRevisions() = 0;
 
     std::unique_ptr<ReleaseHelper> releaseHelper;

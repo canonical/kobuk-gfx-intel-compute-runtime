@@ -564,11 +564,6 @@ bool MemorySynchronizationCommands<GfxFamily>::isBarrierPriorToPipelineSelectWaR
 }
 
 template <typename GfxFamily>
-bool GfxCoreHelperHw<GfxFamily>::isAdditionalFeatureFlagRequired(const FeatureTable *featureTable) const {
-    return false;
-}
-
-template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::isSubDeviceEngineSupported(const RootDeviceEnvironment &rootDeviceEnvironment, const DeviceBitfield &deviceBitfield, aub_stream::EngineType engineType) const {
     return true;
 }
@@ -649,11 +644,6 @@ bool GfxCoreHelperHw<GfxFamily>::copyThroughLockedPtrEnabled(const HardwareInfo 
 
 template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::isChipsetUniqueUUIDSupported() const {
-    return false;
-}
-
-template <typename GfxFamily>
-bool GfxCoreHelperHw<GfxFamily>::largeGrfModeSupported() const {
     return false;
 }
 
@@ -799,6 +789,19 @@ void MemorySynchronizationCommands<GfxFamily>::encodeAdditionalTimestampOffsets(
 template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::usmCompressionSupported(const NEO::HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <typename GfxFamily>
+uint32_t GfxCoreHelperHw<GfxFamily>::calculateAvailableThreadCount(const HardwareInfo &hwInfo, uint32_t grfCount) const {
+    auto maxThreadsPerEuCount = 8u;
+    if (grfCount == GrfConfig::largeGrfNumber) {
+        maxThreadsPerEuCount = 4;
+    }
+    return std::min(hwInfo.gtSystemInfo.ThreadCount, maxThreadsPerEuCount * hwInfo.gtSystemInfo.EUCount);
+}
+
+template <typename GfxFamily>
+void GfxCoreHelperHw<GfxFamily>::alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const {
 }
 
 template <typename GfxFamily>

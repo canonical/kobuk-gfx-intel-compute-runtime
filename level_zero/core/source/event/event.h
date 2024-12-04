@@ -61,8 +61,22 @@ struct IpcEventPoolData {
     bool isHostVisibleEventPoolAllocation = false;
     bool isImplicitScalingCapable = false;
 };
+
+struct IpcCounterBasedEventData {
+    uint64_t deviceHandle = 0;
+    uint64_t hostHandle = 0;
+    uint64_t counterValue = 0;
+    uint32_t rootDeviceIndex = 0;
+    uint32_t counterOffset = 0;
+    uint32_t devicePartitions = 0;
+    uint32_t hostPartitions = 0;
+    uint32_t counterBasedFlags = 0;
+    uint32_t signalScopeFlags = 0;
+    uint32_t waitScopeFlags = 0;
+};
 #pragma pack()
 static_assert(sizeof(IpcEventPoolData) <= ZE_MAX_IPC_HANDLE_SIZE, "IpcEventPoolData is bigger than ZE_MAX_IPC_HANDLE_SIZE");
+static_assert(sizeof(IpcCounterBasedEventData) <= ZE_MAX_IPC_HANDLE_SIZE, "IpcCounterBasedEventData is bigger than ZE_MAX_IPC_HANDLE_SIZE");
 
 namespace EventPacketsCount {
 inline constexpr uint32_t maxKernelSplit = 3;
@@ -71,10 +85,14 @@ inline constexpr uint32_t eventPackets = maxKernelSplit * NEO ::TimestampPacketC
 
 struct EventDescriptor {
     NEO::MultiGraphicsAllocation *eventPoolAllocation = nullptr;
+    const void *extensions = nullptr;
     uint32_t totalEventSize = 0;
     uint32_t maxKernelCount = 0;
     uint32_t maxPacketsCount = 0;
     uint32_t counterBasedFlags = 0;
+    uint32_t index = 0;
+    uint32_t signalScope = 0;
+    uint32_t waitScope = 0;
     bool timestampPool = false;
     bool kerneMappedTsPoolFlag = false;
     bool importedIpcPool = false;
@@ -118,9 +136,14 @@ struct Event : _ze_event_handle_t {
     static Event *create(EventPool *eventPool, const ze_event_desc_t *desc, Device *device);
 
     template <typename TagSizeT>
-    static Event *create(const EventDescriptor &eventDescriptor, const ze_event_desc_t *desc, Device *device);
+    static Event *create(const EventDescriptor &eventDescriptor, Device *device, ze_result_t &result);
 
     static Event *fromHandle(ze_event_handle_t handle) { return static_cast<Event *>(handle); }
+
+    static ze_result_t openCounterBasedIpcHandle(const IpcCounterBasedEventData &ipcData, ze_event_handle_t *eventHandle,
+                                                 DriverHandleImp *driver, ContextImp *context, uint32_t numDevices, ze_device_handle_t *deviceHandles);
+
+    ze_result_t getCounterBasedIpcHandle(IpcCounterBasedEventData &ipcData);
 
     inline ze_event_handle_t toHandle() { return this; }
 
@@ -300,10 +323,17 @@ struct Event : _ze_event_handle_t {
 
     void resetInOrderTimestampNode(NEO::TagNodeBase *newNode);
 
+    bool hasInOrderTimestampNode() const { return inOrderTimestampNode != nullptr; }
+
+    bool isIpcImported() const { return isFromIpcPool; }
+
   protected:
     Event(int index, Device *device) : device(device), index(index) {}
 
+    ze_result_t enableExtensions(const EventDescriptor &eventDescriptor);
+
     void unsetCmdQueue();
+    void releaseTempInOrderTimestampNodes();
 
     EventPool *eventPool = nullptr;
 
@@ -365,6 +395,7 @@ struct Event : _ze_event_handle_t {
     bool isFromIpcPool = false;
     bool kmdWaitMode = false;
     bool interruptMode = false;
+    bool isSharableCouterBased = false;
     uint64_t timestampRefreshIntervalInNanoSec = 0;
 };
 

@@ -22,9 +22,18 @@ namespace L0 {
 namespace ult {
 
 struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
+    class WhiteboxInOrderExecInfo : public InOrderExecInfo {
+      public:
+        using InOrderExecInfo::numDevicePartitionsToWait;
+        using InOrderExecInfo::numHostPartitionsToWait;
+        using InOrderExecInfo::tempTimestampNodes;
+    };
+
     struct FixtureMockEvent : public EventImp<uint32_t> {
         using EventImp<uint32_t>::Event::counterBasedMode;
+        using EventImp<uint32_t>::Event::isFromIpcPool;
         using EventImp<uint32_t>::Event::counterBasedFlags;
+        using EventImp<uint32_t>::Event::isSharableCouterBased;
         using EventImp<uint32_t>::eventPoolAllocation;
         using EventImp<uint32_t>::maxPacketCount;
         using EventImp<uint32_t>::inOrderExecInfo;
@@ -32,6 +41,7 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         using EventImp<uint32_t>::inOrderAllocationOffset;
         using EventImp<uint32_t>::csrs;
         using EventImp<uint32_t>::signalScope;
+        using EventImp<uint32_t>::waitScope;
         using EventImp<uint32_t>::unsetCmdQueue;
         using EventImp<uint32_t>::externalInterruptId;
         using EventImp<uint32_t>::latestUsedCmdQueue;
@@ -76,12 +86,16 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
     DestroyableZeUniquePtr<FixtureMockEvent> createStandaloneCbEvent(const ze_base_desc_t *pNext) {
         constexpr uint32_t counterBasedFlags = (ZE_EVENT_POOL_COUNTER_BASED_EXP_FLAG_IMMEDIATE | ZE_EVENT_POOL_COUNTER_BASED_EXP_FLAG_NON_IMMEDIATE);
 
-        constexpr EventDescriptor eventDescriptor = {
+        const EventDescriptor eventDescriptor = {
             nullptr,                           // eventPoolAllocation
+            pNext,                             // extension
             0,                                 // totalEventSize
             EventPacketsCount::maxKernelSplit, // maxKernelCount
             0,                                 // maxPacketsCount
             counterBasedFlags,                 // counterBasedFlags
+            0,                                 // index
+            0,                                 // signalScope
+            0,                                 // waitScope
             false,                             // timestampPool
             false,                             // kerneMappedTsPoolFlag
             false,                             // importedIpcPool
@@ -93,11 +107,11 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         uint64_t *hostAddress = &(standaloneCbEventStorage.data()[standaloneCbEventStorage.size() - 1]);
         uint64_t *deviceAddress = ptrOffset(hostAddress, 0x1000);
 
-        auto inOrderExecInfo = NEO::InOrderExecInfo::createFromExternalAllocation(*device->getNEODevice(), castToUint64(deviceAddress), nullptr, hostAddress, 1);
+        auto inOrderExecInfo = NEO::InOrderExecInfo::createFromExternalAllocation(*device->getNEODevice(), nullptr, castToUint64(deviceAddress), nullptr, hostAddress, 1, 1, 1);
 
-        ze_event_desc_t eventDesc = {};
-        eventDesc.pNext = pNext;
-        auto event = static_cast<FixtureMockEvent *>(Event::create<uint64_t>(eventDescriptor, &eventDesc, device));
+        ze_result_t result = ZE_RESULT_SUCCESS;
+        auto event = static_cast<FixtureMockEvent *>(Event::create<uint64_t>(eventDescriptor, device, result));
+        EXPECT_EQ(ZE_RESULT_SUCCESS, result);
         event->updateInOrderExecState(inOrderExecInfo, 1, 0);
 
         return DestroyableZeUniquePtr<FixtureMockEvent>(event);

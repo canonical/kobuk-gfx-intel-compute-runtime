@@ -53,7 +53,6 @@ class MockCompilerProductHelper : public CompilerProductHelper {
     ADDMETHOD_CONST_NOBASE(getDeviceExtensions, std::string, {}, (const HardwareInfo &hwInfo, const ReleaseHelper *releaseHelper));
     using getDeviceOpenCLCVersionsRetType = StackVec<OclCVersion, 5>;
     ADDMETHOD_CONST_NOBASE(getDeviceOpenCLCVersions, getDeviceOpenCLCVersionsRetType, {}, (const HardwareInfo &hwInfo, OclCVersion max));
-    ADDMETHOD_CONST_NOBASE_VOIDRETURN(applyDeviceBlobFixesOnHwInfo, (HardwareInfo & hwInfo));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(adjustHwInfoForIgc, (HardwareInfo & hwInfo));
     ADDMETHOD_CONST_NOBASE(isHeaplessModeEnabled, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isHeaplessStateInitEnabled, bool, false, (bool heaplessModeEnabled));
@@ -62,8 +61,9 @@ class MockCompilerProductHelper : public CompilerProductHelper {
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(getKernelFp64AtomicCapabilities, (uint32_t & fp64Caps));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(getKernelCapabilitiesExtra, (const ReleaseHelper *releaseHelper, uint32_t &extraCaps));
     ADDMETHOD_CONST_NOBASE(isBindlessAddressingDisabled, bool, false, (const ReleaseHelper *releaseHelper));
-
     ADDMETHOD_CONST_NOBASE(getProductConfigFromHwInfo, uint32_t, 0, (const HardwareInfo &hwInfo));
+    ADDMETHOD_CONST_NOBASE(getCustomIgcLibraryName, const char *, nullptr, ());
+    ADDMETHOD_CONST_NOBASE(getFinalizerLibraryName, const char *, nullptr, ());
 };
 
 } // namespace NEO

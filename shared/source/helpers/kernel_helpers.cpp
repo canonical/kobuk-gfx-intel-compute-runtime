@@ -21,13 +21,13 @@
 namespace NEO {
 
 uint32_t KernelHelper::getMaxWorkGroupCount(const RootDeviceEnvironment &rootDeviceEnvironment, const KernelDescriptor &kernelDescriptor, uint32_t numSubDevices,
-                                            uint32_t usedSlmSize, uint32_t workDim, const size_t *localWorkSize, EngineGroupType engineGroupType, bool isEngineInstanced) {
+                                            uint32_t usedSlmSize, uint32_t workDim, const size_t *localWorkSize, EngineGroupType engineGroupType) {
     return KernelHelper::getMaxWorkGroupCount(rootDeviceEnvironment, kernelDescriptor.kernelAttributes.numGrfRequired, kernelDescriptor.kernelAttributes.simdSize, kernelDescriptor.kernelAttributes.barrierCount,
-                                              numSubDevices, usedSlmSize, workDim, localWorkSize, engineGroupType, isEngineInstanced);
+                                              numSubDevices, usedSlmSize, workDim, localWorkSize, engineGroupType);
 }
 
 uint32_t KernelHelper::getMaxWorkGroupCount(const RootDeviceEnvironment &rootDeviceEnvironment, uint16_t numGrfRequired, uint8_t simdSize, uint8_t barrierCount,
-                                            uint32_t numSubDevices, uint32_t usedSlmSize, uint32_t workDim, const size_t *localWorkSize, EngineGroupType engineGroupType, bool isEngineInstanced) {
+                                            uint32_t numSubDevices, uint32_t usedSlmSize, uint32_t workDim, const size_t *localWorkSize, EngineGroupType engineGroupType) {
     if (debugManager.flags.OverrideMaxWorkGroupCount.get() != -1) {
         return static_cast<uint32_t>(debugManager.flags.OverrideMaxWorkGroupCount.get());
     }
@@ -54,18 +54,19 @@ uint32_t KernelHelper::getMaxWorkGroupCount(const RootDeviceEnvironment &rootDev
     UNRECOVERABLE_IF(workGroupSize == 0);
     auto numThreadsPerThreadGroup = static_cast<uint32_t>(Math::divideAndRoundUp(workGroupSize, simdSize));
     auto maxWorkGroupsCount = availableThreadCount / numThreadsPerThreadGroup;
-
-    if (barrierCount > 0) {
-        auto maxWorkGroupsCountDueToBarrierUsage = dssCount * (maxBarrierCount / barrierCount);
-        maxWorkGroupsCount = std::min(maxWorkGroupsCount, maxWorkGroupsCountDueToBarrierUsage);
+    if (barrierCount > 0 || usedSlmSize > 0) {
+        helper.alignThreadGroupCountToDssSize(maxWorkGroupsCount, dssCount, availableThreadCount / dssCount, numThreadsPerThreadGroup);
+        if (barrierCount > 0) {
+            auto maxWorkGroupsCountDueToBarrierUsage = dssCount * (maxBarrierCount / barrierCount);
+            maxWorkGroupsCount = std::min(maxWorkGroupsCount, maxWorkGroupsCountDueToBarrierUsage);
+        }
+        if (usedSlmSize > 0) {
+            auto maxWorkGroupsCountDueToSlm = availableSlmSize / usedSlmSize;
+            maxWorkGroupsCount = std::min(maxWorkGroupsCount, maxWorkGroupsCountDueToSlm);
+        }
     }
 
-    if (usedSlmSize > 0) {
-        auto maxWorkGroupsCountDueToSlm = availableSlmSize / usedSlmSize;
-        maxWorkGroupsCount = std::min(maxWorkGroupsCount, maxWorkGroupsCountDueToSlm);
-    }
-
-    maxWorkGroupsCount = helper.adjustMaxWorkGroupCount(maxWorkGroupsCount, engineGroupType, rootDeviceEnvironment, isEngineInstanced);
+    maxWorkGroupsCount = helper.adjustMaxWorkGroupCount(maxWorkGroupsCount, engineGroupType, rootDeviceEnvironment);
 
     if (!helper.singleTileExecImplicitScalingRequired(true)) {
         maxWorkGroupsCount *= numSubDevices;

@@ -18,6 +18,7 @@
 #include "shared/source/os_interface/os_time.h"
 #include "shared/source/utilities/wait_util.h"
 
+#include "level_zero/api/driver_experimental/public/zex_common.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/event/event_imp.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
@@ -26,12 +27,12 @@
 
 namespace L0 {
 template <typename TagSizeT>
-Event *Event::create(const EventDescriptor &eventDescriptor, const ze_event_desc_t *desc, Device *device) {
+Event *Event::create(const EventDescriptor &eventDescriptor, Device *device, ze_result_t &result) {
     auto neoDevice = device->getNEODevice();
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
     auto &hwInfo = neoDevice->getHardwareInfo();
 
-    auto event = std::make_unique<EventImp<TagSizeT>>(desc->index, device, csr->isTbxMode());
+    auto event = std::make_unique<EventImp<TagSizeT>>(eventDescriptor.index, device, csr->isTbxMode());
     UNRECOVERABLE_IF(!event.get());
 
     event->eventPoolAllocation = eventDescriptor.eventPoolAllocation;
@@ -50,15 +51,15 @@ Event *Event::create(const EventDescriptor &eventDescriptor, const ze_event_desc
     }
 
     event->totalEventSize = eventDescriptor.totalEventSize;
-    event->eventPoolOffset = desc->index * event->totalEventSize;
+    event->eventPoolOffset = eventDescriptor.index * event->totalEventSize;
     event->hostAddressFromPool = ptrOffset(baseHostAddress, event->eventPoolOffset);
-    event->signalScope = desc->signal;
-    event->waitScope = desc->wait;
+    event->signalScope = eventDescriptor.signalScope;
+    event->waitScope = eventDescriptor.waitScope;
     event->csrs.push_back(csr);
     event->maxKernelCount = eventDescriptor.maxKernelCount;
     event->maxPacketCount = eventDescriptor.maxPacketsCount;
     event->isFromIpcPool = eventDescriptor.importedIpcPool;
-    if (event->isFromIpcPool || eventDescriptor.ipcPool) {
+    if ((event->isFromIpcPool || eventDescriptor.ipcPool) && (eventDescriptor.counterBasedFlags == 0)) {
         event->disableImplicitCounterBasedMode();
     }
 
@@ -94,33 +95,10 @@ Event *Event::create(const EventDescriptor &eventDescriptor, const ze_event_desc
         event->resetDeviceCompletionData(true);
     }
 
-    auto extendedDesc = reinterpret_cast<const ze_base_desc_t *>(desc->pNext);
+    result = event->enableExtensions(eventDescriptor);
 
-    bool interruptMode = false;
-    bool kmdWaitMode = false;
-
-    if (extendedDesc && (extendedDesc->stype == ZEX_INTEL_STRUCTURE_TYPE_EVENT_SYNC_MODE_EXP_DESC)) {
-        auto eventSyncModeDesc = reinterpret_cast<const zex_intel_event_sync_mode_exp_desc_t *>(extendedDesc);
-
-        interruptMode = (eventSyncModeDesc->syncModeFlags & ZEX_INTEL_EVENT_SYNC_MODE_EXP_FLAG_SIGNAL_INTERRUPT);
-        kmdWaitMode = (eventSyncModeDesc->syncModeFlags & ZEX_INTEL_EVENT_SYNC_MODE_EXP_FLAG_LOW_POWER_WAIT);
-        bool externalInterrupt = (eventSyncModeDesc->syncModeFlags & ZEX_INTEL_EVENT_SYNC_MODE_EXP_FLAG_EXTERNAL_INTERRUPT_WAIT);
-
-        if (externalInterrupt) {
-            event->setExternalInterruptId(eventSyncModeDesc->externalInterruptId);
-            UNRECOVERABLE_IF(eventSyncModeDesc->externalInterruptId > 0 && eventDescriptor.eventPoolAllocation);
-        }
-    }
-
-    interruptMode |= (NEO::debugManager.flags.WaitForUserFenceOnEventHostSynchronize.get() == 1);
-    kmdWaitMode |= (NEO::debugManager.flags.WaitForUserFenceOnEventHostSynchronize.get() == 1);
-
-    if (kmdWaitMode) {
-        event->enableKmdWaitMode();
-    }
-
-    if (interruptMode) {
-        event->enableInterruptMode();
+    if (result != ZE_RESULT_SUCCESS) {
+        return nullptr;
     }
 
     return event.release();
@@ -130,10 +108,14 @@ template <typename TagSizeT>
 Event *Event::create(EventPool *eventPool, const ze_event_desc_t *desc, Device *device) {
     EventDescriptor eventDescriptor = {
         &eventPool->getAllocation(),                  // eventPoolAllocation
+        desc->pNext,                                  // extensions
         eventPool->getEventSize(),                    // totalEventSize
         eventPool->getMaxKernelCount(),               // maxKernelCount
         eventPool->getEventMaxPackets(),              // maxPacketsCount
         eventPool->getCounterBasedFlags(),            // counterBasedFlags
+        desc->index,                                  // index
+        desc->signal,                                 // signalScope
+        desc->wait,                                   // waitScope
         eventPool->isEventPoolTimestampFlagSet(),     // timestampPool
         eventPool->isEventPoolKerneMappedTsFlagSet(), // kerneMappedTsPoolFlag
         eventPool->getImportedIpcPool(),              // importedIpcPool
@@ -144,7 +126,9 @@ Event *Event::create(EventPool *eventPool, const ze_event_desc_t *desc, Device *
         eventDescriptor.eventPoolAllocation = nullptr;
     }
 
-    Event *event = Event::create<TagSizeT>(eventDescriptor, desc, device);
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    Event *event = Event::create<TagSizeT>(eventDescriptor, device, result);
     UNRECOVERABLE_IF(event == nullptr);
     event->setEventPool(eventPool);
     return event;
@@ -310,9 +294,7 @@ void EventImp<TagSizeT>::handleSuccessfulHostSynchronization() {
         csr->getInternalAllocationStorage()->cleanAllocationList(csr->peekTaskCount(), NEO::AllocationUsage::TEMPORARY_ALLOCATION);
     }
 
-    if (inOrderExecInfo) {
-        inOrderExecInfo->releaseNotUsedTempTimestampNodes(false);
-    }
+    releaseTempInOrderTimestampNodes();
 }
 
 template <typename TagSizeT>
@@ -467,11 +449,13 @@ ze_result_t EventImp<TagSizeT>::hostEventSetValueTimestamps(TagSizeT eventVal) {
         }
     }
 
+    auto hostAddresss = getHostAddress();
+
     uint32_t packets = 0;
     for (uint32_t i = 0; i < this->kernelCount; i++) {
         uint32_t packetsToSet = kernelEventCompletionData[i].getPacketsUsed();
         for (uint32_t j = 0; j < packetsToSet; j++, packets++) {
-            if (castToUint64(baseHostAddr) >= castToUint64(ptrOffset(getHostAddress(), totalEventSize))) {
+            if (castToUint64(baseHostAddr) >= castToUint64(ptrOffset(hostAddresss, totalEventSize))) {
                 break;
             }
             copyDataToEventAlloc(ptrOffset(baseHostAddr, contextStartOffset), baseGpuAddr + contextStartOffset, sizeof(TagSizeT), timestampStart);
@@ -560,10 +544,12 @@ ze_result_t EventImp<TagSizeT>::hostEventSetValue(TagSizeT eventVal) {
 
     size_t totalSizeToCopy = 0;
 
+    auto hostAddresss = getHostAddress();
+
     for (uint32_t i = 0; i < kernelCount; i++) {
         uint32_t packetsToSet = kernelEventCompletionData[i].getPacketsUsed();
         for (uint32_t j = 0; j < packetsToSet; j++, packets++) {
-            if (castToUint64(packetHostAddr) >= castToUint64(ptrOffset(getHostAddress(), totalEventSize))) {
+            if (castToUint64(packetHostAddr) >= castToUint64(ptrOffset(hostAddresss, totalEventSize))) {
                 break;
             }
 
@@ -626,7 +612,7 @@ ze_result_t EventImp<TagSizeT>::waitForUserFence(uint64_t timeout) {
         hostAlloc = inOrderExecInfo->isHostStorageDuplicated() ? inOrderExecInfo->getHostCounterAllocation() : inOrderExecInfo->getDeviceCounterAllocation();
     }
 
-    if (!csrs[0]->waitUserFence(getInOrderExecSignalValueWithSubmissionCounter(), waitAddress, timeout, isKmdWaitModeEnabled(), this->externalInterruptId, hostAlloc)) {
+    if (!csrs[0]->waitUserFence(getInOrderExecSignalValueWithSubmissionCounter(), waitAddress, timeout, true, this->externalInterruptId, hostAlloc)) {
         return ZE_RESULT_NOT_READY;
     }
 
@@ -653,8 +639,11 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
 
     waitStartTime = std::chrono::high_resolution_clock::now();
     lastHangCheckTime = waitStartTime;
+
+    const bool fenceWait = isKmdWaitModeEnabled() && isCounterBased() && !this->tbxMode;
+
     do {
-        if (isKmdWaitModeEnabled() && isCounterBased()) {
+        if (fenceWait) {
             ret = waitForUserFence(timeout);
         } else {
             ret = queryStatus();

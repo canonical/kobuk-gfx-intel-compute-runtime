@@ -104,11 +104,9 @@ class ProductHelper {
     virtual std::optional<aub_stream::ProductFamily> getAubStreamProductFamily() const = 0;
     virtual bool isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool overrideGfxPartitionLayoutForWsl() const = 0;
-    virtual std::string getDeviceMemoryName() const = 0;
     virtual bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const = 0;
     virtual bool allowCompression(const HardwareInfo &hwInfo) const = 0;
     virtual LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isAllocationSizeAdjustmentRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isNewResidencyModelSupported() const = 0;
     virtual bool isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const = 0;
     virtual bool isDirectSubmissionConstantCacheInvalidationNeeded(const HardwareInfo &hwInfo) const = 0;
@@ -127,7 +125,6 @@ class ProductHelper {
     virtual bool is3DPipelineSelectWARequired() const = 0;
     virtual bool isStorageInfoAdjustmentRequired() const = 0;
     virtual bool isBlitterForImagesSupported() const = 0;
-    virtual bool isFlatRingBufferSupported() const = 0;
     virtual bool isPageFaultSupported() const = 0;
     virtual bool isKmdMigrationSupported() const = 0;
     virtual bool isDisableScratchPagesSupported() const = 0;
@@ -147,7 +144,6 @@ class ProductHelper {
     virtual bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const = 0;
-    virtual bool isAdjustProgrammableIdPreferredSlmSizeRequired(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const = 0;
     virtual size_t getSvmCpuAlignment() const = 0;
     virtual bool isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const = 0;
@@ -178,7 +174,6 @@ class ProductHelper {
     virtual bool isPlatformQuerySupported() const = 0;
     virtual bool isNonBlockingGpuSubmissionSupported() const = 0;
     virtual bool isResolveDependenciesByPipeControlsSupported(const HardwareInfo &hwInfo, bool isOOQ, TaskCountType queueTaskCount, const CommandStreamReceiver &queueCsr) const = 0;
-    virtual bool isMidThreadPreemptionDisallowedForRayTracingKernels() const = 0;
     virtual bool isBufferPoolAllocatorSupported() const = 0;
     virtual bool isUsmPoolAllocatorSupported() const = 0;
     virtual bool isDeviceUsmAllocationReuseSupported() const = 0;

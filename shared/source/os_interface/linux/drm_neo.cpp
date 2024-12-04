@@ -16,7 +16,6 @@
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/basic_math.h"
-#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/gfx_core_helper.h"
@@ -269,7 +268,7 @@ bool Drm::checkResetStatus(OsContext &osContext) {
         UNRECOVERABLE_IF(retVal != 0);
         if (checkToDisableScratchPage() && ioctlHelper->validPageFault(fault.flags)) {
             bool banned = ((status & ioctlHelper->getStatusForResetStats(true)) != 0);
-            IoFunctions::fprintf(stderr, "FATAL: Unexpected page fault from GPU at 0x%llx, ctx_id: %u (%s) type: %d (%s), level: %d (%s), access: %d (%s), banned: %d, aborting.\n",
+            IoFunctions::fprintf(stderr, "Segmentation fault from GPU at 0x%llx, ctx_id: %u (%s) type: %d (%s), level: %d (%s), access: %d (%s), banned: %d, aborting.\n",
                                  fault.addr,
                                  resetStats.contextId,
                                  EngineHelpers::engineTypeToString(osContext.getEngineType()).c_str(),
@@ -277,7 +276,7 @@ bool Drm::checkResetStatus(OsContext &osContext) {
                                  fault.level, GpuPageFaultHelpers::faultLevelToString(static_cast<FaultLevel>(fault.level)).c_str(),
                                  fault.access, GpuPageFaultHelpers::faultAccessToString(static_cast<FaultAccess>(fault.access)).c_str(),
                                  banned);
-            IoFunctions::fprintf(stdout, "FATAL: Unexpected page fault from GPU at 0x%llx, ctx_id: %u (%s) type: %d (%s), level: %d (%s), access: %d (%s), banned: %d, aborting.\n",
+            IoFunctions::fprintf(stdout, "Segmentation fault from GPU at 0x%llx, ctx_id: %u (%s) type: %d (%s), level: %d (%s), access: %d (%s), banned: %d, aborting.\n",
                                  fault.addr,
                                  resetStats.contextId,
                                  EngineHelpers::engineTypeToString(osContext.getEngineType()).c_str(),
@@ -495,8 +494,16 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
     if (systemInfo) {
         systemInfo->checkSysInfoMismatch(hwInfo);
         setupSystemInfo(hwInfo, systemInfo.get());
-        auto &compilerProductHelper = rootDeviceEnvironment.getHelper<CompilerProductHelper>();
-        compilerProductHelper.applyDeviceBlobFixesOnHwInfo(*hwInfo);
+
+        auto numRtStacks = systemInfo->getSyncNumRtStacksPerDss();
+        if (numRtStacks > 0) {
+            hwInfo->capabilityTable.syncNumRTStacksPerDSS = numRtStacks;
+        }
+
+        auto numRegions = systemInfo->getNumRegions();
+        if (numRegions > 0) {
+            hwInfo->featureTable.regionCount = numRegions;
+        }
     }
     if (!queryMemoryInfo()) {
         setPerContextVMRequired(true);
@@ -1009,10 +1016,6 @@ void Drm::setupSystemInfo(HardwareInfo *hwInfo, SystemInfo *sysInfo) {
     gtSysInfo->MaxDualSubSlicesSupported = sysInfo->getMaxDualSubSlicesSupported();
     gtSysInfo->CsrSizeInMb = sysInfo->getCsrSizeInMb();
     gtSysInfo->SLMSizeInKb = sysInfo->getSlmSizePerDss();
-
-    if (!hwInfo->capabilityTable.slmSize) {
-        hwInfo->capabilityTable.slmSize = gtSysInfo->SLMSizeInKb;
-    }
 }
 
 void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
@@ -1169,7 +1172,7 @@ void Drm::configureGpuFaultCheckThreshold() {
     }
 }
 
-unsigned int Drm::bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, aub_stream::EngineType engineType, bool engineInstancedDevice) {
+unsigned int Drm::bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, aub_stream::EngineType engineType) {
     auto engineInfo = this->engineInfo.get();
 
     auto retVal = static_cast<unsigned int>(ioctlHelper->getDrmParamValue(DrmEngineMapper::engineNodeMap(engineType)));
@@ -1182,7 +1185,7 @@ unsigned int Drm::bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, au
         return retVal;
     }
 
-    bool useVirtualEnginesForCcs = !engineInstancedDevice;
+    bool useVirtualEnginesForCcs = true;
     if (debugManager.flags.UseDrmVirtualEnginesForCcs.get() != -1) {
         useVirtualEnginesForCcs = !!debugManager.flags.UseDrmVirtualEnginesForCcs.get();
     }
@@ -1435,10 +1438,10 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
         bool readOnlyResource = bo->isReadOnlyGpuResource();
 
         if (drm->useVMBindImmediate()) {
-            bindMakeResident = bo->isExplicitResidencyRequired() && bo->isLockable();
+            bindMakeResident = bo->isExplicitResidencyRequired();
             bindImmediate = true;
         }
-        bool bindLock = bo->isExplicitLockedMemoryRequired() && bo->isLockable();
+        bool bindLock = bo->isExplicitLockedMemoryRequired();
         flags |= ioctlHelper->getFlagsForVmBind(bindCapture, bindImmediate, bindMakeResident, bindLock, readOnlyResource);
     }
 
@@ -1532,14 +1535,8 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
 int Drm::bindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObject *bo) {
     auto ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);
     if (ret != 0) {
-        errno = 0;
         static_cast<DrmMemoryOperationsHandlerBind *>(this->rootDeviceEnvironment.memoryOperationsInterface.get())->evictUnusedAllocations(false, false);
         ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);
-        if ((getErrno() == ENOMEM) && pageFaultSupported) {
-            DEBUG_BREAK_IF(true);
-            bo->setIsLockable(false);
-            ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);
-        }
     }
     return ret;
 }

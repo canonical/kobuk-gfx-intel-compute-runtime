@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2024 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
+#include "shared/source/utilities/staging_buffer_manager.h"
 
 #include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/helpers/hardware_commands_helper.h"
@@ -61,6 +62,20 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteImage(
 
     auto bcsSplit = this->isSplitEnqueueBlitNeeded(csrSelectionArgs.direction, getTotalSizeFromRectRegion(region), csr);
 
+    if (!mapAllocation) {
+        InternalMemoryType memoryType = InternalMemoryType::notSpecified;
+        bool isCpuCopyAllowed = false;
+        cl_int retVal = getContext().tryGetExistingHostPtrAllocation(srcPtr, hostPtrSize, device->getRootDeviceIndex(), mapAllocation, memoryType, isCpuCopyAllowed);
+        if (retVal != CL_SUCCESS) {
+            return retVal;
+        }
+
+        if (mapAllocation) {
+            mapAllocation->setAubWritable(true, GraphicsAllocation::defaultBank);
+            mapAllocation->setTbxWritable(true, GraphicsAllocation::defaultBank);
+        }
+    }
+
     if (mapAllocation) {
         surfaces[1] = &mapSurface;
         mapSurface.setGraphicsAllocation(mapAllocation);
@@ -100,10 +115,11 @@ cl_int CommandQueueHw<GfxFamily>::enqueueWriteImage(
     dc.bcsSplit = bcsSplit;
     dc.direction = csrSelectionArgs.direction;
 
-    auto eBuiltInOps = EBuiltInOps::copyBufferToImage3d;
+    auto eBuiltInOps = EBuiltInOps::adjustImageBuiltinType<EBuiltInOps::copyBufferToImage3d>(this->heaplessModeEnabled);
     MultiDispatchInfo dispatchInfo(dc);
 
     const auto dispatchResult = dispatchBcsOrGpgpuEnqueue<CL_COMMAND_WRITE_IMAGE>(dispatchInfo, surfaces, eBuiltInOps, numEventsInWaitList, eventWaitList, event, blockingWrite == CL_TRUE, csr);
+
     if (dispatchResult != CL_SUCCESS) {
         return dispatchResult;
     }

@@ -9,8 +9,8 @@
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/array_count.h"
-#include "shared/source/helpers/driver_model_type.h"
 #include "shared/source/helpers/gfx_core_helper.h"
+#include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/memory_manager/allocations_list.h"
 #include "shared/source/memory_manager/gfx_partition.h"
 #include "shared/source/memory_manager/unified_memory_pooling.h"
@@ -18,7 +18,6 @@
 #include "shared/source/os_interface/driver_info.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_interface.h"
-#include "shared/source/os_interface/product_helper_hw.h"
 #include "shared/source/release_helper/release_helper.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
@@ -38,6 +37,7 @@
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
+
 using namespace NEO;
 extern ApiSpecificConfig::ApiType apiTypeForUlts;
 namespace NEO {
@@ -241,6 +241,20 @@ TEST_F(DeviceTest, whenAllocateRTDispatchGlobalsIsCalledThenRTDispatchGlobalsIsA
     EXPECT_NE(nullptr, pDevice->getRTDispatchGlobals(3));
 }
 
+TEST_F(DeviceTest, whenAllocateRTDispatchGlobalsIsCalledThenStackSizePerRayIsSetCorrectly) {
+    pDevice->initializeRayTracing(5);
+    pDevice->allocateRTDispatchGlobals(3);
+    EXPECT_NE(nullptr, pDevice->getRTDispatchGlobals(3));
+    struct RTDispatchGlobals dispatchGlobals = *reinterpret_cast<struct RTDispatchGlobals *>(pDevice->getRTDispatchGlobals(3)->rtDispatchGlobalsArray->getUnderlyingBuffer());
+
+    auto releaseHelper = getReleaseHelper();
+    if (releaseHelper) {
+        EXPECT_EQ(dispatchGlobals.stackSizePerRay, releaseHelper->getStackSizePerRay());
+    } else {
+        EXPECT_EQ(dispatchGlobals.stackSizePerRay, 0u);
+    }
+}
+
 TEST_F(DeviceTest, givenNot48bResourceForRtWhenAllocateRTDispatchGlobalsIsCalledThenRTDispatchGlobalsIsAllocatedWithout48bResourceFlag) {
     auto mockProductHelper = std::make_unique<MockProductHelper>();
     mockProductHelper->is48bResourceNeededForRayTracingResult = false;
@@ -432,10 +446,11 @@ TEST_F(DeviceGetCapsTest, givenForcePreemptionModeDebugVariableWhenCreateDeviceT
 }
 
 TEST_F(DeviceGetCapsTest, givenDeviceWithMidThreadPreemptionWhenDeviceIsCreatedThenSipKernelIsNotCreated) {
+    VariableBackup<bool> mockSipBackup(&MockSipData::useMockSip, false);
     DebugManagerStateRestore dbgRestorer;
     {
         auto builtIns = new MockBuiltins();
-        ASSERT_FALSE(MockSipData::called); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+        MockSipData::called = false;
 
         debugManager.flags.ForcePreemptionMode.set((int32_t)PreemptionMode::MidThread);
 
@@ -522,6 +537,8 @@ TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorMemoryMana
             return MemoryConstants::pageSize64k;
         }
         void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override{};
+        AddressRange reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) override { return {}; }
+        void freeCpuAddress(AddressRange addressRange) override{};
         GraphicsAllocation *createGraphicsAllocation(OsHandleStorage &handleStorage, const AllocationData &allocationData) override { return nullptr; };
         GraphicsAllocation *allocateGraphicsMemoryForNonSvmHostPtr(const AllocationData &allocationData) override { return nullptr; };
         GraphicsAllocation *allocateGraphicsMemoryWithAlignment(const AllocationData &allocationData) override { return nullptr; };

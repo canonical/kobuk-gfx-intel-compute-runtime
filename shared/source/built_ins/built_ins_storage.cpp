@@ -46,22 +46,30 @@ const char *getBuiltinAsString(EBuiltInOps::Type builtin) {
     case EBuiltInOps::copyBufferToImage3d:
         return "copy_buffer_to_image3d.builtin_kernel";
     case EBuiltInOps::copyBufferToImage3dStateless:
+    case EBuiltInOps::copyBufferToImage3dHeapless:
         return "copy_buffer_to_image3d_stateless.builtin_kernel";
     case EBuiltInOps::copyImage3dToBuffer:
         return "copy_image3d_to_buffer.builtin_kernel";
     case EBuiltInOps::copyImage3dToBufferStateless:
+    case EBuiltInOps::copyImage3dToBufferHeapless:
         return "copy_image3d_to_buffer_stateless.builtin_kernel";
     case EBuiltInOps::copyImageToImage1d:
+    case EBuiltInOps::copyImageToImage1dHeapless:
         return "copy_image_to_image1d.builtin_kernel";
     case EBuiltInOps::copyImageToImage2d:
+    case EBuiltInOps::copyImageToImage2dHeapless:
         return "copy_image_to_image2d.builtin_kernel";
     case EBuiltInOps::copyImageToImage3d:
+    case EBuiltInOps::copyImageToImage3dHeapless:
         return "copy_image_to_image3d.builtin_kernel";
     case EBuiltInOps::fillImage1d:
+    case EBuiltInOps::fillImage1dHeapless:
         return "fill_image1d.builtin_kernel";
     case EBuiltInOps::fillImage2d:
+    case EBuiltInOps::fillImage2dHeapless:
         return "fill_image2d.builtin_kernel";
     case EBuiltInOps::fillImage3d:
+    case EBuiltInOps::fillImage3dHeapless:
         return "fill_image3d.builtin_kernel";
     case EBuiltInOps::queryKernelTimestamps:
         return "copy_kernel_timestamps.builtin_kernel";
@@ -92,29 +100,27 @@ StackVec<std::string, 3> getBuiltinResourceNames(EBuiltInOps::Type builtin, Buil
     const auto deviceIp = createDeviceIdFilenameComponent(hwInfo.ipVersion);
     const auto builtinFilename = getBuiltinAsString(builtin);
     const auto extension = BuiltinCode::getExtension(type);
-    auto getAddressingModePrefix = [type, &productHelper, &device, builtin]() {
-        if (type == BuiltinCode::ECodeType::binary) {
-            const bool requiresStatelessAddressing = (false == productHelper.isStatefulAddressingModeSupported());
-            const bool builtInUsesStatelessAddressing = EBuiltInOps::isStateless(builtin);
-            const bool heaplessEnabled = EBuiltInOps::isHeapless(builtin);
-            if (builtInUsesStatelessAddressing || requiresStatelessAddressing) {
-                return heaplessEnabled ? "stateless_heapless_" : "stateless_";
-            } else if (ApiSpecificConfig::getBindlessMode(device)) {
-                return "bindless_";
-            } else {
-                return "bindful_";
-            }
-        }
-        return "";
-    };
-    const auto addressingModePrefix = getAddressingModePrefix();
 
-    auto createBuiltinResourceName = [](ConstStringRef deviceIpPath, ConstStringRef addressingModePrefix, ConstStringRef builtinFilename, ConstStringRef extension) {
+    std::string_view addressingModePrefix = "";
+    if (type == BuiltinCode::ECodeType::binary) {
+        const bool requiresStatelessAddressing = (false == productHelper.isStatefulAddressingModeSupported());
+        const bool builtInUsesStatelessAddressing = EBuiltInOps::isStateless(builtin);
+        const bool heaplessEnabled = EBuiltInOps::isHeapless(builtin);
+        if (builtInUsesStatelessAddressing || requiresStatelessAddressing) {
+            addressingModePrefix = heaplessEnabled ? "stateless_heapless_" : "stateless_";
+        } else if (ApiSpecificConfig::getBindlessMode(device)) {
+            addressingModePrefix = "bindless_";
+        } else {
+            addressingModePrefix = "bindful_";
+        }
+    }
+
+    auto createBuiltinResourceName = [](ConstStringRef deviceIpPath, std::string_view addressingModePrefix, std::string_view builtinFilename, std::string_view extension) {
         std::ostringstream outResourceName;
         if (false == deviceIpPath.empty()) {
             outResourceName << deviceIpPath.str() << "_";
         }
-        outResourceName << addressingModePrefix.str() << builtinFilename.str() << extension.str();
+        outResourceName << addressingModePrefix << builtinFilename << extension;
         return outResourceName.str();
     };
     StackVec<std::string, 3> resourcesToLookup = {};

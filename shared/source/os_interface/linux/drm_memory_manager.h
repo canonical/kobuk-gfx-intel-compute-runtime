@@ -9,8 +9,8 @@
 #include "shared/source/command_stream/submission_status.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
+#include "shared/source/os_interface/os_memory.h"
 
-#include <limits>
 #include <map>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -77,6 +77,8 @@ class DrmMemoryManager : public MemoryManager {
     AddressRange reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) override;
     size_t selectAlignmentAndHeap(size_t size, HeapIndex *heap) override;
     void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) override;
+    AddressRange reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) override;
+    void freeCpuAddress(AddressRange addressRange) override;
     MOCKABLE_VIRTUAL BufferObject *createBufferObjectInMemoryRegion(uint32_t rootDeviceIndex, Gmm *gmm, AllocationType allocationType, uint64_t gpuAddress, size_t size,
                                                                     DeviceBitfield memoryBanks, size_t maxOsContextCount, int32_t pairHandle, bool isSystemMemoryPool, bool isUsmHostAllocation);
 
@@ -91,7 +93,7 @@ class DrmMemoryManager : public MemoryManager {
     std::vector<GraphicsAllocation *> &getLocalMemAllocs(uint32_t rootDeviceIndex);
     AllocationStatus registerSysMemAlloc(GraphicsAllocation *allocation) override;
     AllocationStatus registerLocalMemAlloc(GraphicsAllocation *allocation, uint32_t rootDeviceIndex) override;
-    void unregisterAllocation(GraphicsAllocation *allocation);
+    MOCKABLE_VIRTUAL void unregisterAllocation(GraphicsAllocation *allocation);
 
     static std::unique_ptr<MemoryManager> create(ExecutionEnvironment &executionEnvironment);
 
@@ -108,8 +110,8 @@ class DrmMemoryManager : public MemoryManager {
     bool allocateInterrupt(uint32_t &outHandle, uint32_t rootDeviceIndex) override;
     bool releaseInterrupt(uint32_t outHandle, uint32_t rootDeviceIndex) override;
 
-    bool createMediaContext(uint32_t rootDeviceIndex, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, uint64_t &outDoorbell) override;
-    bool releaseMediaContext(uint32_t rootDeviceIndex, uint64_t doorbellHandle) override;
+    bool createMediaContext(uint32_t rootDeviceIndex, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, void *&outDoorbell) override;
+    bool releaseMediaContext(uint32_t rootDeviceIndex, void *doorbellHandle) override;
 
     uint32_t getNumMediaDecoders(uint32_t rootDeviceIndex) const override;
     uint32_t getNumMediaEncoders(uint32_t rootDeviceIndex) const override;
@@ -117,6 +119,8 @@ class DrmMemoryManager : public MemoryManager {
     bool isCompressionSupportedForShareable(bool isShareable) override;
     bool usmCompressionSupported(Device *device) override;
     MOCKABLE_VIRTUAL SubmissionStatus emitPinningRequestForBoContainer(BufferObject **bo, uint32_t boCount, uint32_t rootDeviceIndex) const;
+
+    void getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) override;
 
   protected:
     void registerSharedBoHandleAllocation(DrmAllocation *drmAllocation);
@@ -186,6 +190,7 @@ class DrmMemoryManager : public MemoryManager {
     bool forcePinEnabled = false;
     const bool validateHostPtrMemory;
     std::unique_ptr<DrmGemCloseWorker> gemCloseWorker;
+    std::unique_ptr<OSMemory> osMemory;
     decltype(&mmap) mmapFunction = mmap;
     decltype(&munmap) munmapFunction = munmap;
     decltype(&close) closeFunction = close;

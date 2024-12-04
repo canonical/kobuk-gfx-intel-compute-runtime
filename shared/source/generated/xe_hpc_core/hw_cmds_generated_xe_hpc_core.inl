@@ -5360,9 +5360,11 @@ typedef struct tagINTERFACE_DESCRIPTOR_DATA {
         return static_cast<DENORM_MODE>(TheStructure.Common.DenormMode);
     }
     inline void setThreadPreemptionDisable(const THREAD_PREEMPTION_DISABLE value) {
+        UNRECOVERABLE_IF(true); // patched
         TheStructure.Common.ThreadPreemptionDisable = value;
     }
     inline THREAD_PREEMPTION_DISABLE getThreadPreemptionDisable() const {
+        UNRECOVERABLE_IF(true); // patched
         return static_cast<THREAD_PREEMPTION_DISABLE>(TheStructure.Common.ThreadPreemptionDisable);
     }
     inline void setBindingTableEntryCount(const uint32_t value) {
@@ -5426,11 +5428,6 @@ typedef struct tagINTERFACE_DESCRIPTOR_DATA {
     }
 } INTERFACE_DESCRIPTOR_DATA;
 STATIC_ASSERT(32 == sizeof(INTERFACE_DESCRIPTOR_DATA));
-
-typedef struct tagINLINE_DATA {
-    uint32_t RawData[8];
-} INLINE_DATA;
-STATIC_ASSERT(32 == sizeof(INLINE_DATA));
 
 typedef struct tagCOMPUTE_WALKER {
     union tagTheStructure {
@@ -5505,7 +5502,7 @@ typedef struct tagCOMPUTE_WALKER {
             // DWORD 26
             POSTSYNC_DATA PostSync;
             // DWORD 31
-            INLINE_DATA InlineData;
+            uint32_t InlineData[8];
         } Common;
         uint32_t RawData[39];
     } TheStructure;

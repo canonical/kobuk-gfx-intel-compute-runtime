@@ -796,12 +796,12 @@ TEST_F(DeviceCreateCommandQueueTest, givenLowPriorityDescWhenCreateCommandQueueI
 
 TEST_F(DeviceCreateCommandQueueTest, givenCopyOrdinalWhenCreateCommandQueueWithLowPriorityDescIsCalledThenCopyCsrIsAssigned) {
     auto copyCsr = std::unique_ptr<NEO::CommandStreamReceiver>(neoDevice->createCommandStreamReceiver());
-    EngineDescriptor copyEngineDescriptor({aub_stream::ENGINE_BCS, EngineUsage::regular}, neoDevice->getDeviceBitfield(), neoDevice->getPreemptionMode(), false, false);
+    EngineDescriptor copyEngineDescriptor({aub_stream::ENGINE_BCS, EngineUsage::regular}, neoDevice->getDeviceBitfield(), neoDevice->getPreemptionMode(), false);
     auto copyOsContext = neoDevice->getExecutionEnvironment()->memoryManager->createAndRegisterOsContext(copyCsr.get(), copyEngineDescriptor);
     copyCsr->setupContext(*copyOsContext);
 
     auto computeCsr = std::unique_ptr<NEO::CommandStreamReceiver>(neoDevice->createCommandStreamReceiver());
-    EngineDescriptor computeEngineDescriptor({aub_stream::ENGINE_CCS, EngineUsage::lowPriority}, neoDevice->getDeviceBitfield(), neoDevice->getPreemptionMode(), false, false);
+    EngineDescriptor computeEngineDescriptor({aub_stream::ENGINE_CCS, EngineUsage::lowPriority}, neoDevice->getDeviceBitfield(), neoDevice->getPreemptionMode(), false);
     auto computeOsContext = neoDevice->getExecutionEnvironment()->memoryManager->createAndRegisterOsContext(computeCsr.get(), computeEngineDescriptor);
     computeCsr->setupContext(*computeOsContext);
 
@@ -2257,6 +2257,40 @@ TEST_F(DeviceCreateCommandQueueTest, givenDeviceWhenCreateCommandQueueForValidOr
             commandQueue->destroy();
         }
     }
+}
+
+TEST_F(DeviceCreateCommandQueueTest, givenMakeEachEnqueueBlockingSetToOneWhenIsSynchronousModeIsCalledThenReturnsTrue) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.MakeEachEnqueueBlocking.set(1);
+
+    ze_command_queue_desc_t desc{};
+    desc.ordinal = 0u;
+    desc.index = 0u;
+    desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+
+    ze_command_queue_handle_t commandQueueHandle = {};
+
+    device->createCommandQueue(&desc, &commandQueueHandle);
+    auto commandQueueImp = static_cast<CommandQueueImp *>(L0::CommandQueue::fromHandle(commandQueueHandle));
+    EXPECT_TRUE(commandQueueImp->isSynchronousMode());
+    commandQueueImp->destroy();
+}
+
+TEST_F(DeviceCreateCommandQueueTest, givenMakeEachEnqueueBlockingSetToZeroWhenIsSynchronousModeIsCalledThenReturnsFalse) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.MakeEachEnqueueBlocking.set(0);
+
+    ze_command_queue_desc_t desc{};
+    desc.ordinal = 0u;
+    desc.index = 0u;
+    desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+
+    ze_command_queue_handle_t commandQueueHandle = {};
+
+    device->createCommandQueue(&desc, &commandQueueHandle);
+    auto commandQueueImp = static_cast<CommandQueueImp *>(L0::CommandQueue::fromHandle(commandQueueHandle));
+    EXPECT_FALSE(commandQueueImp->isSynchronousMode());
+    commandQueueImp->destroy();
 }
 
 } // namespace ult

@@ -67,12 +67,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     LinearStream *listCmdBufferStream = container.getCommandStream();
 
-    auto threadDims = static_cast<const uint32_t *>(args.threadGroupDimensions);
-    const Vec3<size_t> threadStartVec{0, 0, 0};
-    Vec3<size_t> threadDimsVec{0, 0, 0};
-    if (!args.isIndirect) {
-        threadDimsVec = {threadDims[0], threadDims[1], threadDims[2]};
-    }
+    auto threadGroupDims = static_cast<const uint32_t *>(args.threadGroupDimensions);
 
     DefaultWalkerType cmd = Family::cmdInitGpgpuWalker;
     auto idd = Family::cmdInitInterfaceDescriptorData;
@@ -267,11 +262,11 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     EncodeDispatchKernel<Family>::encodeThreadData(cmd,
                                                    nullptr,
-                                                   threadDims,
+                                                   threadGroupDims,
                                                    args.dispatchInterface->getGroupSize(),
                                                    kernelDescriptor.kernelAttributes.simdSize,
                                                    kernelDescriptor.kernelAttributes.numLocalIdChannels,
-                                                   args.dispatchInterface->getNumThreadsPerThreadGroup(),
+                                                   numThreadsPerThreadGroup,
                                                    args.dispatchInterface->getThreadExecutionMask(),
                                                    true,
                                                    false,
@@ -282,7 +277,18 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     cmd.setPredicateEnable(args.isPredicate);
 
     auto threadGroupCount = cmd.getThreadGroupIdXDimension() * cmd.getThreadGroupIdYDimension() * cmd.getThreadGroupIdZDimension();
-    EncodeDispatchKernel<Family>::adjustInterfaceDescriptorData(idd, *args.device, hwInfo, threadGroupCount, kernelDescriptor.kernelAttributes.numGrfRequired, cmd);
+    EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(idd, *args.device, hwInfo, threadGroupDims, threadGroupCount, kernelDescriptor.kernelAttributes.numGrfRequired, numThreadsPerThreadGroup, cmd);
+
+    EncodeWalkerArgs walkerArgs{
+        kernelDescriptor,                                // kernelDescriptor
+        KernelExecutionType::defaultType,                // kernelExecutionType
+        args.requiredDispatchWalkOrder,                  // requiredDispatchWalkOrder
+        args.additionalSizeParam,                        // additionalSizeParam
+        args.device->getDeviceInfo().maxFrontEndThreads, // maxFrontEndThreads
+        args.requiresSystemMemoryFence()};               // requiredSystemFence
+    EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(rootDeviceEnvironment, cmd, walkerArgs);
+    EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(cmd, walkerArgs);
+    EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(cmd, walkerArgs);
 
     memcpy_s(iddPtr, sizeof(idd), &idd, sizeof(idd));
 
@@ -410,8 +416,16 @@ template <typename WalkerType>
 inline void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const RootDeviceEnvironment &rootDeviceEnvironment, WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
 
 template <typename Family>
+template <typename WalkerType>
+inline void EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
+
+template <typename Family>
+template <typename WalkerType>
+inline void EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
+
+template <typename Family>
 template <typename InterfaceDescriptorType>
-void EncodeDispatchKernel<Family>::appendAdditionalIDDFields(InterfaceDescriptorType *pInterfaceDescriptor, const RootDeviceEnvironment &rootDeviceEnvironment, const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy) {}
+void EncodeDispatchKernel<Family>::setupPreferredSlmSize(InterfaceDescriptorType *pInterfaceDescriptor, const RootDeviceEnvironment &rootDeviceEnvironment, const uint32_t threadsPerThreadGroup, uint32_t slmTotalSize, SlmPolicy slmPolicy) {}
 
 template <typename Family>
 inline bool EncodeDispatchKernel<Family>::isDshNeeded(const DeviceInfo &deviceInfo) {
@@ -628,6 +642,18 @@ void EncodeBatchBufferStartOrEnd<Family>::appendBatchBufferStart(MI_BATCH_BUFFER
 template <typename Family>
 void InOrderPatchCommandHelpers::PatchCmd<Family>::patchComputeWalker(uint64_t appendCounterValue) {
     UNRECOVERABLE_IF(true);
+}
+
+template <typename Family>
+template <typename WalkerType, typename InterfaceDescriptorType>
+void EncodeDispatchKernel<Family>::overrideDefaultValues(WalkerType &walkerCmd, InterfaceDescriptorType &interfaceDescriptor) {
+}
+
+template <typename Family>
+template <typename WalkerType, typename InterfaceDescriptorType>
+void EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo,
+                                                             const uint32_t *threadGroupDimensions, const uint32_t threadGroupCount, const uint32_t grfCount, const uint32_t threadsPerThreadGroup,
+                                                             WalkerType &walkerCmd) {
 }
 
 } // namespace NEO

@@ -78,7 +78,6 @@ class CompilerProductHelper {
     virtual uint32_t matchRevisionIdWithProductConfig(HardwareIpVersion ipVersion, uint32_t revisionID) const = 0;
     virtual std::string getDeviceExtensions(const HardwareInfo &hwInfo, const ReleaseHelper *releaseHelper) const = 0;
     virtual StackVec<OclCVersion, 5> getDeviceOpenCLCVersions(const HardwareInfo &hwInfo, OclCVersion max) const = 0;
-    virtual void applyDeviceBlobFixesOnHwInfo(HardwareInfo &hwInfo) const = 0;
     virtual void adjustHwInfoForIgc(HardwareInfo &hwInfo) const = 0;
     virtual bool isHeaplessModeEnabled() const = 0;
     virtual bool isHeaplessStateInitEnabled(bool heaplessModeEnabled) const = 0;
@@ -87,6 +86,8 @@ class CompilerProductHelper {
     virtual void getKernelFp64AtomicCapabilities(uint32_t &fp64Caps) const = 0;
     virtual void getKernelCapabilitiesExtra(const ReleaseHelper *releaseHelper, uint32_t &extraCaps) const = 0;
     virtual bool isBindlessAddressingDisabled(const ReleaseHelper *releaseHelper) const = 0;
+    virtual const char *getCustomIgcLibraryName() const = 0;
+    virtual const char *getFinalizerLibraryName() const = 0;
 
     virtual ~CompilerProductHelper() = default;
     uint32_t getHwIpVersion(const HardwareInfo &hwInfo) const;
@@ -130,7 +131,6 @@ class CompilerProductHelperHw : public CompilerProductHelper {
     uint32_t matchRevisionIdWithProductConfig(HardwareIpVersion ipVersion, uint32_t revisionID) const override;
     std::string getDeviceExtensions(const HardwareInfo &hwInfo, const ReleaseHelper *releaseHelper) const override;
     StackVec<OclCVersion, 5> getDeviceOpenCLCVersions(const HardwareInfo &hwInfo, OclCVersion max) const override;
-    void applyDeviceBlobFixesOnHwInfo(HardwareInfo &hwInfo) const override;
     void adjustHwInfoForIgc(HardwareInfo &hwInfo) const override;
     bool isHeaplessModeEnabled() const override;
     bool isHeaplessStateInitEnabled(bool heaplessModeEnabled) const override;
@@ -139,6 +139,8 @@ class CompilerProductHelperHw : public CompilerProductHelper {
     void getKernelFp64AtomicCapabilities(uint32_t &fp64Caps) const override;
     void getKernelCapabilitiesExtra(const ReleaseHelper *releaseHelper, uint32_t &extraCaps) const override;
     bool isBindlessAddressingDisabled(const ReleaseHelper *releaseHelper) const override;
+    const char *getCustomIgcLibraryName() const override;
+    const char *getFinalizerLibraryName() const override;
 
     ~CompilerProductHelperHw() override = default;
 

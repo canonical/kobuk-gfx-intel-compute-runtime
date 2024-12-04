@@ -573,7 +573,6 @@ HWTEST2_F(CommandEncodeStatesTest, givenDispatchInterfaceWhenNumRequiredGrfIsNot
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInlineDataRequiredWhenEncodingWalkerThenEmitInlineParameterIsSet) {
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-    using InlineData = typename FamilyType::INLINE_DATA;
     uint32_t dims[] = {1, 1, 1};
     std::unique_ptr<MockDispatchKernelEncoder> dispatchInterface(new MockDispatchKernelEncoder());
 
@@ -591,7 +590,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInlineDataRequiredWhe
     auto cmd = genCmdCast<DefaultWalkerType *>(*itor);
     EXPECT_EQ(1u, cmd->getEmitInlineParameter());
 
-    const uint32_t inlineDataSize = sizeof(InlineData);
+    constexpr auto inlineDataSize = DefaultWalkerType::getInlineDataSize();
     size_t expectedSizeIOH = alignUp(dispatchInterface->getCrossThreadDataSize() +
                                          dispatchInterface->getPerThreadDataSizeForWholeThreadGroup() -
                                          inlineDataSize,
@@ -690,6 +689,9 @@ HWTEST2_F(CommandEncodeStatesTest, givenInterfaceDescriptorDataWhenForceThreadGr
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
     INTERFACE_DESCRIPTOR_DATA iddArg;
     DefaultWalkerType walkerCmd{};
+    walkerCmd.setThreadGroupIdXDimension(1);
+    walkerCmd.setThreadGroupIdYDimension(1);
+    walkerCmd.setThreadGroupIdZDimension(1);
     iddArg = FamilyType::cmdInitInterfaceDescriptorData;
     const uint32_t forceThreadGroupDispatchSize = -1;
     auto hwInfo = pDevice->getHardwareInfo();
@@ -697,11 +699,13 @@ HWTEST2_F(CommandEncodeStatesTest, givenInterfaceDescriptorDataWhenForceThreadGr
 
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceThreadGroupDispatchSize.set(forceThreadGroupDispatchSize);
-
+    uint32_t threadGroups[] = {walkerCmd.getThreadGroupIdXDimension(), walkerCmd.getThreadGroupIdYDimension(), walkerCmd.getThreadGroupIdZDimension()};
+    const uint32_t threadGroupCount = walkerCmd.getThreadGroupIdXDimension() * walkerCmd.getThreadGroupIdYDimension() * walkerCmd.getThreadGroupIdZDimension();
     uint32_t revisions[] = {REVISION_A0, REVISION_B};
+    uint32_t threadsPerThreadGroup = 4;
     for (auto revision : revisions) {
         hwInfo.platform.usRevId = productHelper.getHwRevIdFromStepping(revision, hwInfo);
-        EncodeDispatchKernel<FamilyType>::adjustInterfaceDescriptorData(iddArg, *pDevice, hwInfo, 0, 0, walkerCmd);
+        EncodeDispatchKernel<FamilyType>::encodeThreadGroupDispatch(iddArg, *pDevice, hwInfo, threadGroups, threadGroupCount, 0, threadsPerThreadGroup, walkerCmd);
 
         if (productHelper.isDisableOverdispatchAvailable(hwInfo)) {
             EXPECT_EQ(INTERFACE_DESCRIPTOR_DATA::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1, iddArg.getThreadGroupDispatchSize());
@@ -716,6 +720,9 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInterfaceDescriptorDa
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
     INTERFACE_DESCRIPTOR_DATA iddArg;
     DefaultWalkerType walkerCmd{};
+    walkerCmd.setThreadGroupIdXDimension(1);
+    walkerCmd.setThreadGroupIdYDimension(1);
+    walkerCmd.setThreadGroupIdZDimension(1);
     iddArg = FamilyType::cmdInitInterfaceDescriptorData;
     iddArg.setNumberOfThreadsInGpgpuThreadGroup(1u);
 
@@ -725,8 +732,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenInterfaceDescriptorDa
 
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceThreadGroupDispatchSize.set(forceThreadGroupDispatchSize);
-
-    EncodeDispatchKernel<FamilyType>::adjustInterfaceDescriptorData(iddArg, *pDevice, pDevice->getHardwareInfo(), threadGroupCount, 1, walkerCmd);
+    uint32_t threadGroups[] = {walkerCmd.getThreadGroupIdXDimension(), walkerCmd.getThreadGroupIdYDimension(), walkerCmd.getThreadGroupIdZDimension()};
+    EncodeDispatchKernel<FamilyType>::encodeThreadGroupDispatch(iddArg, *pDevice, pDevice->getHardwareInfo(), threadGroups, threadGroupCount, 1, 1, walkerCmd);
 
     EXPECT_NE(defaultThreadGroupDispatchSize, iddArg.getThreadGroupDispatchSize());
     EXPECT_EQ(forceThreadGroupDispatchSize, iddArg.getThreadGroupDispatchSize());

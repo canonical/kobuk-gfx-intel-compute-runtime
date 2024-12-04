@@ -25,6 +25,11 @@ inline bool AILConfigurationHw<product>::isContextSyncFlagRequired() {
 }
 
 template <PRODUCT_FAMILY product>
+inline bool AILConfigurationHw<product>::is256BPrefetchDisableRequired() {
+    return false;
+}
+
+template <PRODUCT_FAMILY product>
 inline bool AILConfigurationHw<product>::isBufferPoolEnabled() {
     return true;
 }
@@ -54,6 +59,11 @@ inline void AILConfigurationHw<product>::setHandleDivergentBarriers(bool val) {
 template <PRODUCT_FAMILY product>
 inline void AILConfigurationHw<product>::setDisableBindlessAddressing(bool val) {
     shouldDisableBindlessAddressing = val;
+}
+
+template <PRODUCT_FAMILY product>
+inline bool AILConfigurationHw<product>::limitAmountOfDeviceMemoryForRecycling() {
+    return false;
 }
 
 } // namespace NEO

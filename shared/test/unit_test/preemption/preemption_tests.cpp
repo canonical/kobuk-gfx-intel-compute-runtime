@@ -11,6 +11,7 @@
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 #include "shared/source/os_interface/product_helper_hw.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
@@ -19,6 +20,7 @@
 #include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
+#include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/unit_test/fixtures/preemption_fixture.h"
 
@@ -606,32 +608,23 @@ HWTEST_F(MidThreadPreemptionTests, givenKernelWithRayTracingWhenGettingPreemptio
     EXPECT_FALSE(flags.flags.disabledMidThreadPreemptionKernel);
 }
 
-class MockProductHelperForRtKernels : public ProductHelperHw<IGFX_UNKNOWN> {
-  public:
-    bool isMidThreadPreemptionDisallowedForRayTracingKernels() const override {
-        return !midThreadPreemptionAllowedForRayTracing;
-    }
-    bool midThreadPreemptionAllowedForRayTracing = true;
-};
+HWTEST_F(MidThreadPreemptionTests, givenKernelWithRayTracingAndMidThreadPreemptionIsEnabledWhenGettingPreemptionFlagsThenMidThreadPreemptionIsEnabled) {
 
-HWTEST_F(MidThreadPreemptionTests, givenKernelWithRayTracingWhenGettingPreemptionFlagsThenMidThreadPreemptionIsEnabledBasedOnProductHelperCapability) {
-    MockExecutionEnvironment mockExecutionEnvironment{};
-
-    RAIIProductHelperFactory<MockProductHelperForRtKernels> productHelperBackup{*mockExecutionEnvironment.rootDeviceEnvironments[0]};
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
     KernelDescriptor kernelDescriptor{};
 
     kernelDescriptor.kernelAttributes.flags.hasRTCalls = true;
-    auto &productHelper = static_cast<MockProductHelperForRtKernels &>(device->getRootDeviceEnvironment().getHelper<ProductHelper>());
-    {
-        productHelper.midThreadPreemptionAllowedForRayTracing = true;
-        auto flags = PreemptionHelper::createPreemptionLevelFlags(*device, &kernelDescriptor);
-        EXPECT_FALSE(flags.flags.disabledMidThreadPreemptionKernel);
-    }
-    {
-        productHelper.midThreadPreemptionAllowedForRayTracing = false;
-        auto flags = PreemptionHelper::createPreemptionLevelFlags(*device, &kernelDescriptor);
-        EXPECT_TRUE(flags.flags.disabledMidThreadPreemptionKernel);
-    }
+
+    auto flags = PreemptionHelper::createPreemptionLevelFlags(*device, &kernelDescriptor);
+    EXPECT_FALSE(flags.flags.disabledMidThreadPreemptionKernel);
+}
+
+HWTEST_F(MidThreadPreemptionTests, givenKernelWithRayTracingWhenGettingPreemptionFlagsThenMidThreadPreemptionIsEnabledBasedOnReleaseHelperCapability) {
+    MockExecutionEnvironment mockExecutionEnvironment{};
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
+    KernelDescriptor kernelDescriptor{};
+    kernelDescriptor.kernelAttributes.flags.hasRTCalls = true;
+    auto flags = PreemptionHelper::createPreemptionLevelFlags(*device, &kernelDescriptor);
+    EXPECT_FALSE(flags.flags.disabledMidThreadPreemptionKernel);
 }

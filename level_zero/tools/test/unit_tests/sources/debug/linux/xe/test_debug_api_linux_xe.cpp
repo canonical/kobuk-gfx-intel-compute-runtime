@@ -16,11 +16,11 @@
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/linux/drm_mock_helper.h"
-#include "shared/test/common/libult/linux/drm_query_mock.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/os_interface/linux/sys_calls_linux_ult.h"
+#include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
 
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
@@ -529,7 +529,6 @@ TEST_F(DebugApiLinuxTestXe, GivenEuDebugOpenEventWithEventCreateFlagWhenHandleEv
     EXPECT_NE(session->clientHandleToConnection.find(client1.client_handle), session->clientHandleToConnection.end());
     EXPECT_NE(session->clientHandleToConnection.find(client2.client_handle), session->clientHandleToConnection.end());
 
-    EXPECT_EQ(session->clientHandle, 0x123456788u);
     uint64_t wrongClientHandle = 34;
     EXPECT_EQ(session->clientHandleToConnection.find(wrongClientHandle), session->clientHandleToConnection.end());
 }
@@ -902,6 +901,32 @@ TEST_F(DebugApiLinuxTestXe, whenHandleExecQueueEventThenProcessEnterAndProcessEx
     result = zetDebugReadEvent(session->toHandle(), 0, &event2);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_EQ(ZET_DEBUG_EVENT_TYPE_PROCESS_EXIT, event2.type);
+}
+
+TEST_F(DebugApiLinuxTestXe, GivenMetadataEventWhenClientHandleIsInvalidThenClientHandleUpdated) {
+
+    zet_debug_config_t config = {};
+    config.pid = 0x1234;
+
+    auto session = std::make_unique<MockDebugSessionLinuxXe>(config, device, 10);
+    ASSERT_NE(nullptr, session);
+
+    session->clientHandle = session->invalidClientHandle;
+    drm_xe_eudebug_event_metadata metadata = {};
+    metadata.base.type = DRM_XE_EUDEBUG_EVENT_METADATA;
+    metadata.base.flags = DRM_XE_EUDEBUG_EVENT_CREATE;
+    metadata.base.len = sizeof(drm_xe_eudebug_event_metadata);
+    metadata.client_handle = MockDebugSessionLinuxXe::mockClientHandle;
+    metadata.metadata_handle = 2;
+    metadata.len = 0;
+
+    auto handler = new MockIoctlHandlerXe;
+    handler->eventQueue.push({reinterpret_cast<char *>(&metadata), static_cast<uint64_t>(metadata.base.len)});
+    handler->pollRetVal = 1;
+
+    session->ioctlHandler.reset(handler);
+    session->handleEvent(&metadata.base);
+    EXPECT_EQ_VAL(session->clientHandle, metadata.client_handle);
 }
 
 TEST_F(DebugApiLinuxTestXe, GivenMetadataEventWhenHandlingAndMetadataLengthIsZeroThenMetadataIsInsertedToMap) {
@@ -1310,6 +1335,7 @@ TEST_F(DebugApiLinuxTestXe, GivenVmBindOpMetadataCreateEventAndUfenceForProgramM
     client1.base.type = DRM_XE_EUDEBUG_EVENT_OPEN;
     client1.base.flags = DRM_XE_EUDEBUG_EVENT_CREATE;
     client1.client_handle = MockDebugSessionLinuxXe::mockClientHandle;
+    session->pushApiEventValidateAckEvents = true;
     session->handleEvent(reinterpret_cast<drm_xe_eudebug_event *>(&client1));
 
     auto &connection = session->clientHandleToConnection[MockDebugSessionLinuxXe::mockClientHandle];
@@ -1380,6 +1406,8 @@ TEST_F(DebugApiLinuxTestXe, GivenVmBindOpMetadataCreateEventAndUfenceForProgramM
 
     EXPECT_EQ(vmBindOpData.pendingNumExtensions, 0ull);
     EXPECT_EQ(vmBindOpData.vmBindOpMetadataVec.size(), 2ull);
+
+    EXPECT_TRUE(session->pushApiEventAckEventsFound);
 
     EXPECT_EQ(connection->metaDataToModule[10].ackEvents->size(), 1ull);
     EXPECT_EQ(connection->metaDataToModule[10].ackEvents[0][0].seqno, vmBindUfence.base.seqno);
@@ -1890,7 +1918,11 @@ TEST_F(DebugApiLinuxTestXe, WhenCallingThreadControlForResumeThenProperIoctlsIsC
     EXPECT_EQ(nullptr, bitmaskOut.get());
 }
 
-TEST_F(DebugApiLinuxTestXe, GivenNoAttentionBitsWhenMultipleThreadsPassedToCheckStoppedThreadsAndGenerateEventsThenThreadsStateNotCheckedAndEventsNotGenerated) {
+HWTEST2_F(DebugApiLinuxTestXe, GivenNoAttentionBitsWhenMultipleThreadsPassedToCheckStoppedThreadsAndGenerateEventsThenThreadsStateNotCheckedAndEventsNotGenerated, MatchAny) {
+    MockL0GfxCoreHelperSupportsThreadControlStopped<FamilyType> mockL0GfxCoreHelper;
+    std::unique_ptr<ApiGfxCoreHelper> l0GfxCoreHelperBackup(static_cast<ApiGfxCoreHelper *>(&mockL0GfxCoreHelper));
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->apiGfxCoreHelper.swap(l0GfxCoreHelperBackup);
+
     zet_debug_config_t config = {};
     config.pid = 0x1234;
 
@@ -1941,6 +1973,8 @@ TEST_F(DebugApiLinuxTestXe, GivenNoAttentionBitsWhenMultipleThreadsPassedToCheck
     EXPECT_FALSE(sessionMock->allThreads[thread2.packed]->isStopped());
 
     EXPECT_EQ(0u, sessionMock->apiEvents.size());
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->apiGfxCoreHelper.swap(l0GfxCoreHelperBackup);
+    l0GfxCoreHelperBackup.release();
 }
 
 TEST_F(DebugApiLinuxTestXe, GivenEventSeqnoLowerEqualThanSentInterruptWhenHandlingAttentionEventThenEventIsNotProcessed) {
@@ -2235,7 +2269,7 @@ TEST_F(DebugApiLinuxTestXe, GivenInterruptedThreadsWhenNoAttentionEventIsReadThe
 
     auto handler = new MockIoctlHandlerXe;
     session->ioctlHandler.reset(handler);
-    session->returnTimeDiff = DebugSessionLinuxXe::interruptTimeout * 10;
+    session->returnTimeDiff = session->interruptTimeout * 10;
     session->synchronousInternalEventRead = true;
 
     ze_device_thread_t thread = {0, 0, 0, UINT32_MAX};
@@ -2299,10 +2333,55 @@ TEST_F(DebugApiLinuxTestXe, GivenBindInfoForVmHandleWhenReadingModuleDebugAreaTh
     EXPECT_EQ(4u, session->debugArea.pgsize);
 }
 
+TEST_F(DebugApiLinuxTestXe, GivenFifoPollEnvironmentVariableWhenAsyncThreadLaunchedThenDebugUmdFifoPollIntervalUpdated) {
+    DebugManagerStateRestore stateRestore;
+    NEO::debugManager.flags.DebugUmdFifoPollInterval.set(100);
+    auto session = std::make_unique<MockDebugSessionLinuxXe>(zet_debug_config_t{0x1234}, device, 10);
+    ASSERT_NE(nullptr, session);
+
+    EXPECT_EQ(150, session->fifoPollInterval);
+    session->asyncThread.threadActive = false;
+    session->asyncThreadFunction(session.get());
+
+    EXPECT_EQ(100, session->fifoPollInterval);
+
+    session->closeAsyncThread();
+}
+
+TEST_F(DebugApiLinuxTestXe, GivenInterruptTimeoutProvidedByDebugVariablesWhenAsyncThreadLaunchedThenInterruptTimeoutCorrectlyRead) {
+    DebugManagerStateRestore stateRestore;
+    NEO::debugManager.flags.DebugUmdInterruptTimeout.set(5000);
+    auto session = std::make_unique<MockDebugSessionLinuxXe>(zet_debug_config_t{0x1234}, device, 10);
+    ASSERT_NE(nullptr, session);
+
+    EXPECT_EQ(2000, session->interruptTimeout);
+    session->asyncThread.threadActive = false;
+    session->asyncThreadFunction(session.get());
+
+    EXPECT_EQ(5000, session->interruptTimeout);
+
+    session->closeAsyncThread();
+}
+
+TEST_F(DebugApiLinuxTestXe, GivenMaxRetriesProvidedByDebugVariablesWhenAsyncThreadLaunchedThenMaxRetriesCorrectlyRead) {
+    DebugManagerStateRestore stateRestore;
+    NEO::debugManager.flags.DebugUmdMaxReadWriteRetry.set(10);
+    auto session = std::make_unique<MockDebugSessionLinuxXe>(zet_debug_config_t{0x1234}, device, 10);
+    ASSERT_NE(nullptr, session);
+
+    EXPECT_EQ(3, session->maxRetries);
+    session->asyncThread.threadActive = false;
+    session->asyncThreadFunction(session.get());
+
+    EXPECT_EQ(10, session->maxRetries);
+
+    session->closeAsyncThread();
+}
+
 TEST(DebugSessionLinuxXeTest, GivenRootDebugSessionWhenCreateTileSessionCalledThenSessionIsNotCreated) {
     auto hwInfo = *NEO::defaultHwInfo.get();
     NEO::MockDevice *neoDevice(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
-    auto mockDrm = new DrmQueryMock(*neoDevice->executionEnvironment->rootDeviceEnvironments[0]);
+    auto mockDrm = new DrmMock(*neoDevice->executionEnvironment->rootDeviceEnvironments[0]);
     neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(new NEO::OSInterface);
     neoDevice->executionEnvironment->rootDeviceEnvironments[0]->osInterface->setDriverModel(std::unique_ptr<DriverModel>(mockDrm));
     MockDeviceImp deviceImp(neoDevice, neoDevice->getExecutionEnvironment());

@@ -20,11 +20,9 @@ class MockReleaseHelper : public ReleaseHelper {
     ADDMETHOD_CONST_NOBASE(isPipeControlPriorToNonPipelinedStateCommandsWARequired, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isPipeControlPriorToPipelineSelectWaRequired, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isProgramAllStateComputeCommandFieldsWARequired, bool, false, ());
-    ADDMETHOD_CONST_NOBASE(isPrefetchDisablingRequired, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isSplitMatrixMultiplyAccumulateSupported, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isBFloat16ConversionSupported, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isAuxSurfaceModeOverrideRequired, bool, false, ());
-    ADDMETHOD_CONST_NOBASE(getProductMaxPreferredSlmSize, int, 0, (int preferredEnumValue));
     ADDMETHOD_CONST_NOBASE(isResolvingSubDeviceIDNeeded, bool, false, ());
     ADDMETHOD_CONST_NOBASE(shouldAdjustDepth, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isDirectSubmissionSupported, bool, false, ());
@@ -41,6 +39,13 @@ class MockReleaseHelper : public ReleaseHelper {
     ADDMETHOD_CONST_NOBASE(getL3CacheBankSizeInKb, uint64_t, {}, ());
     ADDMETHOD_CONST_NOBASE(getAdditionalFp16Caps, uint32_t, {}, ());
     ADDMETHOD_CONST_NOBASE(getAdditionalExtraCaps, uint32_t, {}, ());
+    ADDMETHOD_CONST_NOBASE(getStackSizePerRay, uint32_t, {}, ());
     ADDMETHOD_CONST_NOBASE(isLocalOnlyAllowed, bool, {}, ());
+    ADDMETHOD_CONST_NOBASE(isDisablingMsaaRequired, bool, false, ());
+
+    const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const override {
+        static SizeToPreferredSlmValueArray sizeToPreferredSlmValue = {};
+        return sizeToPreferredSlmValue;
+    }
 };
 } // namespace NEO

@@ -74,6 +74,7 @@ bool mmapAllowExtendedPointers = false;
 bool failMmap = false;
 uint32_t mmapFuncCalled = 0u;
 uint32_t munmapFuncCalled = 0u;
+bool failMunmap = false;
 
 int (*sysCallsOpen)(const char *pathname, int flags) = nullptr;
 int (*sysCallsClose)(int fileDescriptor) = nullptr;
@@ -106,6 +107,8 @@ int (*sysCallsGetDevicePath)(int deviceFd, char *buf, size_t &bufSize) = nullptr
 off_t lseekReturn = 4096u;
 std::atomic<int> lseekCalledCount(0);
 long sysconfReturn = 1ull << 30;
+std::string dlOpenFilePathPassed;
+bool captureDlOpenFilePath = false;
 
 int mkdir(const std::string &path) {
     if (sysCallsMkdir != nullptr) {
@@ -167,6 +170,13 @@ int openWithMode(const char *file, int flags, int mode) {
 void *dlopen(const char *filename, int flag) {
     dlOpenFlags = flag;
     dlOpenCalled = true;
+    if (captureDlOpenFilePath) {
+        if (filename) {
+            dlOpenFilePathPassed = filename;
+        } else {
+            dlOpenFilePathPassed = {};
+        }
+    }
     return ::dlopen(filename, flag);
 }
 
@@ -324,6 +334,10 @@ void *mmap(void *addr, size_t size, int prot, int flags, int fd, off_t off) noex
 
 int munmap(void *addr, size_t size) noexcept {
     munmapFuncCalled++;
+    if (failMunmap) {
+        return -1;
+    }
+
     auto ptrIt = std::find(mmapVector.begin(), mmapVector.end(), addr);
     if (ptrIt != mmapVector.end()) {
         mmapVector.erase(ptrIt);

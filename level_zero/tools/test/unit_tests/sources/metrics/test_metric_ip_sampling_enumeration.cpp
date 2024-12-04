@@ -58,6 +58,19 @@ HWTEST2_F(MetricIpSamplingEnumerationTest, GivenDependenciesUnAvailableForSubDev
     EXPECT_TRUE(metricSource1.isAvailable());
 }
 
+HWTEST2_F(MetricIpSamplingEnumerationTest, GivenIpSamplingAvailableWhenCreateMetricGroupsFromMetricsIsCalledThenErrorIsReturned, EustallSupportedPlatforms) {
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, testDevices[0]->getMetricDeviceContext().enableMetricApi());
+    auto &metricSource = testDevices[0]->getMetricDeviceContext().getMetricSource<IpSamplingMetricSourceImp>();
+
+    std::vector<zet_metric_handle_t> metricList{};
+    const char metricGroupNamePrefix[ZET_INTEL_MAX_METRIC_GROUP_NAME_PREFIX_EXP] = {};
+    const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION] = {};
+    uint32_t maxMetricGroupCount = 0;
+    std::vector<zet_metric_group_handle_t> metricGroupList = {};
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, metricSource.createMetricGroupsFromMetrics(metricList, metricGroupNamePrefix, description, &maxMetricGroupCount, metricGroupList));
+}
+
 HWTEST2_F(MetricIpSamplingEnumerationTest, GivenDependenciesAvailableWhenMetricGroupGetIsCalledThenValidMetricGroupIsReturned, EustallSupportedPlatforms) {
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, testDevices[0]->getMetricDeviceContext().enableMetricApi());
@@ -302,9 +315,9 @@ HWTEST2_F(MetricIpSamplingEnumerationTest, GivenEnumerationIsSuccessfulWhenQuery
         ASSERT_NE(metricGroups[0], nullptr);
 
         zet_intel_metric_group_type_exp_t metricGroupType{};
-        metricGroupType.stype = ZET_INTEL_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP;
+        metricGroupType.stype = ZET_INTEL_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
         metricGroupType.pNext = nullptr;
-        metricGroupType.type = static_cast<zet_intel_metric_group_type_exp_flags_t>(0xffffffff);
+        metricGroupType.type = static_cast<zet_intel_metric_group_type_exp_flags_t>(0xffffffff); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
 
         zet_metric_group_properties_t metricGroupProperties = {ZET_STRUCTURE_TYPE_METRIC_GROUP_PROPERTIES, &metricGroupType};
         EXPECT_EQ(zetMetricGroupGetProperties(metricGroups[0], &metricGroupProperties), ZE_RESULT_SUCCESS);

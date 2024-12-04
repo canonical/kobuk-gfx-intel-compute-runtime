@@ -9,9 +9,11 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/sleep.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_thread.h"
+#include "shared/source/os_interface/os_time.h"
 #include "shared/source/os_interface/product_helper.h"
 
 #include <chrono>
@@ -26,8 +28,16 @@ DirectSubmissionController::DirectSubmissionController() {
     if (debugManager.flags.DirectSubmissionControllerDivisor.get() != -1) {
         timeoutDivisor = debugManager.flags.DirectSubmissionControllerDivisor.get();
     }
+    if (debugManager.flags.DirectSubmissionControllerBcsTimeoutDivisor.get() != -1) {
+        bcsTimeoutDivisor = debugManager.flags.DirectSubmissionControllerBcsTimeoutDivisor.get();
+    }
+
     if (debugManager.flags.DirectSubmissionControllerMaxTimeout.get() != -1) {
         maxTimeout = std::chrono::microseconds{debugManager.flags.DirectSubmissionControllerMaxTimeout.get()};
+    }
+    isCsrIdleDetectionEnabled = true;
+    if (debugManager.flags.DirectSubmissionControllerIdleDetection.get() != -1) {
+        isCsrIdleDetectionEnabled = debugManager.flags.DirectSubmissionControllerIdleDetection.get();
     }
 };
 
@@ -115,6 +125,7 @@ void *DirectSubmissionController::controlDirectSubmissionsState(void *self) {
     }
 
     controller->timeSinceLastCheck = controller->getCpuTimestamp();
+    controller->lastHangCheckTime = std::chrono::high_resolution_clock::now();
     while (true) {
         if (!controller->keepControlling.load()) {
             return nullptr;
@@ -132,26 +143,34 @@ void *DirectSubmissionController::controlDirectSubmissionsState(void *self) {
 }
 
 void DirectSubmissionController::checkNewSubmissions() {
-    if (!timeoutElapsed()) {
+    auto timeoutMode = timeoutElapsed();
+    if (timeoutMode == TimeoutElapsedMode::notElapsed) {
         return;
     }
+
     std::lock_guard<std::mutex> lock(this->directSubmissionsMutex);
     bool shouldRecalculateTimeout = false;
     for (auto &directSubmission : this->directSubmissions) {
         auto csr = directSubmission.first;
         auto &state = directSubmission.second;
 
+        if (timeoutMode == TimeoutElapsedMode::bcsOnly && !EngineHelpers::isBcs(csr->getOsContext().getEngineType())) {
+            continue;
+        }
+
         auto taskCount = csr->peekTaskCount();
         if (taskCount == state.taskCount) {
             if (state.isStopped) {
                 continue;
-            } else {
-                auto lock = csr->obtainUniqueOwnership();
+            }
+            auto lock = csr->obtainUniqueOwnership();
+            if (!isCsrIdleDetectionEnabled || isDirectSubmissionIdle(csr, lock)) {
                 csr->stopDirectSubmission(false);
                 state.isStopped = true;
                 shouldRecalculateTimeout = true;
                 this->lowestThrottleSubmitted = QueueThrottle::HIGH;
             }
+            state.taskCount = csr->peekTaskCount();
         } else {
             state.isStopped = false;
             state.taskCount = taskCount;
@@ -164,11 +183,34 @@ void DirectSubmissionController::checkNewSubmissions() {
     if (shouldRecalculateTimeout) {
         this->recalculateTimeout();
     }
-    this->timeSinceLastCheck = getCpuTimestamp();
+
+    if (timeoutMode != TimeoutElapsedMode::bcsOnly) {
+        this->timeSinceLastCheck = getCpuTimestamp();
+    }
 }
 
-bool DirectSubmissionController::sleep(std::unique_lock<std::mutex> &lock) {
-    return NEO::waitOnConditionWithPredicate(condVar, lock, std::chrono::microseconds(this->timeout), [&] { return !pagingFenceRequests.empty(); });
+bool DirectSubmissionController::isDirectSubmissionIdle(CommandStreamReceiver *csr, std::unique_lock<std::recursive_mutex> &csrLock) {
+    if (csr->peekLatestFlushedTaskCount() == csr->peekTaskCount()) {
+        return !csr->isBusyWithoutHang(lastHangCheckTime);
+    }
+
+    csr->flushTagUpdate();
+
+    auto osTime = csr->peekRootDeviceEnvironment().osTime.get();
+    uint64_t currCpuTimeInNS;
+    osTime->getCpuTime(&currCpuTimeInNS);
+    auto timeToWait = currCpuTimeInNS + timeToPollTagUpdateNS;
+
+    // unblock csr during polling
+    csrLock.unlock();
+    while (currCpuTimeInNS < timeToWait) {
+        if (!csr->isBusyWithoutHang(lastHangCheckTime)) {
+            break;
+        }
+        osTime->getCpuTime(&currCpuTimeInNS);
+    }
+    csrLock.lock();
+    return !csr->isBusyWithoutHang(lastHangCheckTime);
 }
 
 SteadyClock::time_point DirectSubmissionController::getCpuTimestamp() {
@@ -234,9 +276,14 @@ void DirectSubmissionController::handlePagingFenceRequests(std::unique_lock<std:
     }
 }
 
-bool DirectSubmissionController::timeoutElapsed() {
+TimeoutElapsedMode DirectSubmissionController::timeoutElapsed() {
     auto diff = std::chrono::duration_cast<std::chrono::microseconds>(getCpuTimestamp() - this->timeSinceLastCheck);
-    return diff >= this->timeout;
-}
+    if (diff >= this->timeout) {
+        return TimeoutElapsedMode::fullyElapsed;
+    } else if (this->bcsTimeoutDivisor > 1 && diff >= (this->timeout / this->bcsTimeoutDivisor)) {
+        return TimeoutElapsedMode::bcsOnly;
+    }
 
+    return TimeoutElapsedMode::notElapsed;
+}
 } // namespace NEO

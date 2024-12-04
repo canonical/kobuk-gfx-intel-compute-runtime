@@ -35,7 +35,7 @@ MockDevice::MockDevice()
     commandStreamReceivers.resize(1);
     commandStreamReceivers[0].reset(commandStreamReceiver);
 
-    EngineDescriptor engineDescriptor = {EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::regular}, this->getDeviceBitfield(), PreemptionMode::Disabled, true, false};
+    EngineDescriptor engineDescriptor = {EngineTypeUsage{aub_stream::ENGINE_CCS, EngineUsage::regular}, this->getDeviceBitfield(), PreemptionMode::Disabled, true};
 
     OsContext *osContext = getMemoryManager()->createAndRegisterOsContext(commandStreamReceiver, engineDescriptor);
     commandStreamReceiver->setupContext(*osContext);
@@ -54,7 +54,7 @@ MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t root
     auto &hwInfo = getHardwareInfo();
     if (!getOSTime()) {
         getRootDeviceEnvironmentRef().osTime = MockOSTime::create();
-        getRootDeviceEnvironmentRef().osTime->setDeviceTimerResolution(hwInfo);
+        getRootDeviceEnvironmentRef().osTime->setDeviceTimerResolution();
     }
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfoAndInitHelpers(&hwInfo);
     UnitTestSetter::setRcsExposure(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);

@@ -31,6 +31,7 @@
 #include "opencl/source/context/driver_diagnostics.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/execution_environment/cl_execution_environment.h"
+#include "opencl/source/global_teardown/global_platform_teardown.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/cl_memory_properties_helpers.h"
 #include "opencl/source/helpers/cl_validators.h"
@@ -383,7 +384,12 @@ cl_int CL_API_CALL clRetainDevice(cl_device_id device) {
 
 cl_int CL_API_CALL clReleaseDevice(cl_device_id device) {
     TRACING_ENTER(ClReleaseDevice, &device);
-    cl_int retVal = CL_INVALID_DEVICE;
+    cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseDevice, &retVal);
+        return CL_SUCCESS;
+    }
+    retVal = CL_INVALID_DEVICE;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("device", device);
     auto pDevice = castToObject<ClDevice>(device);
@@ -520,6 +526,10 @@ cl_int CL_API_CALL clRetainContext(cl_context context) {
 cl_int CL_API_CALL clReleaseContext(cl_context context) {
     TRACING_ENTER(ClReleaseContext, &context);
     cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseContext, &retVal);
+        return CL_SUCCESS;
+    }
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("context", context);
     Context *pContext = castToObject<Context>(context);
@@ -636,7 +646,12 @@ cl_int CL_API_CALL clRetainCommandQueue(cl_command_queue commandQueue) {
 
 cl_int CL_API_CALL clReleaseCommandQueue(cl_command_queue commandQueue) {
     TRACING_ENTER(ClReleaseCommandQueue, &commandQueue);
-    cl_int retVal = CL_INVALID_COMMAND_QUEUE;
+    cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseCommandQueue, &retVal);
+        return CL_SUCCESS;
+    }
+    retVal = CL_INVALID_COMMAND_QUEUE;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("commandQueue", commandQueue);
 
@@ -1115,7 +1130,12 @@ cl_int CL_API_CALL clRetainMemObject(cl_mem memobj) {
 
 cl_int CL_API_CALL clReleaseMemObject(cl_mem memobj) {
     TRACING_ENTER(ClReleaseMemObject, &memobj);
-    cl_int retVal = CL_INVALID_MEM_OBJECT;
+    cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseMemObject, &retVal);
+        return CL_SUCCESS;
+    }
+    retVal = CL_INVALID_MEM_OBJECT;
     API_ENTER(&retVal);
 
     DBG_LOG_INPUTS("memobj", memobj);
@@ -1340,6 +1360,10 @@ cl_int CL_API_CALL clRetainSampler(cl_sampler sampler) {
 cl_int CL_API_CALL clReleaseSampler(cl_sampler sampler) {
     TRACING_ENTER(ClReleaseSampler, &sampler);
     cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseSampler, &retVal);
+        return CL_SUCCESS;
+    }
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("sampler", sampler);
     auto pSampler = castToObject<Sampler>(sampler);
@@ -1538,6 +1562,10 @@ cl_int CL_API_CALL clRetainProgram(cl_program program) {
 cl_int CL_API_CALL clReleaseProgram(cl_program program) {
     TRACING_ENTER(ClReleaseProgram, &program);
     cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseProgram, &retVal);
+        return CL_SUCCESS;
+    }
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("program", program);
     auto pProgram = castToObject<Program>(program);
@@ -1879,6 +1907,10 @@ cl_int CL_API_CALL clRetainKernel(cl_kernel kernel) {
 cl_int CL_API_CALL clReleaseKernel(cl_kernel kernel) {
     TRACING_ENTER(ClReleaseKernel, &kernel);
     cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseKernel, &retVal);
+        return CL_SUCCESS;
+    }
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("kernel", kernel);
     auto pMultiDeviceKernel = castToObject<MultiDeviceKernel>(kernel);
@@ -2173,6 +2205,10 @@ cl_int CL_API_CALL clRetainEvent(cl_event event) {
 cl_int CL_API_CALL clReleaseEvent(cl_event event) {
     TRACING_ENTER(ClReleaseEvent, &event);
     auto retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseEvent, &retVal);
+        return CL_SUCCESS;
+    }
     API_ENTER(&retVal);
     auto pEvent = castToObject<Event>(event);
     DBG_LOG_INPUTS("cl_event", event, "Event", pEvent);
@@ -2928,19 +2964,22 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
             TRACING_EXIT(ClEnqueueWriteImage, &retVal);
             return retVal;
         }
-
-        retVal = pCommandQueue->enqueueWriteImage(
-            pImage,
-            blockingWrite,
-            origin,
-            region,
-            inputRowPitch,
-            inputSlicePitch,
-            ptr,
-            nullptr,
-            numEventsInWaitList,
-            eventWaitList,
-            event);
+        if (pCommandQueue->isValidForStagingWriteImage(pImage, ptr, numEventsInWaitList > 0)) {
+            retVal = pCommandQueue->enqueueStagingWriteImage(pImage, blockingWrite, origin, region, inputRowPitch, inputSlicePitch, ptr, event);
+        } else {
+            retVal = pCommandQueue->enqueueWriteImage(
+                pImage,
+                blockingWrite,
+                origin,
+                region,
+                inputRowPitch,
+                inputSlicePitch,
+                ptr,
+                nullptr,
+                numEventsInWaitList,
+                eventWaitList,
+                event);
+        }
     }
     DBG_LOG_INPUTS("event", getClFileLogger().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(ClEnqueueWriteImage, &retVal);
@@ -4510,6 +4549,10 @@ cl_int CL_API_CALL clReleaseAcceleratorINTEL(
 
     TRACING_ENTER(ClReleaseAcceleratorINTEL, &accelerator);
     cl_int retVal = CL_SUCCESS;
+    if (wasPlatformTeardownCalled) {
+        TRACING_EXIT(ClReleaseAcceleratorINTEL, &retVal);
+        return CL_SUCCESS;
+    }
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("accelerator", accelerator);
 
@@ -5271,6 +5314,7 @@ cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel kernel,
     case CL_KERNEL_EXEC_INFO_THREAD_ARBITRATION_POLICY_INTEL: {
         auto propertyValue = *static_cast<const uint32_t *>(paramValue);
         retVal = pMultiDeviceKernel->setKernelThreadArbitrationPolicy(propertyValue);
+        TRACING_EXIT(ClSetKernelExecInfo, &retVal);
         return retVal;
     }
     case CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM: {

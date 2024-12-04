@@ -3,6 +3,8 @@
 %global rel xxx
 %global build_id xxx
 %global NEO_RELEASE_WITH_REGKEYS FALSE
+%global NEO_ENABLE_I915_PRELIM_DETECTION FALSE
+%global NEO_ENABLE_XE_PRELIM_DETECTION FALSE
 %global NEO_ENABLE_XE_EU_DEBUG_SUPPORT FALSE
 %global NEO_I915_PRELIM_HEADERS_DIR %{nil}
 
@@ -28,7 +30,7 @@ BuildRequires: intel-gmmlib-devel
 BuildRequires: intel-igc-opencl-devel
 
 Requires: intel-gmmlib
-Requires: intel-igc-opencl
+Requires: intel-igc-opencl-2
 
 %description
 Runtime library providing the ability to use Intel GPUs with the oneAPI Level
@@ -65,7 +67,8 @@ cd build
    -DCMAKE_BUILD_TYPE=Release \
    -DNEO_BUILD_WITH_OCL=FALSE \
    -DNEO_SKIP_UNIT_TESTS=TRUE \
-   -DNEO_ENABLE_i915_PRELIM_DETECTION=TRUE \
+   -DNEO_ENABLE_I915_PRELIM_DETECTION=%{NEO_ENABLE_I915_PRELIM_DETECTION} \
+   -DNEO_ENABLE_XE_PRELIM_DETECTION=%{NEO_ENABLE_XE_PRELIM_DETECTION} \
    -DNEO_ENABLE_XE_EU_DEBUG_SUPPORT=%{NEO_ENABLE_XE_EU_DEBUG_SUPPORT} \
    -DRELEASE_WITH_REGKEYS=%{NEO_RELEASE_WITH_REGKEYS} \
    -DL0_INSTALL_UDEV_RULES=1 \

@@ -3,7 +3,7 @@ components:
     branch: master
     dest_dir: aub_stream
     repository: https://github.com/intel/aubstream
-    revision: 3985030d02d96af3d80579f4772e503522d4e313
+    revision: 3c3c8bd43aa4892e3f3b8ad0c5c70ce6e626afdb
     type: git
   gmmlib:
     asset_name: gmmlib
@@ -16,23 +16,17 @@ components:
     asset_name: igc
     dest_dir: igc
     type: git
-    branch: releases/igc-1.0.17791
-    revision: igc-1.0.17791.16
+    branch: releases/2.1.x
+    revision: v2.1.14
     repository: https://github.com/intel/intelgraphicscompiler
   igsc:
     asset_name: igsc
     dest_dir: igsc
     type: git
     branch: master
-    revision: V0.9.3
+    revision: V0.9.4
     repository: https://github.com/intel/igsc.git
-    component_version: 279
-  infra:
-    branch: neo/releases/24.39
-    dest_dir: infra
-    fetch_tags: true
-    revision: v6340.2464.0
-    type: git
+    component_version: 291
   internal:
     branch: master
     dest_dir: internal
@@ -42,7 +36,7 @@ components:
     dest_dir: kernels_bin
     type: git
     branch: kernels_bin
-    revision: 3081-2868
+    revision: 3145-3089
   kmdaf:
     branch: kmdaf
     dest_dir: kmdaf
@@ -53,7 +47,7 @@ components:
     dest_dir: level_zero
     type: git
     branch: master
-    revision: v1.17.44
+    revision: v1.18.5
     repository: https://github.com/oneapi-src/level-zero
   libva:
     asset_name: libva
@@ -67,14 +61,14 @@ components:
     dest_dir: metrics/discovery
     type: git
     branch: master
-    revision: metrics-discovery-1.13.176
+    revision: metrics-discovery-1.13.178
     repository: https://github.com/intel/metrics-discovery.git
   metrics-library:
     asset_name: metrics-library
     dest_dir: metrics/library
     type: git
     branch: master
-    revision: metrics-library-1.0.173
+    revision: metrics-library-1.0.178
     repository: https://github.com/intel/metrics-library.git
   neo-clang-format:
     dest_dir: tools/clang-format
@@ -85,11 +79,13 @@ components:
     dest_dir: wdk
     type: git
     branch: wdk
-    revision: 65d6d372547c08a274badc252c7bf4748ff85fb1-3043
+    revision: b2c3c8ffcd8900259152512859ad8973ac003836-3130
   wsl:
     branch: wsl
     dest_dir: wsl
     revision: 56430997dac34ca0e9e18c177636234cac26ad54
     type: git
-converter: M-3081
+converter: M-3145
+include:
+- infra.yml
 version: '1'

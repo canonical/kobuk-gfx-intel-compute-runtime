@@ -19,7 +19,7 @@ constexpr static auto gfxProduct = IGFX_BMG;
 static std::map<std::string, std::map<std::string, uint64_t>> guidToKeyOffsetMap = {
     {"0x1e2f8200", // BMG PUNIT rev 1
      {{"VRAM_BANDWIDTH", 14}}},
-    {"0x5e2F8210", // BMG OOBMSM Rev 15
+    {"0x5e2f8210", // BMG OOBMSM Rev 15
      {{"SOC_THERMAL_SENSORS_TEMPERATURE_0_2_0_GTTMMADR[1]", 41},
       {"VRAM_TEMPERATURE_0_2_0_GTTMMADR", 42},
       {"reg_PCIESS_rx_bytecount_lsb", 70},
@@ -294,6 +294,14 @@ bool SysmanProductHelperHw<gfxProduct>::isUpstreamPortConnected() {
     return true;
 }
 
+template <>
+ze_result_t SysmanProductHelperHw<gfxProduct>::getPciProperties(zes_pci_properties_t *pProperties) {
+    pProperties->haveBandwidthCounters = true;
+    pProperties->havePacketCounters = true;
+    pProperties->haveReplayCounters = false;
+    return ZE_RESULT_SUCCESS;
+}
+
 static ze_result_t getPciStatsValues(zes_pci_stats_t *pStats, std::map<std::string, uint64_t> &keyOffsetMap, const std::string &telemNodeDir, uint64_t telemOffset) {
     uint32_t rxCounterLsb = 0;
     if (!PlatformMonitoringTech::readValue(keyOffsetMap, telemNodeDir, "reg_PCIESS_rx_bytecount_lsb", telemOffset, rxCounterLsb)) {
@@ -416,6 +424,11 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getGpuMaxTemperature(LinuxSysmanI
     }
     *pTemperature = static_cast<double>(gpuMaxTemperature);
     return ZE_RESULT_SUCCESS;
+}
+
+template <>
+bool SysmanProductHelperHw<gfxProduct>::isMemoryMaxTemperatureSupported() {
+    return true;
 }
 
 template <>

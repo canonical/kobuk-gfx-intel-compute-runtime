@@ -142,10 +142,6 @@ uint32_t ProductHelperHw<IGFX_UNKNOWN>::getAubStreamSteppingFromHwRevId(const Ha
         return AubMemDump::SteppingValues::K;
     }
 }
-template <>
-std::string ProductHelperHw<IGFX_UNKNOWN>::getDeviceMemoryName() const {
-    return "";
-}
 
 template <>
 bool ProductHelperHw<IGFX_UNKNOWN>::isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const {
@@ -185,11 +181,6 @@ LocalMemoryAccessMode ProductHelperHw<IGFX_UNKNOWN>::getLocalMemoryAccessMode(co
 template <>
 std::vector<int32_t> ProductHelperHw<IGFX_UNKNOWN>::getKernelSupportedThreadArbitrationPolicies() const {
     return {};
-}
-
-template <>
-bool ProductHelperHw<IGFX_UNKNOWN>::isAllocationSizeAdjustmentRequired(const HardwareInfo &hwInfo) const {
-    return false;
 }
 
 template <>
@@ -333,11 +324,6 @@ bool ProductHelperHw<IGFX_UNKNOWN>::isCopyEngineSelectorEnabled(const HardwareIn
 
 template <>
 bool ProductHelperHw<IGFX_UNKNOWN>::isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
-bool ProductHelperHw<IGFX_UNKNOWN>::isAdjustProgrammableIdPreferredSlmSizeRequired(const HardwareInfo &hwInfo) const {
     return false;
 }
 

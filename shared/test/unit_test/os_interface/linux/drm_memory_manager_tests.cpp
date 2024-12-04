@@ -17,7 +17,6 @@
 #include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
-#include "shared/test/common/fixtures/memory_allocator_multi_device_fixture.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/mocks/linux/mock_drm_allocation.h"
@@ -45,6 +44,12 @@
 #include <fcntl.h>
 #include <memory>
 #include <vector>
+
+namespace NEO {
+namespace SysCalls {
+extern bool failMmap;
+} // namespace SysCalls
+} // namespace NEO
 
 namespace {
 using DrmMemoryManagerTest = Test<DrmMemoryManagerFixture>;
@@ -1800,7 +1805,7 @@ TEST_F(DrmMemoryManagerTest, whenCallingCreateAndReleaseMediaContextThenCallIoct
       public:
         using MockIoctlHelper::MockIoctlHelper;
 
-        bool createMediaContext(uint32_t vmId, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, uint64_t &outDoorbell) override {
+        bool createMediaContext(uint32_t vmId, void *controlSharedMemoryBuffer, uint32_t controlSharedMemoryBufferSize, void *controlBatchBuffer, uint32_t controlBatchBufferSize, void *&outDoorbell) override {
             mediaContextVmId = vmId;
             return MockIoctlHelper::createMediaContext(vmId, controlSharedMemoryBuffer, controlSharedMemoryBufferSize, controlBatchBuffer, controlBatchBufferSize, outDoorbell);
         }
@@ -1812,7 +1817,7 @@ TEST_F(DrmMemoryManagerTest, whenCallingCreateAndReleaseMediaContextThenCallIoct
     auto &drm = static_cast<DrmMockCustom &>(memoryManager->getDrm(rootDeviceIndex));
     drm.ioctlHelper.reset(mockIoctlHelper);
 
-    uint64_t handle = 0;
+    void *handle = nullptr;
 
     EXPECT_EQ(0u, mockIoctlHelper->createMediaContextCalled);
     EXPECT_EQ(0u, mockIoctlHelper->releaseMediaContextCalled);
@@ -1843,6 +1848,21 @@ TEST_F(DrmMemoryManagerTest, whenCallingGetNumMediaThenCallIoctlHelper) {
     memoryManager->getNumMediaEncoders(rootDeviceIndex);
     EXPECT_EQ(1u, mockIoctlHelper->getNumMediaDecodersCalled);
     EXPECT_EQ(1u, mockIoctlHelper->getNumMediaEncodersCalled);
+}
+
+TEST_F(DrmMemoryManagerTest, whenCallingGetExtraDevicePropertiesThenCallIoctlHelper) {
+    auto mockIoctlHelper = new MockIoctlHelper(*mock);
+
+    auto &drm = static_cast<DrmMockCustom &>(memoryManager->getDrm(rootDeviceIndex));
+    drm.ioctlHelper.reset(mockIoctlHelper);
+
+    uint32_t moduleId = 0;
+    uint16_t serverType = 0;
+
+    EXPECT_EQ(0u, mockIoctlHelper->queryDeviceParamsCalled);
+
+    memoryManager->getExtraDeviceProperties(rootDeviceIndex, &moduleId, &serverType);
+    EXPECT_EQ(1u, mockIoctlHelper->queryDeviceParamsCalled);
 }
 
 TEST_F(DrmMemoryManagerTest, GivenShareableEnabledWhenAskedToCreateGraphicsAllocationThenValidAllocationIsReturnedAndStandard64KBHeapIsUsed) {
@@ -2635,37 +2655,6 @@ TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerAndUnifiedAuxCapableAllocation
     memoryManager->freeGraphicsMemory(allocation);
 }
 
-TEST_F(DrmMemoryManagerTest, given32BitAllocatorWithHeapAllocatorWhenLargerFragmentIsReusedThenOnlyUnmapSizeIsLargerWhileSizeStaysTheSame) {
-    mock->ioctlExpected.gemUserptr = 1;
-    mock->ioctlExpected.gemWait = 1;
-    mock->ioctlExpected.gemClose = 1;
-
-    DebugManagerStateRestore dbgFlagsKeeper;
-    memoryManager->setForce32BitAllocations(true);
-
-    size_t allocationSize = 4 * MemoryConstants::pageSize;
-    auto ptr = memoryManager->getGfxPartition(rootDeviceIndex)->heapAllocate(HeapIndex::heapExternal, allocationSize);
-    size_t smallAllocationSize = MemoryConstants::pageSize;
-    memoryManager->getGfxPartition(rootDeviceIndex)->heapAllocate(HeapIndex::heapExternal, smallAllocationSize);
-
-    // now free first allocation , this will move it to chunks
-    memoryManager->getGfxPartition(rootDeviceIndex)->heapFree(HeapIndex::heapExternal, ptr, allocationSize);
-
-    // now ask for 3 pages, this will give ptr from chunks
-    size_t pages3size = 3 * MemoryConstants::pageSize;
-
-    void *hostPtr = reinterpret_cast<void *>(0x1000);
-    DrmAllocation *graphicsAlloaction = memoryManager->allocate32BitGraphicsMemory(rootDeviceIndex, pages3size, hostPtr, AllocationType::buffer);
-
-    auto bo = graphicsAlloaction->getBO();
-    EXPECT_EQ(pages3size, bo->peekSize());
-
-    auto gmmHelper = device->getGmmHelper();
-    EXPECT_EQ(gmmHelper->canonize(ptr), graphicsAlloaction->getGpuAddress());
-
-    memoryManager->freeGraphicsMemory(graphicsAlloaction);
-}
-
 TEST_F(DrmMemoryManagerTest, givenSharedAllocationWithSmallerThenRealSizeWhenCreateIsCalledThenRealSizeIsUsed) {
     unsigned int realSize = 64 * 1024;
     VariableBackup<decltype(SysCalls::lseekReturn)> lseekBackup(&SysCalls::lseekReturn, realSize);
@@ -3048,6 +3037,22 @@ TEST_F(DrmMemoryManagerBasic, givenMemoryManagerWhenCreateAllocationFromHandleIs
     EXPECT_NE(nullptr, allocation);
     EXPECT_EQ(MemoryPool::systemCpuInaccessible, allocation->getMemoryPool());
     memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerBasic, givenMemoryManagerWhenCreateAllocationFromHandleIsCalledThenAllocationIsNotRegisteredNorUnregistered) {
+    std::unique_ptr<TestedDrmMemoryManager> memoryManager(new (std::nothrow) TestedDrmMemoryManager(false,
+                                                                                                    false,
+                                                                                                    true,
+                                                                                                    executionEnvironment));
+    TestedDrmMemoryManager::OsHandleData osHandleData{1u};
+    AllocationProperties properties(rootDeviceIndex, false, MemoryConstants::pageSize, AllocationType::sharedBuffer, false, {});
+
+    auto allocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandleData, properties, false, false, true, nullptr);
+    EXPECT_NE(nullptr, allocation);
+    memoryManager->freeGraphicsMemory(allocation);
+    EXPECT_EQ(0u, memoryManager->registerSysMemAllocCalled);
+    EXPECT_EQ(0u, memoryManager->registerLocalMemAllocCalled);
+    EXPECT_EQ(0u, memoryManager->unregisterAllocationCalled);
 }
 
 TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDisabledForcePinAndEnabledValidateHostMemoryWhenPinBBAllocationFailsThenUnrecoverableIsCalled) {
@@ -7200,39 +7205,6 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenUnsuppor
     }
 }
 
-TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenOversizedAllocationWhenGraphicsAllocationInDevicePoolIsAllocatedThenAllocationAndBufferObjectHaveRequestedSize) {
-    auto heap = HeapIndex::heapStandard64KB;
-    if (memoryManager->getGfxPartition(rootDeviceIndex)->getHeapLimit(HeapIndex::heapExtended)) {
-        heap = HeapIndex::heapExtended;
-    }
-    auto largerSize = 6 * MemoryConstants::megaByte;
-
-    auto gpuAddress0 = memoryManager->getGfxPartition(rootDeviceIndex)->heapAllocateWithCustomAlignment(heap, largerSize, MemoryConstants::pageSize2M);
-    EXPECT_NE(0u, gpuAddress0);
-    EXPECT_EQ(6 * MemoryConstants::megaByte, largerSize);
-    auto gpuAddress1 = memoryManager->getGfxPartition(rootDeviceIndex)->heapAllocate(heap, largerSize);
-    EXPECT_NE(0u, gpuAddress1);
-    EXPECT_EQ(6 * MemoryConstants::megaByte, largerSize);
-    auto gpuAddress2 = memoryManager->getGfxPartition(rootDeviceIndex)->heapAllocate(heap, largerSize);
-    EXPECT_NE(0u, gpuAddress2);
-    EXPECT_EQ(6 * MemoryConstants::megaByte, largerSize);
-    memoryManager->getGfxPartition(rootDeviceIndex)->heapFree(heap, gpuAddress1, largerSize);
-
-    auto status = MemoryManager::AllocationStatus::Error;
-    AllocationData allocData;
-    allocData.size = 5 * MemoryConstants::megaByte;
-    allocData.type = AllocationType::buffer;
-    allocData.rootDeviceIndex = rootDeviceIndex;
-    auto allocation = memoryManager->allocateGraphicsMemoryInDevicePool(allocData, status);
-    memoryManager->getGfxPartition(rootDeviceIndex)->heapFree(heap, gpuAddress2, largerSize);
-    EXPECT_EQ(MemoryManager::AllocationStatus::Success, status);
-    ASSERT_NE(nullptr, allocation);
-    EXPECT_EQ(largerSize, allocation->getReservedAddressSize());
-    EXPECT_EQ(allocData.size, allocation->getUnderlyingBufferSize());
-    EXPECT_EQ(allocData.size, static_cast<DrmAllocation *>(allocation)->getBO()->peekSize());
-    memoryManager->freeGraphicsMemory(allocation);
-}
-
 TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocationsThatAreAlignedToPowerOf2InSizeAndAreGreaterThen8GBThenTheyAreAlignedToPreviousPowerOfTwoForGpuVirtualAddress) {
     if (!memoryManager->getGfxPartition(rootDeviceIndex)->getHeapLimit(HeapIndex::heapExtended)) {
         GTEST_SKIP();
@@ -7818,6 +7790,31 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDrmMemoryManagerWhenGp
     EXPECT_LE(memoryManager->getGfxPartition(1)->getHeapBase(HeapIndex::heapStandard), gmmHelper->decanonize(addressRange.address));
     EXPECT_GT(memoryManager->getGfxPartition(1)->getHeapLimit(HeapIndex::heapStandard), gmmHelper->decanonize(addressRange.address));
     memoryManager->freeGpuAddress(addressRange, 1);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDrmMemoryManagerWhenCpuAddressReservationIsAttemptedThenCorrectAddressRangesAreReturned) {
+    auto memoryManager = std::make_unique<TestedDrmMemoryManager>(false, true, false, *executionEnvironment);
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(1);
+
+    auto addressRange = memoryManager->reserveCpuAddress(0, 0);
+    EXPECT_EQ(0u, addressRange.address);
+    EXPECT_EQ(0u, addressRange.size);
+
+    addressRange = memoryManager->reserveCpuAddress(0, MemoryConstants::pageSize);
+    EXPECT_NE(0u, addressRange.address);
+    EXPECT_EQ(MemoryConstants::pageSize, addressRange.size);
+    memoryManager->freeCpuAddress(addressRange);
+
+    addressRange = memoryManager->reserveCpuAddress(MemoryConstants::pageSize * 1234, MemoryConstants::pageSize);
+    EXPECT_NE(0u, addressRange.address);
+    EXPECT_EQ(MemoryConstants::pageSize, addressRange.size);
+    memoryManager->freeCpuAddress(addressRange);
+
+    VariableBackup<bool> backup(&SysCalls::failMmap, true);
+    addressRange = memoryManager->reserveCpuAddress(0, 0);
+    EXPECT_EQ(0u, addressRange.address);
+    EXPECT_EQ(0u, addressRange.size);
 }
 
 TEST_F(DrmMemoryManagerTest, given57bAddressSpaceCpuAndGpuWhenAllocatingHostUSMThenAddressFromExtendedHeapIsPassedAsHintAndSetAsGpuAddressAndReservedAddress) {

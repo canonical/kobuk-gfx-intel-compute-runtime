@@ -7,9 +7,11 @@
 
 #pragma once
 
+#include "shared/source/command_container/definitions/encode_size_preferred_slm_value.h"
 #include "shared/source/helpers/hw_ip_version.h"
 #include "shared/source/utilities/stackvec.h"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,6 +27,7 @@ using createReleaseHelperFunctionType = std::unique_ptr<ReleaseHelper> (*)(Hardw
 inline createReleaseHelperFunctionType *releaseHelperFactory[maxArchitecture]{};
 
 using ThreadsPerEUConfigs = StackVec<uint32_t, 6>;
+using SizeToPreferredSlmValueArray = std::array<SizeToPreferredSlmValue, 12>;
 
 class ReleaseHelper {
   public:
@@ -37,11 +40,9 @@ class ReleaseHelper {
     virtual bool isPipeControlPriorToNonPipelinedStateCommandsWARequired() const = 0;
     virtual bool isPipeControlPriorToPipelineSelectWaRequired() const = 0;
     virtual bool isProgramAllStateComputeCommandFieldsWARequired() const = 0;
-    virtual bool isPrefetchDisablingRequired() const = 0;
     virtual bool isSplitMatrixMultiplyAccumulateSupported() const = 0;
     virtual bool isBFloat16ConversionSupported() const = 0;
     virtual bool isAuxSurfaceModeOverrideRequired() const = 0;
-    virtual int getProductMaxPreferredSlmSize(int preferredEnumValue) const = 0;
     virtual bool isResolvingSubDeviceIDNeeded() const = 0;
     virtual bool shouldAdjustDepth() const = 0;
     virtual bool isDirectSubmissionSupported() const = 0;
@@ -58,7 +59,10 @@ class ReleaseHelper {
     virtual uint64_t getL3CacheBankSizeInKb() const = 0;
     virtual uint32_t getAdditionalFp16Caps() const = 0;
     virtual uint32_t getAdditionalExtraCaps() const = 0;
+    virtual uint32_t getStackSizePerRay() const = 0;
     virtual bool isLocalOnlyAllowed() const = 0;
+    virtual bool isDisablingMsaaRequired() const = 0;
+    virtual const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const = 0;
 
   protected:
     ReleaseHelper(HardwareIpVersion hardwareIpVersion) : hardwareIpVersion(hardwareIpVersion) {}
@@ -78,11 +82,9 @@ class ReleaseHelperHw : public ReleaseHelper {
     bool isPipeControlPriorToNonPipelinedStateCommandsWARequired() const override;
     bool isPipeControlPriorToPipelineSelectWaRequired() const override;
     bool isProgramAllStateComputeCommandFieldsWARequired() const override;
-    bool isPrefetchDisablingRequired() const override;
     bool isSplitMatrixMultiplyAccumulateSupported() const override;
     bool isBFloat16ConversionSupported() const override;
     bool isAuxSurfaceModeOverrideRequired() const override;
-    int getProductMaxPreferredSlmSize(int preferredEnumValue) const override;
     bool isResolvingSubDeviceIDNeeded() const override;
     bool shouldAdjustDepth() const override;
     bool isDirectSubmissionSupported() const override;
@@ -99,7 +101,10 @@ class ReleaseHelperHw : public ReleaseHelper {
     uint64_t getL3CacheBankSizeInKb() const override;
     uint32_t getAdditionalFp16Caps() const override;
     uint32_t getAdditionalExtraCaps() const override;
+    uint32_t getStackSizePerRay() const override;
     bool isLocalOnlyAllowed() const override;
+    bool isDisablingMsaaRequired() const override;
+    const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const override;
 
   protected:
     ReleaseHelperHw(HardwareIpVersion hardwareIpVersion) : ReleaseHelper(hardwareIpVersion) {}

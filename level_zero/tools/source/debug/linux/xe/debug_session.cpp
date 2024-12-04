@@ -75,10 +75,21 @@ bool DebugSessionLinuxXe::handleInternalEvent() {
 
 void *DebugSessionLinuxXe::asyncThreadFunction(void *arg) {
     DebugSessionLinuxXe *self = reinterpret_cast<DebugSessionLinuxXe *>(arg);
+    if (NEO::debugManager.flags.DebugUmdFifoPollInterval.get() != -1) {
+        self->fifoPollInterval = NEO::debugManager.flags.DebugUmdFifoPollInterval.get();
+    }
+    if (NEO::debugManager.flags.DebugUmdInterruptTimeout.get() != -1) {
+        self->interruptTimeout = NEO::debugManager.flags.DebugUmdInterruptTimeout.get();
+    }
+    if (NEO::debugManager.flags.DebugUmdMaxReadWriteRetry.get() != -1) {
+        self->maxRetries = NEO::debugManager.flags.DebugUmdMaxReadWriteRetry.get();
+    }
+
     PRINT_DEBUGGER_INFO_LOG("Debugger async thread start\n", "");
 
     while (self->asyncThread.threadActive) {
         self->handleEventsAsync();
+        self->pollFifo();
         self->generateEventsAndResumeStoppedThreads();
         self->sendInterrupts();
     }
@@ -169,7 +180,6 @@ void DebugSessionLinuxXe::handleEvent(drm_xe_eudebug_event *event) {
             DEBUG_BREAK_IF(clientHandleToConnection.find(clientEvent->client_handle) != clientHandleToConnection.end());
             clientHandleToConnection[clientEvent->client_handle].reset(new ClientConnectionXe);
             clientHandleToConnection[clientEvent->client_handle]->client = *clientEvent;
-            clientHandle = clientEvent->client_handle;
         }
 
         if (event->flags & DRM_XE_EUDEBUG_EVENT_DESTROY) {
@@ -316,6 +326,9 @@ void DebugSessionLinuxXe::handleEvent(drm_xe_eudebug_event *event) {
 
     case DRM_XE_EUDEBUG_EVENT_METADATA: {
         drm_xe_eudebug_event_metadata *metaData = reinterpret_cast<drm_xe_eudebug_event_metadata *>(event);
+        if (clientHandle == invalidClientHandle) {
+            clientHandle = metaData->client_handle;
+        }
 
         PRINT_DEBUGGER_INFO_LOG("DRM_XE_EUDEBUG_IOCTL_READ_EVENT type: DRM_XE_EUDEBUG_EVENT_METADATA client_handle = %llu metadata_handle = %llu type = %llu len = %llu\n",
                                 (uint64_t)metaData->client_handle, (uint64_t)metaData->metadata_handle, (uint64_t)metaData->type, (uint64_t)metaData->len);
@@ -484,7 +497,6 @@ void DebugSessionLinuxXe::handleVmBind(VmBindData &vmBindData) {
         debugEvent.info.module.moduleEnd = reinterpret_cast<uint64_t>(elfMetadata.data.get()) + elfMetadata.metadata.len;
         debugEvent.flags = ZET_DEBUG_EVENT_FLAG_NEED_ACK;
 
-        pushApiEvent(debugEvent, metaDataEntry.metadata.metadata_handle);
         {
             std::lock_guard<std::mutex> lock(asyncThreadMutex);
             if (vmBindData.vmBind.flags & DRM_XE_EUDEBUG_EVENT_VM_BIND_FLAG_UFENCE) {
@@ -495,6 +507,7 @@ void DebugSessionLinuxXe::handleVmBind(VmBindData &vmBindData) {
                 }
             }
         }
+        pushApiEvent(debugEvent, metaDataEntry.metadata.metadata_handle);
     }
 
     if (shouldAckEvent && (vmBindData.vmBindUfence.base.flags & DRM_XE_EUDEBUG_EVENT_NEED_ACK)) {
@@ -769,7 +782,7 @@ int DebugSessionLinuxXe::threadControl(const std::vector<EuThread::ThreadId> &th
     return -1;
 }
 
-void DebugSessionLinuxXe::updateContextAndLrcHandlesForThreadsWithAttention(EuThread::ThreadId threadId, AttentionEventFields &attention) {
+void DebugSessionLinuxXe::updateContextAndLrcHandlesForThreadsWithAttention(EuThread::ThreadId threadId, const AttentionEventFields &attention) {
     allThreads[threadId]->setContextHandle(attention.contextHandle);
     allThreads[threadId]->setLrcHandle(attention.lrcHandle);
 }

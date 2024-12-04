@@ -649,8 +649,11 @@ kernels:
     ASSERT_TRUE(success);
 
     auto &kernelNode = *parser.createChildrenRange(*parser.findNodeWithKeyDfs("kernels")).begin();
+    std::string errors;
     std::string warnings;
-    NEO::Zebin::ZeInfo::extractZeInfoKernelSections(parser, kernelNode, kernelSections, "some_kernel", warnings);
+    auto errCode = NEO::Zebin::ZeInfo::extractZeInfoKernelSections(parser, kernelNode, kernelSections, "some_kernel", errors, warnings);
+    EXPECT_EQ(DecodeError::success, errCode);
+    EXPECT_TRUE(errors.empty()) << errors;
     EXPECT_TRUE(warnings.empty()) << warnings;
     ASSERT_FALSE(kernelSections.nameNd.empty());
     ASSERT_FALSE(kernelSections.executionEnvNd.empty());
@@ -1137,8 +1140,10 @@ kernels:
     ASSERT_TRUE(success);
 
     auto &kernelNode = *parser.createChildrenRange(*parser.findNodeWithKeyDfs("kernels")).begin();
+    std::string errors;
     std::string warnings;
-    NEO::Zebin::ZeInfo::extractZeInfoKernelSections(parser, kernelNode, kernelSections, "some_kernel", warnings);
+    auto errCode = NEO::Zebin::ZeInfo::extractZeInfoKernelSections(parser, kernelNode, kernelSections, "some_kernel", errors, warnings);
+    EXPECT_EQ(DecodeError::success, errCode);
     EXPECT_TRUE(warnings.empty()) << warnings;
     ASSERT_FALSE(kernelSections.nameNd.empty());
     ASSERT_FALSE(kernelSections.executionEnvNd.empty());
@@ -1157,7 +1162,7 @@ kernels:
     EXPECT_EQ("experimental_properties", parser.readKey(*kernelSections.experimentalPropertiesNd[0])) << parser.readKey(*kernelSections.experimentalPropertiesNd[0]).str();
 }
 
-TEST(ExtractZeInfoKernelSections, GivenUnknownSectionThenEmitsAWarning) {
+TEST(ExtractZeInfoKernelSections, GivenUnknownSectionThenEmitsAnError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -1177,9 +1182,12 @@ kernels:
     ASSERT_TRUE(success);
 
     auto &kernelNode = *parser.createChildrenRange(*parser.findNodeWithKeyDfs("kernels")).begin();
+    std::string errors;
     std::string warnings;
-    NEO::Zebin::ZeInfo::extractZeInfoKernelSections(parser, kernelNode, kernelSections, "some_kernel", warnings);
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"apple\" in context of : some_kernel\n", warnings.c_str());
+    auto errCode = NEO::Zebin::ZeInfo::extractZeInfoKernelSections(parser, kernelNode, kernelSections, "some_kernel", errors, warnings);
+    EXPECT_EQ(DecodeError::unkownZeinfoAttribute, errCode);
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"apple\" in context of : some_kernel\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
     ASSERT_FALSE(kernelSections.nameNd.empty());
     EXPECT_EQ("name", parser.readKey(*kernelSections.nameNd[0])) << parser.readKey(*kernelSections.nameNd[0]).str();
 }
@@ -1478,7 +1486,7 @@ kernels:
                                                                     "some_kernel",
                                                                     errors,
                                                                     warnings);
-    EXPECT_EQ(NEO::DecodeError::invalidBinary, err);
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
 }
 
 TEST_F(decodeZeInfoKernelEntryTest, GivenValidExperimentalPropertiesThenPopulateKernelDescriptorSucceeds) {
@@ -1949,7 +1957,7 @@ kernels:
     EXPECT_EQ(2, execEnv.indirectStatelessCount);
 }
 
-TEST(ReadZeInfoExecutionEnvironment, GivenUnknownEntryThenEmmitsWarning) {
+TEST(ReadZeInfoExecutionEnvironment, GivenUnknownEntryThenEmitsError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -1969,10 +1977,10 @@ kernels:
     std::string warnings;
     NEO::Zebin::ZeInfo::Types::Kernel::ExecutionEnv::ExecutionEnvBaseT execEnv;
     auto err = NEO::Zebin::ZeInfo::readZeInfoExecutionEnvironment(parser, execEnvNode, execEnv, "some_kernel", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" in context of some_kernel\n", warnings.c_str());
-    EXPECT_EQ(8, execEnv.simdSize);
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_FALSE(errors.empty());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" in context of some_kernel\n", errors.c_str());
 }
 
 TEST(ReadZeInfoExecutionEnvironment, GivenInvalidValueForKnownEntryThenFails) {
@@ -2068,7 +2076,7 @@ kernels:
     EXPECT_TRUE(equals(attributes.invalidKernel.value(), "invalid_kernel_reason"));
 }
 
-TEST(ReadZeInfoDebugEnvironment, givenValidYamlEntryThenSetProperMembers) {
+TEST(ReadZeInfoDebugEnvironment, givenSipSurfaceBtiEntryThenSetProperMembers) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -2094,7 +2102,33 @@ kernels:
     EXPECT_EQ(0, debugEnv.debugSurfaceBTI);
 }
 
-TEST(ReadZeInfoDebugEnvironment, givenUnknownEntryThenEmitsWarning) {
+TEST(ReadZeInfoDebugEnvironment, givenSipSurfaceOffsetEntryThenSetProperMembers) {
+    NEO::ConstStringRef yaml = R"===(---
+kernels:         
+  - name:            some_kernel
+    debug_env:
+        sip_surface_offset: 0
+...
+)===";
+
+    std::string parserErrors;
+    std::string parserWarnings;
+    NEO::Yaml::YamlParser parser;
+    bool success = parser.parse(yaml, parserErrors, parserWarnings);
+    ASSERT_TRUE(success);
+    auto &argsNode = *parser.findNodeWithKeyDfs("debug_env");
+    std::string errors;
+    std::string warnings;
+    NEO::Zebin::ZeInfo::Types::Kernel::DebugEnv::DebugEnvBaseT debugEnv;
+    auto err = NEO::Zebin::ZeInfo::readZeInfoDebugEnvironment(parser, argsNode, debugEnv, "some_kernel", errors, warnings);
+    EXPECT_EQ(NEO::DecodeError::success, err);
+    EXPECT_TRUE(errors.empty()) << errors;
+    EXPECT_TRUE(warnings.empty()) << warnings;
+
+    EXPECT_EQ(0, debugEnv.debugSurfaceOffset);
+}
+
+TEST(ReadZeInfoDebugEnvironment, givenUnknownEntryThenEmitsError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -2114,9 +2148,9 @@ kernels:
     std::string warnings;
     NEO::Zebin::ZeInfo::Types::Kernel::DebugEnv::DebugEnvBaseT debugEnv;
     auto err = NEO::Zebin::ZeInfo::readZeInfoDebugEnvironment(parser, argsNode, debugEnv, "some_kernel", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"different\" in context of some_kernel\n", warnings.c_str());
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"different\" in context of some_kernel\n", errors.c_str());
 }
 
 TEST(ReadZeInfoDebugEnvironment, givenInvalidValueForKnownEntryThenFail) {
@@ -2331,9 +2365,9 @@ kernels:
 ...
 )===";
     auto err = decodeZeInfoKernelEntry(zeinfo);
-    EXPECT_EQ(NEO::DecodeError::invalidBinary, err);
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
     EXPECT_TRUE(warnings.empty()) << warnings;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown attribute entry \"unknown_attribute\" in context of some_kernel\n", errors.c_str());
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"unknown_attribute\" in context of some_kernel\n", errors.c_str());
 }
 
 TEST(ReadZeInfoEnumChecked, GivenInvalidNodeThenFail) {
@@ -2396,7 +2430,7 @@ kernels:
     EXPECT_EQ(192, args[1].size);
 }
 
-TEST(ReadZeInfoPerThreadPayloadArguments, GivenUnknownEntryThenEmmitsWarning) {
+TEST(ReadZeInfoPerThreadPayloadArguments, GivenUnknownEntryThenEmitsError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -2418,14 +2452,10 @@ kernels:
     std::string warnings;
     NEO::Zebin::ZeInfo::KernelPerThreadPayloadArguments args;
     auto err = NEO::Zebin::ZeInfo::readZeInfoPerThreadPayloadArguments(parser, argsNode, args, "some_kernel", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for per-thread payload argument in context of some_kernel\n", warnings.c_str());
-
-    ASSERT_EQ(1U, args.size());
-    EXPECT_EQ(NEO::Zebin::ZeInfo::Types::Kernel::argTypePackedLocalIds, args[0].argType);
-    EXPECT_EQ(8, args[0].offset);
-    EXPECT_EQ(16, args[0].size);
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_FALSE(errors.empty());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for per-thread payload argument in context of some_kernel\n", errors.c_str());
 }
 
 TEST(ReadZeInfoPerThreadPayloadArguments, GivenInvalidValueForKnownEntryThenFails) {
@@ -2551,7 +2581,7 @@ kernels:
     EXPECT_TRUE(args[3].isPtr);
 }
 
-TEST(ReadZeInfoPayloadArguments, GivenUnknownEntryThenEmmitsWarning) {
+TEST(ReadZeInfoPayloadArguments, GivenUnknownEntryThenEmitsError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -2575,15 +2605,9 @@ kernels:
     NEO::Zebin::ZeInfo::KernelPayloadArguments args;
     int32_t maxArgIndex = -1;
     auto err = NEO::Zebin::ZeInfo::readZeInfoPayloadArguments(parser, argsNode, args, maxArgIndex, "some_kernel", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for payload argument in context of some_kernel\n", warnings.c_str());
-
-    ASSERT_EQ(1U, args.size());
-    EXPECT_EQ(NEO::Zebin::ZeInfo::Types::Kernel::argTypeArgByvalue, args[0].argType);
-    EXPECT_EQ(24, args[0].offset);
-    EXPECT_EQ(4, args[0].size);
-    EXPECT_EQ(2, args[0].argIndex);
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for payload argument in context of some_kernel\n", errors.c_str());
 }
 
 TEST(ReadZeInfoPayloadArguments, GivenArgByPointerWithSlmAddresingModeAndSlmAlignmentThenSetSlmAlignmentAccordingly) {
@@ -2688,7 +2712,7 @@ kernels:
     EXPECT_EQ(13, btis[1].argIndex);
 }
 
-TEST(ReadZeInfoBindingTableIndices, GivenUnknownEntryThenEmmitsWarning) {
+TEST(ReadZeInfoBindingTableIndices, GivenUnknownEntryThenEmitsError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -2709,9 +2733,9 @@ kernels:
     std::string warnings;
     NEO::Zebin::ZeInfo::KernelBindingTableEntries btis;
     auto err = NEO::Zebin::ZeInfo::readZeInfoBindingTableIndices(parser, argsNode, btis, "some_kernel", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for binding table index in context of some_kernel\n", warnings.c_str());
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for binding table index in context of some_kernel\n", errors.c_str());
 
     ASSERT_EQ(1U, btis.size());
     EXPECT_EQ(1, btis[0].btiValue);
@@ -2829,7 +2853,7 @@ kernels:
     EXPECT_TRUE(buffers[0].isSimtThread);
 }
 
-TEST(ReadZeInfoPerThreadMemoryBuffers, GivenUnknownEntryThenEmmitsWarning) {
+TEST(ReadZeInfoPerThreadMemoryBuffers, GivenUnknownEntryThenEmmitsError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:         
   - name:            some_kernel
@@ -2851,9 +2875,9 @@ kernels:
     std::string warnings;
     NEO::Zebin::ZeInfo::KernelPerThreadMemoryBuffers buffers;
     auto err = NEO::Zebin::ZeInfo::readZeInfoPerThreadMemoryBuffers(parser, buffersNode, buffers, "some_kernel", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for per-thread memory buffer in context of some_kernel\n", warnings.c_str());
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"something_new\" for per-thread memory buffer in context of some_kernel\n", errors.c_str());
 
     ASSERT_EQ(1U, buffers.size());
     EXPECT_EQ(NEO::Zebin::ZeInfo::Types::Kernel::PerThreadMemoryBuffer::AllocationTypeScratch, buffers[0].allocationType);
@@ -3205,7 +3229,7 @@ TEST(DecodeSingleDeviceBinaryZebin, GivenEmptyInZeInfoThenEmitsWarning) {
     EXPECT_TRUE(errors.empty()) << errors;
 }
 
-TEST(DecodeSingleDeviceBinaryZebin, GivenUnknownEntryInZeInfoGlobalScopeThenEmitsWarning) {
+TEST(DecodeSingleDeviceBinaryZebin, GivenUnknownEntryInZeInfoGlobalScopeThenEmitsError) {
     NEO::MockExecutionEnvironment mockExecutionEnvironment{};
     auto &gfxCoreHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<NEO::GfxCoreHelper>();
     ZebinTestData::ValidEmptyProgram zebin;
@@ -3219,9 +3243,9 @@ TEST(DecodeSingleDeviceBinaryZebin, GivenUnknownEntryInZeInfoGlobalScopeThenEmit
     std::string errors;
     std::string warnings;
     auto error = NEO::decodeSingleDeviceBinary<NEO::DeviceBinaryFormat::zebin>(programInfo, singleBinary, errors, warnings, gfxCoreHelper);
-    EXPECT_EQ(NEO::DecodeError::success, error);
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"some_entry\" in global scope of .ze_info\n", warnings.c_str());
-    EXPECT_TRUE(errors.empty()) << errors;
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, error);
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"some_entry\" in global scope of .ze_info\n", errors.c_str());
+    EXPECT_TRUE(warnings.empty()) << warnings;
 }
 
 TEST(DecodeSingleDeviceBinaryZebin, WhenZeInfoDoesNotContainKernelsSectionThenEmitsError) {
@@ -3239,8 +3263,9 @@ TEST(DecodeSingleDeviceBinaryZebin, WhenZeInfoDoesNotContainKernelsSectionThenEm
     std::string warnings;
     auto error = NEO::decodeSingleDeviceBinary<NEO::DeviceBinaryFormat::zebin>(programInfo, singleBinary, errors, warnings, gfxCoreHelper);
     EXPECT_EQ(NEO::DecodeError::invalidBinary, error);
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"a\" in global scope of .ze_info\n", warnings.c_str());
-    EXPECT_STREQ("DeviceBinaryFormat::zebin::ZeInfo : Expected exactly 1 of kernels, got : 0\n", errors.c_str());
+    EXPECT_STREQ("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"a\" in global scope of .ze_info\n"
+                 "DeviceBinaryFormat::zebin::ZeInfo : Expected exactly 1 of kernels, got : 0\n",
+                 errors.c_str());
 }
 
 TEST(DecodeSingleDeviceBinaryZebin, WhenZeInfoContainsMultipleKernelSectionsThenFails) {
@@ -3329,7 +3354,7 @@ TEST(DecodeSingleDeviceBinaryZebin, WhenZeInfoMinorVersionIsNewerThenEmitsWarnin
     ZebinTestData::ValidEmptyProgram zebin;
     zebin.removeSection(NEO::Zebin::Elf::SectionHeaderTypeZebin::SHT_ZEBIN_ZEINFO, NEO::Zebin::Elf::SectionNames::zeInfo);
     auto version = NEO::Zebin::ZeInfo::zeInfoDecoderVersion;
-    std::string expectedWarning = "DeviceBinaryFormat::zebin::.ze_info : Minor version : " + std::to_string(version.minor + 1) + " is newer than available in decoder : " + std::to_string(version.minor) + " - some features may be skipped\n";
+    std::string expectedWarning = "DeviceBinaryFormat::zebin::.ze_info : Minor version : " + std::to_string(version.minor + 1) + " is newer than available in decoder : " + std::to_string(version.minor) + "\n";
     version.minor += 1;
     auto zeInfo = std::string("version:\'") + versionToString(version) + "\'\nkernels:\n";
     zebin.appendSection(NEO::Zebin::Elf::SectionHeaderTypeZebin::SHT_ZEBIN_ZEINFO, NEO::Zebin::Elf::SectionNames::zeInfo, ArrayRef<const uint8_t>::fromAny(zeInfo.data(), zeInfo.size()));
@@ -6462,7 +6487,7 @@ TEST(ValidateTargetDeviceTests, givenMismatechAotConfigWhenValidatingTargetDevic
     targetDevice.aotConfig.value = 0x00001234;
     targetDevice.maxPointerSizeInBytes = 8u;
 
-    auto mismatchedAotConfig = static_cast<AOT::PRODUCT_CONFIG>(0x00004321);
+    auto mismatchedAotConfig = static_cast<AOT::PRODUCT_CONFIG>(0x00004321); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
     Zebin::Elf::ZebinTargetFlags targetMetadata;
     auto res = validateTargetDevice(targetDevice, Zebin::Elf::EI_CLASS_64, productFamily, renderCoreFamily, mismatchedAotConfig, targetMetadata);
     EXPECT_FALSE(res);
@@ -6541,6 +6566,75 @@ TEST(ValidateTargetDeviceTests, givenSteppingBiggerThanMaxHwRevisionWhenValidati
     EXPECT_FALSE(res);
 }
 
+TEST(ValidateTargetDeviceTests, givenDeviceInCompatModeWhenValidatingTargetDeviceThenUseItOnlyForValidation) {
+    for (auto &currentDevice : AOT::deviceAcronyms) {
+        TargetDevice targetDevice;
+        targetDevice.aotConfig.value = currentDevice.second;
+        targetDevice.maxPointerSizeInBytes = 8u;
+
+        Zebin::Elf::ZebinTargetFlags targetMetadata;
+
+        for (auto &deviceToCompare : AOT::deviceAcronyms) {
+            auto productConfigToCompare = deviceToCompare.second;
+
+            auto res = validateTargetDevice(targetDevice,
+                                            Zebin::Elf::EI_CLASS_64,
+                                            productFamily,
+                                            renderCoreFamily,
+                                            productConfigToCompare,
+                                            targetMetadata);
+
+            auto prodConfCompatPairItr = AOT::compatibilityMapping.find(productConfigToCompare);
+
+            if (targetDevice.aotConfig.value == productConfigToCompare) {
+                EXPECT_TRUE(res);
+            } else if (prodConfCompatPairItr != AOT::compatibilityMapping.end()) {
+                auto prodConfVec = prodConfCompatPairItr->second;
+                auto found = std::find(prodConfVec.begin(), prodConfVec.end(), currentDevice.second);
+                if (found != prodConfVec.end()) {
+                    EXPECT_TRUE(res);
+                } else {
+                    EXPECT_FALSE(res);
+                }
+            } else {
+                EXPECT_FALSE(res);
+            }
+        }
+    }
+}
+
+TEST(ValidateTargetDeviceTests, givenDeviceWithoutCompatModeWhenValidatingTargetDeviceThenUseItOnlyForValidation) {
+    bool compatModeInitState = debugManager.flags.EnableCompatibilityMode.get();
+    debugManager.flags.EnableCompatibilityMode.set(false);
+
+    for (auto &currentDevice : AOT::deviceAcronyms) {
+        TargetDevice targetDevice;
+        targetDevice.aotConfig.value = currentDevice.second;
+        targetDevice.maxPointerSizeInBytes = 8u;
+
+        Zebin::Elf::ZebinTargetFlags targetMetadata;
+
+        for (auto &deviceToCompare : AOT::deviceAcronyms) {
+            auto productConfigToCompare = deviceToCompare.second;
+
+            auto res = validateTargetDevice(targetDevice,
+                                            Zebin::Elf::EI_CLASS_64,
+                                            productFamily,
+                                            renderCoreFamily,
+                                            productConfigToCompare,
+                                            targetMetadata);
+
+            if (targetDevice.aotConfig.value == productConfigToCompare) {
+                EXPECT_TRUE(res);
+            } else {
+                EXPECT_FALSE(res);
+            }
+        }
+    }
+
+    debugManager.flags.EnableCompatibilityMode.set(compatModeInitState);
+}
+
 TEST(PopulateGlobalDeviceHostNameMapping, givenValidZebinWithGlobalHostAccessTableSectionThenPopulateHostDeviceNameMapCorrectly) {
     NEO::MockExecutionEnvironment mockExecutionEnvironment{};
     auto &gfxCoreHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<NEO::GfxCoreHelper>();
@@ -6615,7 +6709,7 @@ TEST(PopulateGlobalDeviceHostNameMapping, givenZebinWithGlobalHostAccessTableSec
     }
 }
 
-TEST(PopulateGlobalDeviceHostNameMapping, givenZebinWithGlobalHostAccessTableSectionAndUnrecognizableKeyThenEmitWarning) {
+TEST(PopulateGlobalDeviceHostNameMapping, givenZebinWithGlobalHostAccessTableSectionAndUnrecognizableKeyThenEmitError) {
     NEO::ConstStringRef yaml = R"===(
         kernels:
             - name : some_kernel
@@ -6637,11 +6731,11 @@ TEST(PopulateGlobalDeviceHostNameMapping, givenZebinWithGlobalHostAccessTableSec
     std::string warnings;
     NEO::Zebin::ZeInfo::ZeInfoGlobalHostAccessTables tables;
     auto err = NEO::Zebin::ZeInfo::readZeInfoGlobalHostAceessTable(parser, tableNode, tables, "global_host_access_table", errors, warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_TRUE(warnings.empty()) << warnings;
 
-    std::string expectedWarning("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"banana_type\" for payload argument in context of global_host_access_table\n");
-    EXPECT_STREQ(expectedWarning.c_str(), warnings.c_str());
+    std::string expectedError("DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"banana_type\" for payload argument in context of global_host_access_table\n");
+    EXPECT_STREQ(expectedError.c_str(), errors.c_str());
 }
 
 TEST(PopulateZeInfoExternalFunctionsMetadata, GivenValidExternalFunctionsMetadataThenParsesItProperly) {
@@ -6694,7 +6788,7 @@ functions:
     }
 }
 
-TEST(PopulateZeInfoExternalFunctionsMetadata, GivenValidExternalFunctionsMetadataWithUnknownEntriesThenParsesItProperly) {
+TEST(PopulateZeInfoExternalFunctionsMetadata, GivenValidExternalFunctionsMetadataWithUnknownEntriesThenEmitError) {
     NEO::ConstStringRef yaml = R"===(---
 functions:
   - name: fun0
@@ -6720,17 +6814,11 @@ functions:
     std::string warnings;
     ProgramInfo programInfo;
     auto err = NEO::Zebin::ZeInfo::populateExternalFunctionsMetadata(programInfo, parser, functionNode, errors, warnings);
-    EXPECT_EQ(DecodeError::success, err);
-    EXPECT_TRUE(errors.empty()) << errors;
-    const auto expectedWarning = "DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"unknown\" in context of : external functions\n";
-    EXPECT_STREQ(expectedWarning, warnings.c_str());
-
-    ASSERT_EQ(1U, programInfo.externalFunctions.size());
-    auto &fun0Info = programInfo.externalFunctions[0];
-    EXPECT_STREQ("fun0", fun0Info.functionName.c_str());
-    EXPECT_EQ(128U, fun0Info.numGrfRequired);
-    EXPECT_EQ(8U, fun0Info.simdSize);
-    EXPECT_EQ(1U, fun0Info.barrierCount);
+    EXPECT_EQ(DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_FALSE(errors.empty());
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    const auto expectedError = "DeviceBinaryFormat::zebin::.ze_info : Unknown entry \"unknown\" in context of : external functions\n";
+    EXPECT_STREQ(expectedError, errors.c_str());
 }
 
 TEST(PopulateZeInfoExternalFunctionsMetadata, GivenInvalidExternalFunctionsMetadataThenFail) {
@@ -6971,7 +7059,7 @@ TEST(PopulateInlineSamplers, GivenInvalidFilterModeThenPopulateInlineSamplersFai
     EXPECT_FALSE(errors.empty());
 }
 
-TEST(ReadZeInfoInlineSamplers, GivenUnknownEntryThenPrintWarning) {
+TEST(ReadZeInfoInlineSamplers, GivenUnknownEntryThenPrintError) {
     NEO::ConstStringRef yaml = R"===(---
 kernels:
   - name:            some_kernel
@@ -6996,9 +7084,9 @@ kernels:
                                                             "some_kernel",
                                                             errors,
                                                             warnings);
-    EXPECT_EQ(NEO::DecodeError::success, err);
-    EXPECT_FALSE(warnings.empty());
-    EXPECT_TRUE(errors.empty()) << errors;
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, err);
+    EXPECT_TRUE(warnings.empty()) << warnings;
+    EXPECT_FALSE(errors.empty());
 }
 
 TEST(ZeInfoMetadataExtractionFromElf, givenValidElfContainingZeInfoSectionWhenExtractingZeInfoMetadataStringThenProperMetadataIsReturnedForEachElfType) {
@@ -7044,4 +7132,25 @@ TEST(ZeInfoMetadataExtractionFromElf, givenValidElfNotContainingZeInfoSectionWhe
     auto zeInfoStr64B = getZeInfoFromZebin(ArrayRef<const uint8_t>::fromAny(encoded64BElf.data(), encoded64BElf.size()), outErrors, outWarnings);
     EXPECT_EQ(nullptr, zeInfoStr32B.data());
     EXPECT_EQ(nullptr, zeInfoStr64B.data());
+}
+
+TEST(EncounterUnknownZeInfoAttribute, whenUnknownAttributeIsEncounteredThenErrorMessageAndErrorCodeAreSet) {
+    std::string errorMessage, warning;
+    NEO::DecodeError errorCode = NEO::DecodeError::success;
+    NEO::Zebin::ZeInfo::encounterUnknownZeInfoAttribute("unknown_attribute", errorMessage, warning, errorCode);
+    EXPECT_EQ(NEO::DecodeError::unkownZeinfoAttribute, errorCode);
+    EXPECT_TRUE(warning.empty()) << warning;
+    EXPECT_FALSE(errorMessage.empty());
+}
+
+TEST(EncounterUnknownZeInfoAttribute, givenEnvVariabletoIgnoreUnknownAttributesWhenUnknownAttributeIsEncounteredThenWarningIsSet) {
+    DebugManagerStateRestore dbgRestore;
+    NEO::debugManager.flags.IgnoreZebinUnknownAttributes.set(true);
+
+    std::string errorMessage, warning;
+    NEO::DecodeError errorCode = NEO::DecodeError::success;
+    NEO::Zebin::ZeInfo::encounterUnknownZeInfoAttribute("unknown_attribute", errorMessage, warning, errorCode);
+    EXPECT_EQ(NEO::DecodeError::success, errorCode);
+    EXPECT_TRUE(errorMessage.empty()) << errorMessage;
+    EXPECT_FALSE(warning.empty());
 }

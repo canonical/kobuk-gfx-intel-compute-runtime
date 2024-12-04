@@ -145,7 +145,7 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
     virtual void patchGlobalOffset() = 0;
     virtual void patchRegionParams(const CmdListKernelLaunchParams &launchParams) = 0;
 
-    virtual uint32_t suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineGroupType, bool isEngineInstanced, bool forceSingleTileQuery) = 0;
+    virtual uint32_t suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineGroupType, bool forceSingleTileQuery) = 0;
     virtual ze_result_t setCacheConfig(ze_cache_config_flags_t flags) = 0;
 
     virtual ze_result_t getProfileInfo(zet_profile_properties_t *pProfileProperties) = 0;
@@ -184,10 +184,6 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
 
     inline ze_kernel_handle_t toHandle() { return this; }
 
-    bool isMidThreadPreemptionDisallowedForRayTracingKernels() const {
-        return midThreadPreemptionDisallowedForRayTracingKernels;
-    }
-
     uint32_t getMaxWgCountPerTile(NEO::EngineGroupType engineGroupType) const {
         auto value = maxWgCountPerTileCcs;
         if (engineGroupType == NEO::EngineGroupType::renderCompute) {
@@ -202,7 +198,6 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI {
     uint32_t maxWgCountPerTileCcs = 0;
     uint32_t maxWgCountPerTileRcs = 0;
     uint32_t maxWgCountPerTileCooperative = 0;
-    bool midThreadPreemptionDisallowedForRayTracingKernels = false;
     bool heaplessEnabled = false;
     bool implicitScalingEnabled = false;
     bool localDispatchSupport = false;
