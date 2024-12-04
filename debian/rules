@@ -1,9 +1,9 @@
 #!/usr/bin/make -f
 NEO_MAJOR = 24
 NEO_MINOR = 39
-NEO_BUILD = 31294.10
+NEO_BUILD = 31294.12
 build_id = 31294
-build_hf_id = 10
+build_hf_id = 12
 
 
 export DEB_BUILD_MAINT_OPTIONS	= hardening=+all
