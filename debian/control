@@ -26,8 +26,8 @@ Replaces: intel-level-zero-gpu
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libigc1 (>= 2.1.14),
- libigdfcl1 (>= 2.1.14),
+ libigc2 (>= 2.1.14),
+ libigdfcl2 (>= 2.1.14),
  libnl-3-200,
  libnl-route-3-200,
  libze1
@@ -55,8 +55,8 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  ocl-icd-libopencl1,
- libigc1 (>= 2.1.14),
- libigdfcl1 (>= 2.1.14),
+ libigc2 (>= 2.1.14),
+ libigdfcl2 (>= 2.1.14),
 Breaks:
  intel-opencl
 Replaces:
