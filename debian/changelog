@@ -1,3 +1,9 @@
+intel-compute-runtime (24.45.31740.14-1~24.10~ppa2) oracular; urgency=medium
+
+  * No-op PPA version bump to fix an error in the previous changelog
+
+ -- Shane McKee <shane.mckee@canonical.com>  Tue, 17 Dec 2024 04:25:13 +0800
+
 intel-compute-runtime (24.45.31740.14-1~24.10~ppa1) oracular; urgency=medium
 
   * Update version to 24.45.31740.14 
