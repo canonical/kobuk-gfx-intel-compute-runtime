@@ -1,3 +1,9 @@
+intel-compute-runtime (24.52.32224.5-1~24.10~ppa1) oracular; urgency=medium
+
+  * Update version to 24.52.32224.5
+
+ -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Mon, 13 Jan 2025 14:27:34 -0800
+
 intel-compute-runtime (24.45.31740.14-1~24.10~ppa2) oracular; urgency=medium
 
   * No-op PPA version bump to fix an error in the previous changelog
