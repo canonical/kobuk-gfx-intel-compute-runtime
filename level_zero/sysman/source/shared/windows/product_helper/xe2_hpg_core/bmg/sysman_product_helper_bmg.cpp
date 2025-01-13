@@ -20,11 +20,20 @@ namespace Sysman {
 
 constexpr static auto gfxProduct = IGFX_BMG;
 
+// XTAL clock frequency is denoted as an integer between [0-3] with a predefined value for each number. This vector defines the predefined value for each integer represented by the index of the vector.
+static const std::vector<double> indexToXtalClockFrequecyMap = {24, 19.2, 38.4, 25};
+
 static std::map<unsigned long, std::map<std::string, uint32_t>> guidToKeyOffsetMap = {
     {0x1e2f8200, // BMG PUNIT rev 1
-     {{"VRAM_BANDWIDTH", 14}}},
+     {{"XTAL_CLK_FREQUENCY", 1},
+      {"VRAM_BANDWIDTH", 14},
+      {"XTAL_COUNT", 128},
+      {"VCCGT_ENERGY_ACCUMULATOR", 407},
+      {"VCCDDR_ENERGY_ACCUMULATOR", 410}}},
     {0x5e2f8210, // BMG OOBMSM rev 15
-     {{"SOC_THERMAL_SENSORS_TEMPERATURE_0_2_0_GTTMMADR[1]", 41},
+     {{"PACKAGE_ENERGY_STATUS_SKU", 34},
+      {"PLATFORM_ENERGY_STATUS", 35},
+      {"SOC_THERMAL_SENSORS_TEMPERATURE_0_2_0_GTTMMADR[1]", 41},
       {"VRAM_TEMPERATURE_0_2_0_GTTMMADR", 42},
       {"rx_byte_count_lsb", 70},
       {"rx_byte_count_msb", 69},
@@ -276,7 +285,263 @@ static std::map<unsigned long, std::map<std::string, uint32_t>> guidToKeyOffsetM
       {"GDDR4_CH1_GT_64B_WR_REQ_UPPER", 280},
       {"GDDR4_CH1_GT_64B_WR_REQ_LOWER", 281},
       {"GDDR5_CH1_GT_64B_WR_REQ_UPPER", 320},
-      {"GDDR5_CH1_GT_64B_WR_REQ_LOWER", 321}}}};
+      {"GDDR5_CH1_GT_64B_WR_REQ_LOWER", 321}}},
+    {0x5e2f8211, // BMG OOBMSM rev 16
+     {{"PACKAGE_ENERGY_STATUS_SKU", 34},
+      {"PLATFORM_ENERGY_STATUS", 35},
+      {"SOC_THERMAL_SENSORS_TEMPERATURE_0_2_0_GTTMMADR[1]", 41},
+      {"VRAM_TEMPERATURE_0_2_0_GTTMMADR", 42},
+      {"rx_byte_count_lsb", 70},
+      {"rx_byte_count_msb", 71},
+      {"tx_byte_count_lsb", 72},
+      {"tx_byte_count_msb", 73},
+      {"rx_pkt_count_lsb", 74},
+      {"rx_pkt_count_msb", 75},
+      {"tx_pkt_count_lsb", 76},
+      {"tx_pkt_count_msb", 77},
+      {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", 93},
+      {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", 92},
+      {"GDDR0_CH0_GT_32B_RD_REQ_UPPER", 95},
+      {"GDDR0_CH0_GT_32B_RD_REQ_LOWER", 94},
+      {"GDDR1_CH0_GT_32B_RD_REQ_UPPER", 135},
+      {"GDDR1_CH0_GT_32B_RD_REQ_LOWER", 134},
+      {"GDDR2_CH0_GT_32B_RD_REQ_UPPER", 175},
+      {"GDDR2_CH0_GT_32B_RD_REQ_LOWER", 174},
+      {"GDDR3_CH0_GT_32B_RD_REQ_UPPER", 215},
+      {"GDDR3_CH0_GT_32B_RD_REQ_LOWER", 214},
+      {"GDDR4_CH0_GT_32B_RD_REQ_UPPER", 255},
+      {"GDDR4_CH0_GT_32B_RD_REQ_LOWER", 254},
+      {"GDDR5_CH0_GT_32B_RD_REQ_UPPER", 295},
+      {"GDDR5_CH0_GT_32B_RD_REQ_LOWER", 294},
+      {"GDDR0_CH1_GT_32B_RD_REQ_UPPER", 115},
+      {"GDDR0_CH1_GT_32B_RD_REQ_LOWER", 114},
+      {"GDDR1_CH1_GT_32B_RD_REQ_UPPER", 155},
+      {"GDDR1_CH1_GT_32B_RD_REQ_LOWER", 154},
+      {"GDDR2_CH1_GT_32B_RD_REQ_UPPER", 195},
+      {"GDDR2_CH1_GT_32B_RD_REQ_LOWER", 194},
+      {"GDDR3_CH1_GT_32B_RD_REQ_UPPER", 235},
+      {"GDDR3_CH1_GT_32B_RD_REQ_LOWER", 234},
+      {"GDDR4_CH1_GT_32B_RD_REQ_UPPER", 275},
+      {"GDDR4_CH1_GT_32B_RD_REQ_LOWER", 274},
+      {"GDDR5_CH1_GT_32B_RD_REQ_UPPER", 315},
+      {"GDDR5_CH1_GT_32B_RD_REQ_LOWER", 314},
+      {"GDDR0_CH0_GT_32B_WR_REQ_UPPER", 99},
+      {"GDDR0_CH0_GT_32B_WR_REQ_LOWER", 98},
+      {"GDDR1_CH0_GT_32B_WR_REQ_UPPER", 139},
+      {"GDDR1_CH0_GT_32B_WR_REQ_LOWER", 138},
+      {"GDDR2_CH0_GT_32B_WR_REQ_UPPER", 179},
+      {"GDDR2_CH0_GT_32B_WR_REQ_LOWER", 178},
+      {"GDDR3_CH0_GT_32B_WR_REQ_UPPER", 219},
+      {"GDDR3_CH0_GT_32B_WR_REQ_LOWER", 218},
+      {"GDDR4_CH0_GT_32B_WR_REQ_UPPER", 259},
+      {"GDDR4_CH0_GT_32B_WR_REQ_LOWER", 258},
+      {"GDDR5_CH0_GT_32B_WR_REQ_UPPER", 299},
+      {"GDDR5_CH0_GT_32B_WR_REQ_LOWER", 298},
+      {"GDDR0_CH1_GT_32B_WR_REQ_UPPER", 119},
+      {"GDDR0_CH1_GT_32B_WR_REQ_LOWER", 118},
+      {"GDDR1_CH1_GT_32B_WR_REQ_UPPER", 159},
+      {"GDDR1_CH1_GT_32B_WR_REQ_LOWER", 158},
+      {"GDDR2_CH1_GT_32B_WR_REQ_UPPER", 199},
+      {"GDDR2_CH1_GT_32B_WR_REQ_LOWER", 198},
+      {"GDDR3_CH1_GT_32B_WR_REQ_UPPER", 239},
+      {"GDDR3_CH1_GT_32B_WR_REQ_LOWER", 238},
+      {"GDDR4_CH1_GT_32B_WR_REQ_UPPER", 279},
+      {"GDDR4_CH1_GT_32B_WR_REQ_LOWER", 278},
+      {"GDDR5_CH1_GT_32B_WR_REQ_UPPER", 319},
+      {"GDDR5_CH1_GT_32B_WR_REQ_LOWER", 318},
+      {"GDDR0_CH0_DISPLAYVC0_32B_RD_REQ_UPPER", 103},
+      {"GDDR0_CH0_DISPLAYVC0_32B_RD_REQ_LOWER", 102},
+      {"GDDR1_CH0_DISPLAYVC0_32B_RD_REQ_UPPER", 143},
+      {"GDDR1_CH0_DISPLAYVC0_32B_RD_REQ_LOWER", 142},
+      {"GDDR2_CH0_DISPLAYVC0_32B_RD_REQ_UPPER", 183},
+      {"GDDR2_CH0_DISPLAYVC0_32B_RD_REQ_LOWER", 182},
+      {"GDDR3_CH0_DISPLAYVC0_32B_RD_REQ_UPPER", 223},
+      {"GDDR3_CH0_DISPLAYVC0_32B_RD_REQ_LOWER", 222},
+      {"GDDR4_CH0_DISPLAYVC0_32B_RD_REQ_UPPER", 263},
+      {"GDDR4_CH0_DISPLAYVC0_32B_RD_REQ_LOWER", 262},
+      {"GDDR5_CH0_DISPLAYVC0_32B_RD_REQ_UPPER", 303},
+      {"GDDR5_CH0_DISPLAYVC0_32B_RD_REQ_LOWER", 302},
+      {"GDDR0_CH1_DISPLAYVC0_32B_RD_REQ_UPPER", 123},
+      {"GDDR0_CH1_DISPLAYVC0_32B_RD_REQ_LOWER", 122},
+      {"GDDR1_CH1_DISPLAYVC0_32B_RD_REQ_UPPER", 163},
+      {"GDDR1_CH1_DISPLAYVC0_32B_RD_REQ_LOWER", 162},
+      {"GDDR2_CH1_DISPLAYVC0_32B_RD_REQ_UPPER", 203},
+      {"GDDR2_CH1_DISPLAYVC0_32B_RD_REQ_LOWER", 202},
+      {"GDDR3_CH1_DISPLAYVC0_32B_RD_REQ_UPPER", 243},
+      {"GDDR3_CH1_DISPLAYVC0_32B_RD_REQ_LOWER", 242},
+      {"GDDR4_CH1_DISPLAYVC0_32B_RD_REQ_UPPER", 283},
+      {"GDDR4_CH1_DISPLAYVC0_32B_RD_REQ_LOWER", 282},
+      {"GDDR5_CH1_DISPLAYVC0_32B_RD_REQ_UPPER", 323},
+      {"GDDR5_CH1_DISPLAYVC0_32B_RD_REQ_LOWER", 322},
+      {"GDDR0_CH0_SOC_32B_RD_REQ_UPPER", 107},
+      {"GDDR0_CH0_SOC_32B_RD_REQ_LOWER", 106},
+      {"GDDR1_CH0_SOC_32B_RD_REQ_UPPER", 147},
+      {"GDDR1_CH0_SOC_32B_RD_REQ_LOWER", 146},
+      {"GDDR2_CH0_SOC_32B_RD_REQ_UPPER", 187},
+      {"GDDR2_CH0_SOC_32B_RD_REQ_LOWER", 186},
+      {"GDDR3_CH0_SOC_32B_RD_REQ_UPPER", 227},
+      {"GDDR3_CH0_SOC_32B_RD_REQ_LOWER", 226},
+      {"GDDR4_CH0_SOC_32B_RD_REQ_UPPER", 267},
+      {"GDDR4_CH0_SOC_32B_RD_REQ_LOWER", 266},
+      {"GDDR5_CH0_SOC_32B_RD_REQ_UPPER", 307},
+      {"GDDR5_CH0_SOC_32B_RD_REQ_LOWER", 306},
+      {"GDDR0_CH1_SOC_32B_RD_REQ_UPPER", 127},
+      {"GDDR0_CH1_SOC_32B_RD_REQ_LOWER", 126},
+      {"GDDR1_CH1_SOC_32B_RD_REQ_UPPER", 167},
+      {"GDDR1_CH1_SOC_32B_RD_REQ_LOWER", 166},
+      {"GDDR2_CH1_SOC_32B_RD_REQ_UPPER", 207},
+      {"GDDR2_CH1_SOC_32B_RD_REQ_LOWER", 206},
+      {"GDDR3_CH1_SOC_32B_RD_REQ_UPPER", 247},
+      {"GDDR3_CH1_SOC_32B_RD_REQ_LOWER", 246},
+      {"GDDR4_CH1_SOC_32B_RD_REQ_UPPER", 287},
+      {"GDDR4_CH1_SOC_32B_RD_REQ_LOWER", 286},
+      {"GDDR5_CH1_SOC_32B_RD_REQ_UPPER", 327},
+      {"GDDR5_CH1_SOC_32B_RD_REQ_LOWER", 326},
+      {"GDDR0_CH0_SOC_32B_WR_REQ_UPPER", 111},
+      {"GDDR0_CH0_SOC_32B_WR_REQ_LOWER", 110},
+      {"GDDR1_CH0_SOC_32B_WR_REQ_UPPER", 151},
+      {"GDDR1_CH0_SOC_32B_WR_REQ_LOWER", 150},
+      {"GDDR2_CH0_SOC_32B_WR_REQ_UPPER", 191},
+      {"GDDR2_CH0_SOC_32B_WR_REQ_LOWER", 190},
+      {"GDDR3_CH0_SOC_32B_WR_REQ_UPPER", 231},
+      {"GDDR3_CH0_SOC_32B_WR_REQ_LOWER", 230},
+      {"GDDR4_CH0_SOC_32B_WR_REQ_UPPER", 271},
+      {"GDDR4_CH0_SOC_32B_WR_REQ_LOWER", 270},
+      {"GDDR5_CH0_SOC_32B_WR_REQ_UPPER", 311},
+      {"GDDR5_CH0_SOC_32B_WR_REQ_LOWER", 310},
+      {"GDDR0_CH1_SOC_32B_WR_REQ_UPPER", 131},
+      {"GDDR0_CH1_SOC_32B_WR_REQ_LOWER", 130},
+      {"GDDR1_CH1_SOC_32B_WR_REQ_UPPER", 171},
+      {"GDDR1_CH1_SOC_32B_WR_REQ_LOWER", 170},
+      {"GDDR2_CH1_SOC_32B_WR_REQ_UPPER", 211},
+      {"GDDR2_CH1_SOC_32B_WR_REQ_LOWER", 210},
+      {"GDDR3_CH1_SOC_32B_WR_REQ_UPPER", 251},
+      {"GDDR3_CH1_SOC_32B_WR_REQ_LOWER", 250},
+      {"GDDR4_CH1_SOC_32B_WR_REQ_UPPER", 291},
+      {"GDDR4_CH1_SOC_32B_WR_REQ_LOWER", 290},
+      {"GDDR5_CH1_SOC_32B_WR_REQ_UPPER", 331},
+      {"GDDR5_CH1_SOC_32B_WR_REQ_LOWER", 330},
+      {"MSU_BITMASK", 922},
+      {"GDDR0_CH0_GT_64B_RD_REQ_UPPER", 97},
+      {"GDDR0_CH0_GT_64B_RD_REQ_LOWER", 96},
+      {"GDDR1_CH0_GT_64B_RD_REQ_UPPER", 137},
+      {"GDDR1_CH0_GT_64B_RD_REQ_LOWER", 136},
+      {"GDDR2_CH0_GT_64B_RD_REQ_UPPER", 177},
+      {"GDDR2_CH0_GT_64B_RD_REQ_LOWER", 176},
+      {"GDDR3_CH0_GT_64B_RD_REQ_UPPER", 217},
+      {"GDDR3_CH0_GT_64B_RD_REQ_LOWER", 216},
+      {"GDDR4_CH0_GT_64B_RD_REQ_UPPER", 257},
+      {"GDDR4_CH0_GT_64B_RD_REQ_LOWER", 256},
+      {"GDDR5_CH0_GT_64B_RD_REQ_UPPER", 297},
+      {"GDDR5_CH0_GT_64B_RD_REQ_LOWER", 296},
+      {"GDDR0_CH1_GT_64B_RD_REQ_UPPER", 117},
+      {"GDDR0_CH1_GT_64B_RD_REQ_LOWER", 116},
+      {"GDDR1_CH1_GT_64B_RD_REQ_UPPER", 157},
+      {"GDDR1_CH1_GT_64B_RD_REQ_LOWER", 156},
+      {"GDDR2_CH1_GT_64B_RD_REQ_UPPER", 197},
+      {"GDDR2_CH1_GT_64B_RD_REQ_LOWER", 196},
+      {"GDDR3_CH1_GT_64B_RD_REQ_UPPER", 237},
+      {"GDDR3_CH1_GT_64B_RD_REQ_LOWER", 236},
+      {"GDDR4_CH1_GT_64B_RD_REQ_UPPER", 277},
+      {"GDDR4_CH1_GT_64B_RD_REQ_LOWER", 276},
+      {"GDDR5_CH1_GT_64B_RD_REQ_UPPER", 317},
+      {"GDDR5_CH1_GT_64B_RD_REQ_LOWER", 316},
+      {"GDDR0_CH0_DISPLAYVC0_64B_RD_REQ_UPPER", 105},
+      {"GDDR0_CH0_DISPLAYVC0_64B_RD_REQ_LOWER", 104},
+      {"GDDR1_CH0_DISPLAYVC0_64B_RD_REQ_UPPER", 145},
+      {"GDDR1_CH0_DISPLAYVC0_64B_RD_REQ_LOWER", 144},
+      {"GDDR2_CH0_DISPLAYVC0_64B_RD_REQ_UPPER", 185},
+      {"GDDR2_CH0_DISPLAYVC0_64B_RD_REQ_LOWER", 184},
+      {"GDDR3_CH0_DISPLAYVC0_64B_RD_REQ_UPPER", 225},
+      {"GDDR3_CH0_DISPLAYVC0_64B_RD_REQ_LOWER", 224},
+      {"GDDR4_CH0_DISPLAYVC0_64B_RD_REQ_UPPER", 265},
+      {"GDDR4_CH0_DISPLAYVC0_64B_RD_REQ_LOWER", 264},
+      {"GDDR5_CH0_DISPLAYVC0_64B_RD_REQ_UPPER", 305},
+      {"GDDR5_CH0_DISPLAYVC0_64B_RD_REQ_LOWER", 304},
+      {"GDDR0_CH1_DISPLAYVC0_64B_RD_REQ_UPPER", 125},
+      {"GDDR0_CH1_DISPLAYVC0_64B_RD_REQ_LOWER", 124},
+      {"GDDR1_CH1_DISPLAYVC0_64B_RD_REQ_UPPER", 165},
+      {"GDDR1_CH1_DISPLAYVC0_64B_RD_REQ_LOWER", 164},
+      {"GDDR2_CH1_DISPLAYVC0_64B_RD_REQ_UPPER", 205},
+      {"GDDR2_CH1_DISPLAYVC0_64B_RD_REQ_LOWER", 204},
+      {"GDDR3_CH1_DISPLAYVC0_64B_RD_REQ_UPPER", 245},
+      {"GDDR3_CH1_DISPLAYVC0_64B_RD_REQ_LOWER", 244},
+      {"GDDR4_CH1_DISPLAYVC0_64B_RD_REQ_UPPER", 285},
+      {"GDDR4_CH1_DISPLAYVC0_64B_RD_REQ_LOWER", 284},
+      {"GDDR5_CH1_DISPLAYVC0_64B_RD_REQ_UPPER", 325},
+      {"GDDR5_CH1_DISPLAYVC0_64B_RD_REQ_LOWER", 324},
+      {"GDDR0_CH0_SOC_64B_RD_REQ_UPPER", 109},
+      {"GDDR0_CH0_SOC_64B_RD_REQ_LOWER", 108},
+      {"GDDR1_CH0_SOC_64B_RD_REQ_UPPER", 149},
+      {"GDDR1_CH0_SOC_64B_RD_REQ_LOWER", 148},
+      {"GDDR2_CH0_SOC_64B_RD_REQ_UPPER", 189},
+      {"GDDR2_CH0_SOC_64B_RD_REQ_LOWER", 188},
+      {"GDDR3_CH0_SOC_64B_RD_REQ_UPPER", 229},
+      {"GDDR3_CH0_SOC_64B_RD_REQ_LOWER", 228},
+      {"GDDR4_CH0_SOC_64B_RD_REQ_UPPER", 269},
+      {"GDDR4_CH0_SOC_64B_RD_REQ_LOWER", 268},
+      {"GDDR5_CH0_SOC_64B_RD_REQ_UPPER", 309},
+      {"GDDR5_CH0_SOC_64B_RD_REQ_LOWER", 308},
+      {"GDDR0_CH1_SOC_64B_RD_REQ_UPPER", 129},
+      {"GDDR0_CH1_SOC_64B_RD_REQ_LOWER", 128},
+      {"GDDR1_CH1_SOC_64B_RD_REQ_UPPER", 169},
+      {"GDDR1_CH1_SOC_64B_RD_REQ_LOWER", 168},
+      {"GDDR2_CH1_SOC_64B_RD_REQ_UPPER", 209},
+      {"GDDR2_CH1_SOC_64B_RD_REQ_LOWER", 208},
+      {"GDDR3_CH1_SOC_64B_RD_REQ_UPPER", 249},
+      {"GDDR3_CH1_SOC_64B_RD_REQ_LOWER", 248},
+      {"GDDR4_CH1_SOC_64B_RD_REQ_UPPER", 289},
+      {"GDDR4_CH1_SOC_64B_RD_REQ_LOWER", 288},
+      {"GDDR5_CH1_SOC_64B_RD_REQ_UPPER", 329},
+      {"GDDR5_CH1_SOC_64B_RD_REQ_LOWER", 328},
+      {"GDDR0_CH0_SOC_64B_WR_REQ_UPPER", 113},
+      {"GDDR0_CH0_SOC_64B_WR_REQ_LOWER", 112},
+      {"GDDR1_CH0_SOC_64B_WR_REQ_UPPER", 153},
+      {"GDDR1_CH0_SOC_64B_WR_REQ_LOWER", 152},
+      {"GDDR2_CH0_SOC_64B_WR_REQ_UPPER", 193},
+      {"GDDR2_CH0_SOC_64B_WR_REQ_LOWER", 192},
+      {"GDDR3_CH0_SOC_64B_WR_REQ_UPPER", 233},
+      {"GDDR3_CH0_SOC_64B_WR_REQ_LOWER", 232},
+      {"GDDR4_CH0_SOC_64B_WR_REQ_UPPER", 273},
+      {"GDDR4_CH0_SOC_64B_WR_REQ_LOWER", 272},
+      {"GDDR5_CH0_SOC_64B_WR_REQ_UPPER", 313},
+      {"GDDR5_CH0_SOC_64B_WR_REQ_LOWER", 312},
+      {"GDDR0_CH1_SOC_64B_WR_REQ_UPPER", 133},
+      {"GDDR0_CH1_SOC_64B_WR_REQ_LOWER", 132},
+      {"GDDR1_CH1_SOC_64B_WR_REQ_UPPER", 173},
+      {"GDDR1_CH1_SOC_64B_WR_REQ_LOWER", 172},
+      {"GDDR2_CH1_SOC_64B_WR_REQ_UPPER", 213},
+      {"GDDR2_CH1_SOC_64B_WR_REQ_LOWER", 212},
+      {"GDDR3_CH1_SOC_64B_WR_REQ_UPPER", 253},
+      {"GDDR3_CH1_SOC_64B_WR_REQ_LOWER", 252},
+      {"GDDR4_CH1_SOC_64B_WR_REQ_UPPER", 293},
+      {"GDDR4_CH1_SOC_64B_WR_REQ_LOWER", 292},
+      {"GDDR5_CH1_SOC_64B_WR_REQ_UPPER", 333},
+      {"GDDR5_CH1_SOC_64B_WR_REQ_LOWER", 332},
+      {"GDDR0_CH0_GT_64B_WR_REQ_UPPER", 101},
+      {"GDDR0_CH0_GT_64B_WR_REQ_LOWER", 100},
+      {"GDDR1_CH0_GT_64B_WR_REQ_UPPER", 141},
+      {"GDDR1_CH0_GT_64B_WR_REQ_LOWER", 140},
+      {"GDDR2_CH0_GT_64B_WR_REQ_UPPER", 181},
+      {"GDDR2_CH0_GT_64B_WR_REQ_LOWER", 180},
+      {"GDDR3_CH0_GT_64B_WR_REQ_UPPER", 221},
+      {"GDDR3_CH0_GT_64B_WR_REQ_LOWER", 220},
+      {"GDDR4_CH0_GT_64B_WR_REQ_UPPER", 261},
+      {"GDDR4_CH0_GT_64B_WR_REQ_LOWER", 260},
+      {"GDDR5_CH0_GT_64B_WR_REQ_UPPER", 301},
+      {"GDDR5_CH0_GT_64B_WR_REQ_LOWER", 300},
+      {"GDDR0_CH1_GT_64B_WR_REQ_UPPER", 121},
+      {"GDDR0_CH1_GT_64B_WR_REQ_LOWER", 120},
+      {"GDDR1_CH1_GT_64B_WR_REQ_UPPER", 161},
+      {"GDDR1_CH1_GT_64B_WR_REQ_LOWER", 160},
+      {"GDDR2_CH1_GT_64B_WR_REQ_UPPER", 201},
+      {"GDDR2_CH1_GT_64B_WR_REQ_LOWER", 200},
+      {"GDDR3_CH1_GT_64B_WR_REQ_UPPER", 241},
+      {"GDDR3_CH1_GT_64B_WR_REQ_LOWER", 240},
+      {"GDDR4_CH1_GT_64B_WR_REQ_UPPER", 281},
+      {"GDDR4_CH1_GT_64B_WR_REQ_LOWER", 280},
+      {"GDDR5_CH1_GT_64B_WR_REQ_UPPER", 321},
+      {"GDDR5_CH1_GT_64B_WR_REQ_LOWER", 320}}}};
 
 ze_result_t getGpuMaxTemperature(PlatformMonitoringTech *pPmt, double *pTemperature) {
     uint32_t gpuMaxTemperature = 0;
@@ -448,7 +713,21 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getPciStats(zes_pci_stats_t *pSta
     }
 
     pStats->packetCounter = packInto64Bit(txPacketCounterH, txPacketCounterL) + packInto64Bit(rxPacketCounterH, rxPacketCounterL);
-    pStats->timestamp = SysmanDevice::getSysmanTimestamp();
+
+    // timestamp calculation
+    uint32_t timeStampL = 0;
+    uint32_t timeStampH = 0;
+
+    status = pPmt->readValue("GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", timeStampH);
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+    status = pPmt->readValue("GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", timeStampL);
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+    // timestamp from PMT is in milli seconds
+    pStats->timestamp = packInto64Bit(timeStampH, timeStampL) * milliSecsToMicroSecs;
 
     return status;
 }
@@ -577,14 +856,242 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getMemoryBandWidth(zes_mem_bandwi
         return status;
     }
 
-    pBandwidth->timestamp = packInto64Bit(timeStampH, timeStampL);
+    // timestamp from PMT is in milli seconds
+    pBandwidth->timestamp = packInto64Bit(timeStampH, timeStampL) * milliSecsToMicroSecs;
 
+    return status;
+}
+
+template <>
+std::vector<zes_power_domain_t> SysmanProductHelperHw<gfxProduct>::getNumberOfPowerDomainsSupported(WddmSysmanImp *pWddmSysmanImp) {
+    KmdSysManager *pKmdSysManager = &pWddmSysmanImp->getKmdSysManager();
+    KmdSysman::RequestProperty request;
+    KmdSysman::ResponseProperty response;
+
+    request.commandId = KmdSysman::Command::Get;
+    request.componentId = KmdSysman::Component::PowerComponent;
+    request.requestId = KmdSysman::Requests::Power::NumPowerDomains;
+
+    ze_result_t status = pKmdSysManager->requestSingle(request, response);
+
+    std::vector<zes_power_domain_t> powerDomains;
+    if (status != ZE_RESULT_SUCCESS) {
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr,
+                              "No power domains are supported, power handles will not be created.\n");
+        return powerDomains;
+    }
+
+    uint32_t supportedPowerDomains = 0;
+    memcpy_s(&supportedPowerDomains, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
+
+    switch (supportedPowerDomains) {
+    case 1:
+        powerDomains.push_back(ZES_POWER_DOMAIN_PACKAGE);
+        break;
+    case 2:
+        powerDomains.push_back(ZES_POWER_DOMAIN_PACKAGE);
+        powerDomains.push_back(ZES_POWER_DOMAIN_CARD);
+        break;
+    default:
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr,
+                              "Unexpected value returned by KMD, power handles will not be created.\n");
+        break;
+    }
+
+    PlatformMonitoringTech *pPmt = pWddmSysmanImp->getSysmanPmt();
+    if (pPmt != nullptr) {
+        powerDomains.push_back(ZES_POWER_DOMAIN_MEMORY);
+        powerDomains.push_back(ZES_POWER_DOMAIN_GPU);
+    }
+    return powerDomains;
+}
+
+template <>
+ze_result_t SysmanProductHelperHw<gfxProduct>::getPowerProperties(zes_power_properties_t *pProperties, zes_power_domain_t powerDomain, WddmSysmanImp *pWddmSysmanImp) {
+    if (powerDomain == ZES_POWER_DOMAIN_CARD || powerDomain == ZES_POWER_DOMAIN_PACKAGE) {
+        KmdSysManager *pKmdSysManager = &pWddmSysmanImp->getKmdSysManager();
+        pProperties->onSubdevice = false;
+        pProperties->subdeviceId = 0;
+
+        std::vector<KmdSysman::RequestProperty> vRequests = {};
+        std::vector<KmdSysman::ResponseProperty> vResponses = {};
+        KmdSysman::RequestProperty request = {};
+
+        request.commandId = KmdSysman::Command::Get;
+        request.componentId = KmdSysman::Component::PowerComponent;
+        request.paramInfo = static_cast<uint32_t>(powerGroupToDomainTypeMap.at(powerDomain));
+        request.requestId = KmdSysman::Requests::Power::EnergyThresholdSupported;
+        vRequests.push_back(request);
+
+        request.requestId = KmdSysman::Requests::Power::TdpDefault;
+        vRequests.push_back(request);
+
+        request.requestId = KmdSysman::Requests::Power::MinPowerLimitDefault;
+        vRequests.push_back(request);
+
+        request.requestId = KmdSysman::Requests::Power::MaxPowerLimitDefault;
+        vRequests.push_back(request);
+
+        ze_result_t status = pKmdSysManager->requestMultiple(vRequests, vResponses);
+
+        if ((status != ZE_RESULT_SUCCESS) || (vResponses.size() != vRequests.size())) {
+            return status;
+        }
+
+        if (vResponses[0].returnCode == KmdSysman::Success) {
+            memcpy_s(&pProperties->canControl, sizeof(ze_bool_t), vResponses[0].dataBuffer, sizeof(ze_bool_t));
+            memcpy_s(&pProperties->isEnergyThresholdSupported, sizeof(ze_bool_t), vResponses[0].dataBuffer, sizeof(ze_bool_t));
+        }
+
+        pProperties->defaultLimit = -1;
+        if (vResponses[1].returnCode == KmdSysman::Success) {
+            memcpy_s(&pProperties->defaultLimit, sizeof(uint32_t), vResponses[1].dataBuffer, sizeof(uint32_t));
+        }
+
+        pProperties->minLimit = -1;
+        if (vResponses[2].returnCode == KmdSysman::Success) {
+            memcpy_s(&pProperties->minLimit, sizeof(uint32_t), vResponses[2].dataBuffer, sizeof(uint32_t));
+        }
+
+        pProperties->maxLimit = -1;
+        if (vResponses[3].returnCode == KmdSysman::Success) {
+            memcpy_s(&pProperties->maxLimit, sizeof(uint32_t), vResponses[3].dataBuffer, sizeof(uint32_t));
+        }
+        return ZE_RESULT_SUCCESS;
+    } else if (powerDomain == ZES_POWER_DOMAIN_MEMORY || powerDomain == ZES_POWER_DOMAIN_GPU) {
+        PlatformMonitoringTech *pPmt = pWddmSysmanImp->getSysmanPmt();
+        if (pPmt == nullptr) {
+            return ZE_RESULT_ERROR_UNKNOWN;
+        }
+        pProperties->onSubdevice = false;
+        pProperties->subdeviceId = 0;
+        pProperties->canControl = false;
+        pProperties->isEnergyThresholdSupported = false;
+        pProperties->defaultLimit = -1;
+        pProperties->minLimit = -1;
+        pProperties->maxLimit = -1;
+        return ZE_RESULT_SUCCESS;
+    } else {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+}
+
+template <>
+ze_result_t SysmanProductHelperHw<gfxProduct>::getPowerPropertiesExt(zes_power_ext_properties_t *pExtPoperties, zes_power_domain_t powerDomain, WddmSysmanImp *pWddmSysmanImp) {
+    if (powerDomain == ZES_POWER_DOMAIN_CARD || powerDomain == ZES_POWER_DOMAIN_PACKAGE) {
+        KmdSysManager *pKmdSysManager = &pWddmSysmanImp->getKmdSysManager();
+        pExtPoperties->domain = powerDomain;
+        if (pExtPoperties->defaultLimit) {
+            KmdSysman::RequestProperty request;
+            KmdSysman::ResponseProperty response;
+
+            request.commandId = KmdSysman::Command::Get;
+            request.componentId = KmdSysman::Component::PowerComponent;
+            request.paramInfo = static_cast<uint32_t>(powerGroupToDomainTypeMap.at(powerDomain));
+            request.requestId = KmdSysman::Requests::Power::TdpDefault;
+
+            ze_result_t status = pKmdSysManager->requestSingle(request, response);
+            pExtPoperties->defaultLimit->limit = -1;
+
+            if (status == ZE_RESULT_SUCCESS) {
+                memcpy_s(&pExtPoperties->defaultLimit->limit, sizeof(uint32_t), response.dataBuffer, sizeof(uint32_t));
+            }
+
+            pExtPoperties->defaultLimit->limitUnit = ZES_LIMIT_UNIT_POWER;
+            pExtPoperties->defaultLimit->enabledStateLocked = true;
+            pExtPoperties->defaultLimit->intervalValueLocked = true;
+            pExtPoperties->defaultLimit->limitValueLocked = true;
+            pExtPoperties->defaultLimit->source = ZES_POWER_SOURCE_ANY;
+            pExtPoperties->defaultLimit->level = ZES_POWER_LEVEL_UNKNOWN;
+        }
+        return ZE_RESULT_SUCCESS;
+    } else if (powerDomain == ZES_POWER_DOMAIN_MEMORY || powerDomain == ZES_POWER_DOMAIN_GPU) {
+        pExtPoperties->domain = powerDomain;
+        if (pExtPoperties->defaultLimit) {
+            pExtPoperties->defaultLimit->limit = -1;
+            pExtPoperties->defaultLimit->limitUnit = ZES_LIMIT_UNIT_POWER;
+            pExtPoperties->defaultLimit->enabledStateLocked = true;
+            pExtPoperties->defaultLimit->intervalValueLocked = true;
+            pExtPoperties->defaultLimit->limitValueLocked = true;
+            pExtPoperties->defaultLimit->source = ZES_POWER_SOURCE_ANY;
+            pExtPoperties->defaultLimit->level = ZES_POWER_LEVEL_UNKNOWN;
+        }
+        return ZE_RESULT_SUCCESS;
+    } else {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+}
+
+template <>
+ze_result_t SysmanProductHelperHw<gfxProduct>::getPowerEnergyCounter(zes_power_energy_counter_t *pEnergy, zes_power_domain_t powerDomain, WddmSysmanImp *pWddmSysmanImp) {
+    ze_result_t status = ZE_RESULT_SUCCESS;
+    uint32_t energyCounter = 0;
+    std::string key;
+
+    PlatformMonitoringTech *pPmt = pWddmSysmanImp->getSysmanPmt();
+    if (pPmt == nullptr) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+
+    switch (powerDomain) {
+    case ZES_POWER_DOMAIN_PACKAGE:
+        key = "PACKAGE_ENERGY_STATUS_SKU";
+        break;
+    case ZES_POWER_DOMAIN_CARD:
+        key = "PLATFORM_ENERGY_STATUS";
+        break;
+    case ZES_POWER_DOMAIN_MEMORY:
+        key = "VCCDDR_ENERGY_ACCUMULATOR";
+        break;
+    case ZES_POWER_DOMAIN_GPU:
+        key = "VCCGT_ENERGY_ACCUMULATOR";
+        break;
+    default:
+        DEBUG_BREAK_IF(true);
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        break;
+    }
+
+    status = pPmt->readValue(key, energyCounter);
+
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+
+    // Energy counter is in U(18.14) format. Need to convert it into uint64_t
+    uint32_t integerPart = static_cast<uint32_t>(energyCounter >> 14);
+
+    uint32_t decimalBits = static_cast<uint32_t>((energyCounter & 0x3FFF));
+    double decimalPart = static_cast<double>(decimalBits) / (1 << 14);
+
+    double result = static_cast<double>(integerPart + decimalPart);
+    pEnergy->energy = static_cast<uint64_t>((result * convertJouleToMicroJoule));
+
+    // timestamp calcuation
+    uint64_t timestamp64 = 0;
+    uint32_t frequency = 0;
+
+    status = pPmt->readValue("XTAL_COUNT", timestamp64);
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+    status = pPmt->readValue("XTAL_CLK_FREQUENCY", frequency);
+    if (status != ZE_RESULT_SUCCESS) {
+        return status;
+    }
+    double timestamp = timestamp64 / indexToXtalClockFrequecyMap[frequency & 0x2];
+    pEnergy->timestamp = static_cast<uint64_t>(timestamp);
     return status;
 }
 
 template <>
 std::map<unsigned long, std::map<std::string, uint32_t>> *SysmanProductHelperHw<gfxProduct>::getGuidToKeyOffsetMap() {
     return &guidToKeyOffsetMap;
+}
+
+template <>
+bool SysmanProductHelperHw<gfxProduct>::isZesInitSupported() {
+    return true;
 }
 
 template class SysmanProductHelperHw<gfxProduct>;

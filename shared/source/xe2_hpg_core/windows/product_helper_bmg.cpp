@@ -27,17 +27,7 @@ int ProductHelperHw<gfxProduct>::configureHardwareCustom(HardwareInfo *hwInfo, O
 }
 
 template <>
-bool ProductHelperHw<gfxProduct>::isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const {
-    return true;
-}
-
-template <>
 bool ProductHelperHw<gfxProduct>::restartDirectSubmissionForHostptrFree() const {
-    return true;
-}
-
-template <>
-bool ProductHelperHw<gfxProduct>::isStagingBuffersEnabled() const {
     return true;
 }
 

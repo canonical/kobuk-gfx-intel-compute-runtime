@@ -669,6 +669,10 @@ NTSTATUS __stdcall mockD3DKMTSignalSynchronizationObjectFromGpu(IN CONST D3DKMT_
     return STATUS_SUCCESS;
 }
 
+NTSTATUS __stdcall mockD3DKMTOpenSyncObjectFromNtHandle2(IN OUT D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 *) {
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS __stdcall mockD3DKMTFreeGpuVirtualAddress(IN CONST D3DKMT_FREEGPUVIRTUALADDRESS *) {
     return STATUS_SUCCESS;
 }
@@ -681,7 +685,10 @@ NTSTATUS __stdcall mockD3DKMTSubmitCommand(IN CONST D3DKMT_SUBMITCOMMAND *) {
     return STATUS_SUCCESS;
 }
 
-NTSTATUS __stdcall mockD3DKMTEvict(IN OUT D3DKMT_EVICT *) {
+NTSTATUS __stdcall mockD3DKMTEvict(IN OUT D3DKMT_EVICT *evict) {
+    if (evict->NumAllocations == 0) {
+        return STATUS_INVALID_PARAMETER;
+    }
     return STATUS_SUCCESS;
 }
 

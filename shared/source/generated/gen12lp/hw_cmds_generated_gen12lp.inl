@@ -2425,11 +2425,11 @@ typedef struct tagRENDER_SURFACE_STATE {
         SURFACEQPITCH_BIT_SHIFT = 0x2,
         SURFACEQPITCH_ALIGN_SIZE = 0x4,
     } SURFACEQPITCH;
-    inline void setSurfaceQpitch(const uint32_t value) {
+    inline void setSurfaceQPitch(const uint32_t value) {
         DEBUG_BREAK_IF(value > 0x7fff);
         TheStructure.Common.SurfaceQpitch = value >> SURFACEQPITCH_BIT_SHIFT;
     }
-    inline uint32_t getSurfaceQpitch() const {
+    inline uint32_t getSurfaceQPitch() const {
         return TheStructure.Common.SurfaceQpitch << SURFACEQPITCH_BIT_SHIFT;
     }
     inline void setSampleTapDiscardDisable(const SAMPLE_TAP_DISCARD_DISABLE value) {
@@ -2569,25 +2569,25 @@ typedef struct tagRENDER_SURFACE_STATE {
     inline RENDER_TARGET_AND_SAMPLE_UNORM_ROTATION getRenderTargetAndSampleUnormRotation() const {
         return static_cast<RENDER_TARGET_AND_SAMPLE_UNORM_ROTATION>(TheStructure.Common.RenderTargetAndSampleUnormRotation);
     }
-    inline void setMipCountLod(const uint32_t value) {
+    inline void setMIPCountLOD(const uint32_t value) {
         DEBUG_BREAK_IF(value > 0xf);
         TheStructure.Common.MipCountLod = value;
     }
-    inline uint32_t getMipCountLod() const {
+    inline uint32_t getMIPCountLOD() const {
         return TheStructure.Common.MipCountLod;
     }
-    inline void setSurfaceMinLod(const uint32_t value) {
+    inline void setSurfaceMinLOD(const uint32_t value) {
         DEBUG_BREAK_IF(value > 0xf0);
         TheStructure.Common.SurfaceMinLod = value;
     }
-    inline uint32_t getSurfaceMinLod() const {
+    inline uint32_t getSurfaceMinLOD() const {
         return TheStructure.Common.SurfaceMinLod;
     }
-    inline void setMipTailStartLod(const uint32_t value) {
+    inline void setMipTailStartLOD(const uint32_t value) {
         DEBUG_BREAK_IF(value > 0xf00);
         TheStructure.Common.MipTailStartLod = value;
     }
-    inline uint32_t getMipTailStartLod() const {
+    inline uint32_t getMipTailStartLOD() const {
         return TheStructure.Common.MipTailStartLod;
     }
     inline void setCoherencyType(const COHERENCY_TYPE value) {
@@ -2786,11 +2786,11 @@ typedef struct tagRENDER_SURFACE_STATE {
         AUXILIARYSURFACEQPITCH_BIT_SHIFT = 0x2,
         AUXILIARYSURFACEQPITCH_ALIGN_SIZE = 0x4,
     } AUXILIARYSURFACEQPITCH;
-    inline void setAuxiliarySurfaceQpitch(const uint32_t value) {
+    inline void setAuxiliarySurfaceQPitch(const uint32_t value) {
         DEBUG_BREAK_IF(value > 0x7fff0000L);
         TheStructure._SurfaceFormatIsnotPlanar.AuxiliarySurfaceQpitch = value >> AUXILIARYSURFACEQPITCH_BIT_SHIFT;
     }
-    inline uint32_t getAuxiliarySurfaceQpitch() const {
+    inline uint32_t getAuxiliarySurfaceQPitch() const {
         return TheStructure._SurfaceFormatIsnotPlanar.AuxiliarySurfaceQpitch << AUXILIARYSURFACEQPITCH_BIT_SHIFT;
     }
     typedef enum tagAUXILIARYSURFACEBASEADDRESS {
@@ -3825,7 +3825,7 @@ typedef struct tagMI_USER_INTERRUPT {
         struct tagCommon {
             // DWORD 0
             uint32_t Reserved_0 : BITFIELD_RANGE(0, 22);
-            uint32_t MICommandOpcode : BITFIELD_RANGE(23, 28);
+            uint32_t MiCommandOpcode : BITFIELD_RANGE(23, 28);
             uint32_t CommandType : BITFIELD_RANGE(29, 31);
         } Common;
         uint32_t RawData[1];
@@ -3838,7 +3838,7 @@ typedef struct tagMI_USER_INTERRUPT {
     } COMMAND_TYPE;
     inline void init() {
         memset(&TheStructure, 0, sizeof(TheStructure));
-        TheStructure.Common.MICommandOpcode = MI_COMMAND_OPCODE_MI_USER_INTERRUPT;
+        TheStructure.Common.MiCommandOpcode = MI_COMMAND_OPCODE_MI_USER_INTERRUPT;
         TheStructure.Common.CommandType = COMMAND_TYPE_MI_COMMAND;
     }
     static tagMI_USER_INTERRUPT sInit() {
@@ -5572,7 +5572,7 @@ struct L3_CONTROL {
 };
 
 STATIC_ASSERT(28 == sizeof(L3_CONTROL));
-STATIC_ASSERT(std::is_pod<L3_CONTROL>::value);
+STATIC_ASSERT(NEO::TypeTraits::isPodV<L3_CONTROL>);
 
 typedef struct tagXY_BLOCK_COPY_BLT {
     union tagTheStructure {

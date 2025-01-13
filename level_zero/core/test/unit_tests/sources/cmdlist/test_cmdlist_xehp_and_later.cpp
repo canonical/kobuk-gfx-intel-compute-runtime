@@ -113,9 +113,6 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandListTests, whenCommandListIsCreatedThenPCAnd
     }
 
     EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
-
-    EXPECT_TRUE(cmdSba->getDisableSupportForMultiGpuPartialWritesForStatelessMessages());
-    EXPECT_FALSE(cmdSba->getDisableSupportForMultiGpuAtomicsForStatelessAccesses());
 }
 
 HWTEST2_F(CommandListTests, whenCommandListIsCreatedAndProgramExtendedPipeControlPriorToNonPipelinedStateCommandIsEnabledThenPCAndStateBaseAddressCmdsAreAddedAndCorrectlyProgrammed, IsAtLeastXeHpCore) {
@@ -204,9 +201,6 @@ HWTEST2_F(CommandListTests, whenCommandListIsCreatedAndProgramExtendedPipeContro
     }
 
     EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
-
-    EXPECT_TRUE(cmdSba->getDisableSupportForMultiGpuPartialWritesForStatelessMessages());
-    EXPECT_FALSE(cmdSba->getDisableSupportForMultiGpuAtomicsForStatelessAccesses());
 }
 
 using CommandListTestsReserveSize = Test<DeviceFixture>;
@@ -412,7 +406,7 @@ struct CommandListAppendLaunchKernelCompactL3FlushEventFixture : public ModuleFi
         WalkerVariant walkerVariant = NEO::UnitTestHelper<FamilyType>::getWalkerVariant(*firstWalker);
         std::visit([&arg, firstKernelEventAddress](auto &&walker) {
             using WalkerType = std::decay_t<decltype(*walker)>;
-            using PostSyncType = typename WalkerType::PostSyncType;
+            using PostSyncType = decltype(FamilyType::template getPostSyncType<WalkerType>());
             using OPERATION = typename PostSyncType::OPERATION;
             auto &postSync = walker->getPostSync();
 
@@ -667,7 +661,7 @@ struct CommandListSignalAllEventPacketFixture : public ModuleFixture {
         WalkerVariant walkerVariant = NEO::UnitTestHelper<FamilyType>::getWalkerVariant(*firstWalker);
         std::visit([expectedWalkerPostSyncOp](auto &&walker) {
             using WalkerType = std::decay_t<decltype(*walker)>;
-            using PostSyncType = typename WalkerType::PostSyncType;
+            using PostSyncType = decltype(FamilyType::template getPostSyncType<WalkerType>());
             using OPERATION = typename PostSyncType::OPERATION;
             auto &postSync = walker->getPostSync();
 
@@ -1688,7 +1682,6 @@ void findStateCacheFlushPipeControlAfterWalker(LinearStream &cmdStream, size_t o
 template <typename FamilyType>
 void find3dBtdCommand(LinearStream &cmdStream, size_t offset, size_t size, uint64_t gpuVa, bool expectToFind) {
     using _3DSTATE_BTD = typename FamilyType::_3DSTATE_BTD;
-    using _3DSTATE_BTD_BODY = typename FamilyType::_3DSTATE_BTD_BODY;
 
     if (expectToFind) {
         ASSERT_NE(0u, size);
@@ -1797,9 +1790,6 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenRegularCmdListExecutedAndImmediateExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    using _3DSTATE_BTD = typename FamilyType::_3DSTATE_BTD;
-    using _3DSTATE_BTD_BODY = typename FamilyType::_3DSTATE_BTD_BODY;
-
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
 
@@ -1854,9 +1844,6 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenImmediateCmdListExecutedAndImmediateExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    using _3DSTATE_BTD = typename FamilyType::_3DSTATE_BTD;
-    using _3DSTATE_BTD_BODY = typename FamilyType::_3DSTATE_BTD_BODY;
-
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
 
@@ -1915,9 +1902,6 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenImmediateCmdListExecutedAndRegularExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    using _3DSTATE_BTD = typename FamilyType::_3DSTATE_BTD;
-    using _3DSTATE_BTD_BODY = typename FamilyType::_3DSTATE_BTD_BODY;
-
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
 
@@ -3131,8 +3115,6 @@ HWTEST2_F(CommandListAppendLaunchKernel,
 
     WalkerVariant walkerVariant = NEO::UnitTestHelper<FamilyType>::getWalkerVariant(launchParams.cmdWalkerBuffer);
     std::visit([eventBaseAddress](auto &&walker) {
-        using WalkerType = std::decay_t<decltype(*walker)>;
-        using PostSyncType = typename WalkerType::PostSyncType;
         auto &postSync = walker->getPostSync();
 
         EXPECT_NE(eventBaseAddress, postSync.getDestinationAddress());

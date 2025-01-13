@@ -25,8 +25,18 @@ inline bool AILConfigurationHw<product>::isContextSyncFlagRequired() {
 }
 
 template <PRODUCT_FAMILY product>
+inline bool AILConfigurationHw<product>::isRunAloneContextRequired() {
+    return false;
+}
+
+template <PRODUCT_FAMILY product>
 inline bool AILConfigurationHw<product>::is256BPrefetchDisableRequired() {
     return false;
+}
+
+template <PRODUCT_FAMILY product>
+inline bool AILConfigurationHw<product>::drainHostptrs() {
+    return true;
 }
 
 template <PRODUCT_FAMILY product>
@@ -64,6 +74,21 @@ inline void AILConfigurationHw<product>::setDisableBindlessAddressing(bool val) 
 template <PRODUCT_FAMILY product>
 inline bool AILConfigurationHw<product>::limitAmountOfDeviceMemoryForRecycling() {
     return false;
+}
+
+template <PRODUCT_FAMILY product>
+inline bool AILConfigurationHw<product>::isFallbackToPatchtokensRequired() {
+    return false;
+}
+
+template <PRODUCT_FAMILY product>
+inline bool AILConfigurationHw<product>::isAdjustMicrosecondResolutionRequired() {
+    return shouldAdjustMicrosecondResolution;
+}
+
+template <PRODUCT_FAMILY product>
+inline uint32_t AILConfigurationHw<product>::getMicrosecondResolution() {
+    return microsecondAdjustment;
 }
 
 } // namespace NEO

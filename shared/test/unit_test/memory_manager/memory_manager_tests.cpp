@@ -13,6 +13,7 @@
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/program/program_initialization.h"
+#include "shared/source/utilities/heap_allocator.h"
 #include "shared/test/common/compiler_interface/linker_mock.h"
 #include "shared/test/common/fixtures/device_fixture.h"
 #include "shared/test/common/fixtures/memory_allocator_fixture.h"
@@ -98,7 +99,7 @@ TEST(MemoryManagerTest, givenAllocationWithNullCpuPtrThenMemoryCopyToAllocationR
     EXPECT_FALSE(memoryManager.copyMemoryToAllocation(&allocation, offset, nullptr, 0));
 }
 
-TEST(MemoryManagerTest, givenGraphicsAllocationWhenMapCalledThenDontResetCpuAddress) {
+TEST(MemoryManagerTest, givenDeviceGraphicsAllocationWhenMapCalledThenDontResetCpuAddress) {
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     MockMemoryManager memoryManager(false, false, executionEnvironment);
 
@@ -106,13 +107,40 @@ TEST(MemoryManagerTest, givenGraphicsAllocationWhenMapCalledThenDontResetCpuAddr
     MockGraphicsAllocation allocation{&allocationStorage, 1};
     EXPECT_NE(nullptr, allocation.getUnderlyingBuffer());
 
-    EXPECT_TRUE(memoryManager.mapPhysicalToVirtualMemory(&allocation, 0x12300, 0));
+    EXPECT_TRUE(memoryManager.mapPhysicalDeviceMemoryToVirtualMemory(&allocation, 0x12300, 0));
     EXPECT_EQ(&allocationStorage, allocation.getUnderlyingBuffer());
     EXPECT_EQ(0x12300u, allocation.getGpuAddress());
 
-    memoryManager.unMapPhysicalToVirtualMemory(&allocation, 1, 1, nullptr, 0);
+    memoryManager.unMapPhysicalDeviceMemoryFromVirtualMemory(&allocation, 1, 1, nullptr, 0);
     EXPECT_EQ(&allocationStorage, allocation.getUnderlyingBuffer());
     EXPECT_EQ(0u, allocation.getGpuAddress());
+}
+
+TEST(MemoryManagerTest, givenHostGraphicsAllocationWhenMapCalledThenDontResetCpuAddress) {
+    MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
+    MockMemoryManager memoryManager(false, false, executionEnvironment);
+
+    uint8_t allocationStorage = 0;
+    MockGraphicsAllocation allocation{&allocationStorage, 1};
+    EXPECT_NE(nullptr, allocation.getUnderlyingBuffer());
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    rootDeviceIndices.pushUnique(1);
+    MultiGraphicsAllocation multiGraphicsAllocation{static_cast<uint32_t>(rootDeviceIndices.size())};
+    EXPECT_TRUE(memoryManager.mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, &allocation, 0x12300, 0));
+    EXPECT_EQ(&allocationStorage, allocation.getUnderlyingBuffer());
+    EXPECT_NE(0x12300u, allocation.getGpuAddress());
+    for (size_t i = 0; i < rootDeviceIndices.size(); i++) {
+        EXPECT_NE(multiGraphicsAllocation.getGraphicsAllocation(static_cast<uint32_t>(i)), nullptr);
+    }
+
+    memoryManager.unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocation, static_cast<GraphicsAllocation *>(&allocation), 0x12300, 0);
+    EXPECT_EQ(&allocationStorage, allocation.getUnderlyingBuffer());
+    EXPECT_NE(0x12300u, allocation.getGpuAddress());
+    for (size_t i = 0; i < rootDeviceIndices.size(); i++) {
+        EXPECT_EQ(multiGraphicsAllocation.getGraphicsAllocation(static_cast<uint32_t>(i)), nullptr);
+    }
 }
 
 TEST(MemoryManagerTest, givenDefaultMemoryManagerWhenItIsAskedForBudgetExhaustionThenFalseIsReturned) {
@@ -3335,4 +3363,42 @@ TEST(MemoryManagerTest, WhenGettingExtraDevicePropertiesThenPropertiesRemainUnch
 
     EXPECT_EQ(moduleId, 0u);
     EXPECT_EQ(serverType, 0u);
+}
+
+TEST(MemoryManagerTest, WhenAddingCustomHeapAllocatorConfigsThenCanRetrieveAndMatchConfigs) {
+    uint64_t heapBase = 0xAAAAAAAA;
+
+    uint64_t heapFrontStart = 0xAAAABBBB;
+    uint64_t heapRegularStart = 0xEEEEFFFF;
+
+    size_t heapFrontSize = 1 * MemoryConstants::gigaByte;
+    size_t heapRegularSize = 2 * MemoryConstants::gigaByte;
+
+    auto allocator1 = std::make_unique<HeapAllocator>(heapFrontStart, heapFrontSize, MemoryConstants::pageSize64k, 0);
+    auto allocator2 = std::make_unique<HeapAllocator>(heapRegularStart, heapRegularSize, MemoryConstants::pageSize64k, 0);
+
+    MockMemoryManager memoryManager;
+
+    memoryManager.addCustomHeapAllocatorConfig(AllocationType::linearStream, true, {allocator1.get(), heapBase});
+    memoryManager.addCustomHeapAllocatorConfig(AllocationType::linearStream, false, {allocator2.get(), heapBase});
+
+    auto config1 = memoryManager.getCustomHeapAllocatorConfig(AllocationType::linearStream, true);
+    auto config2 = memoryManager.getCustomHeapAllocatorConfig(AllocationType::linearStream, false);
+    auto configNonExisting = memoryManager.getCustomHeapAllocatorConfig(AllocationType::buffer, false);
+
+    EXPECT_TRUE(config1.has_value());
+    EXPECT_TRUE(config2.has_value());
+    EXPECT_FALSE(configNonExisting.has_value());
+
+    EXPECT_EQ(allocator1.get(), config1->get().allocator);
+    EXPECT_EQ(heapBase, config1->get().gpuVaBase);
+
+    EXPECT_EQ(allocator2.get(), config2->get().allocator);
+    EXPECT_EQ(heapBase, config2->get().gpuVaBase);
+
+    memoryManager.removeCustomHeapAllocatorConfig(AllocationType::linearStream, true);
+    memoryManager.removeCustomHeapAllocatorConfig(AllocationType::linearStream, false);
+
+    EXPECT_FALSE(memoryManager.getCustomHeapAllocatorConfig(AllocationType::linearStream, true).has_value());
+    EXPECT_FALSE(memoryManager.getCustomHeapAllocatorConfig(AllocationType::linearStream, false).has_value());
 }

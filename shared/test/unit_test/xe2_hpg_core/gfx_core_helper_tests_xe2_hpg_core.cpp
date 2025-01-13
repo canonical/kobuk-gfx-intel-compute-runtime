@@ -31,9 +31,9 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenAskingFor
     EXPECT_EQ(expectedAlignment, gfxCoreHelper.getTimestampPacketAllocatorAlignment());
 }
 
-XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenCheckTimestampWaitSupportThenReturnFalse) {
+XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenCheckTimestampWaitSupportThenReturnTrue) {
     auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    EXPECT_FALSE(gfxCoreHelper.isTimestampWaitSupportedForQueues());
+    EXPECT_TRUE(gfxCoreHelper.isTimestampWaitSupportedForQueues());
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenXe2HpgCoreWhenAskedForMinimialSimdThen16IsReturned) {
@@ -159,6 +159,7 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenOneCcsEnabledWhenGetEngine
 
     HardwareInfo hwInfo = *defaultHwInfo;
     hwInfo.featureTable.flags.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrRcsNode = true;
     hwInfo.featureTable.ftrBcsInfo = maxNBitValue(9);
     hwInfo.capabilityTable.blitterOperationsSupported = true;
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
@@ -238,6 +239,103 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenNotAllCopyEnginesWhenSetti
         {aub_stream::ENGINE_BCS4, false, true},
         {aub_stream::ENGINE_BCS5, false, true},
         {aub_stream::ENGINE_BCS6, false, true},
+    }};
+
+    for (size_t i = 0; i < numEngines; i++) {
+        EXPECT_EQ(enginePropertiesMap[i].engineType, engines[i].first);
+        EXPECT_EQ(enginePropertiesMap[i].isCcs, EngineHelpers::isCcs(enginePropertiesMap[i].engineType));
+        EXPECT_EQ(enginePropertiesMap[i].isBcs, EngineHelpers::isBcs(enginePropertiesMap[i].engineType));
+    }
+}
+
+XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenFtrRcsDisabledWhenGettingGpgpuEnginesThenCCCSIsNotAdded) {
+    const size_t numEngines = 14;
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrRcsNode = false;
+    hwInfo.featureTable.ftrBcsInfo = maxNBitValue(9);
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
+    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
+    auto &gfxCoreHelper = device->getGfxCoreHelper();
+    EXPECT_EQ(numEngines, device->allEngines.size());
+    auto &engines = gfxCoreHelper.getGpgpuEngineInstances(device->getRootDeviceEnvironment());
+    EXPECT_EQ(numEngines, engines.size());
+
+    struct EnginePropertiesMap {
+        aub_stream::EngineType engineType;
+        bool isCcs;
+        bool isBcs;
+    };
+
+    const std::array<EnginePropertiesMap, numEngines> enginePropertiesMap = {{
+        {aub_stream::ENGINE_CCS, true, false},
+        {aub_stream::ENGINE_CCS, true, false},
+        {aub_stream::ENGINE_CCS, true, false},
+        {aub_stream::ENGINE_BCS, false, true},
+        {aub_stream::ENGINE_BCS, false, true},
+        {aub_stream::ENGINE_BCS1, false, true},
+        {aub_stream::ENGINE_BCS2, false, true},
+        {aub_stream::ENGINE_BCS3, false, true},
+        {aub_stream::ENGINE_BCS3, false, true},
+        {aub_stream::ENGINE_BCS4, false, true},
+        {aub_stream::ENGINE_BCS5, false, true},
+        {aub_stream::ENGINE_BCS6, false, true},
+        {aub_stream::ENGINE_BCS7, false, true},
+        {aub_stream::ENGINE_BCS8, false, true},
+    }};
+
+    for (size_t i = 0; i < numEngines; i++) {
+        EXPECT_EQ(enginePropertiesMap[i].engineType, engines[i].first);
+        EXPECT_EQ(enginePropertiesMap[i].isCcs, EngineHelpers::isCcs(enginePropertiesMap[i].engineType));
+        EXPECT_EQ(enginePropertiesMap[i].isBcs, EngineHelpers::isBcs(enginePropertiesMap[i].engineType));
+    }
+}
+
+XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenNodeOrdinalSetoToCCCSWhenGettingGpgpuEnginesThenCCCSIsAdded) {
+    const size_t numEngines = 15;
+    DebugManagerStateRestore restorer;
+    debugManager.flags.NodeOrdinal.set(aub_stream::ENGINE_CCCS);
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
+    hwInfo.featureTable.flags.ftrRcsNode = false;
+    hwInfo.featureTable.ftrBcsInfo = maxNBitValue(9);
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCCS;
+    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo, 0));
+    auto &gfxCoreHelper = device->getGfxCoreHelper();
+    EXPECT_EQ(numEngines, device->allEngines.size());
+    auto &engines = gfxCoreHelper.getGpgpuEngineInstances(device->getRootDeviceEnvironment());
+    EXPECT_EQ(numEngines, engines.size());
+
+    struct EnginePropertiesMap {
+        aub_stream::EngineType engineType;
+        bool isCcs;
+        bool isBcs;
+    };
+
+    const std::array<EnginePropertiesMap, numEngines> enginePropertiesMap = {{
+        {aub_stream::ENGINE_CCS, true, false},
+        {aub_stream::ENGINE_CCCS, false, false},
+        {aub_stream::ENGINE_CCCS, false, false},
+        {aub_stream::ENGINE_CCCS, false, false},
+        {aub_stream::ENGINE_BCS, false, true},
+        {aub_stream::ENGINE_BCS, false, true},
+        {aub_stream::ENGINE_BCS1, false, true},
+        {aub_stream::ENGINE_BCS2, false, true},
+        {aub_stream::ENGINE_BCS3, false, true},
+        {aub_stream::ENGINE_BCS3, false, true},
+        {aub_stream::ENGINE_BCS4, false, true},
+        {aub_stream::ENGINE_BCS5, false, true},
+        {aub_stream::ENGINE_BCS6, false, true},
+        {aub_stream::ENGINE_BCS7, false, true},
+        {aub_stream::ENGINE_BCS8, false, true},
     }};
 
     for (size_t i = 0; i < numEngines; i++) {
@@ -626,11 +724,16 @@ XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenCallGetInt
     EXPECT_EQ(productHelper.getInternalHeapsPreallocated(), 3u);
 }
 
+XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenCallIsStagingBuffersEnabledThenReturnTrue) {
+    const auto &productHelper = getHelper<ProductHelper>();
+    EXPECT_TRUE(productHelper.isStagingBuffersEnabled());
+}
+
 using LriHelperTestsXe2HpgCore = ::testing::Test;
 
 XE2_HPG_CORETEST_F(LriHelperTestsXe2HpgCore, whenProgrammingLriCommandThenExpectMmioRemapEnableCorrectlySet) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint32_t address = 0x8888;
@@ -683,8 +786,6 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenXe2HpgWhenCallIsMatrixMult
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenNumGrfAndSimdSizeWhenAdjustingMaxWorkGroupSizeThenCorrectWorkGroupSizeIsReturned) {
-    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-    using SIMD_SIZE = typename FamilyType::DefaultWalkerType::SIMD_SIZE;
     auto defaultMaxWorkGroupSize = 2048u;
     const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
     const auto &rootDeviceEnvironment = pDevice->getRootDeviceEnvironment();

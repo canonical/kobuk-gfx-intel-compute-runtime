@@ -290,15 +290,11 @@ PVCTEST_F(PvcProductHelper, whenQueryingMaxNumSamplersThenReturnZero) {
     EXPECT_EQ(0u, productHelper->getMaxNumSamplers());
 }
 
-PVCTEST_F(PvcProductHelper, whenCheckingIfDummyBlitWaIsRequiredThenTrueIsReturned) {
-    EXPECT_TRUE(productHelper->isDummyBlitWaRequired());
-}
-
 PVCTEST_F(PvcProductHelper, givenProductHelperWhenAskingForReadOnlyResourceSupportThenTrueReturned) {
     EXPECT_TRUE(productHelper->supportReadOnlyAllocations());
 }
 
 PVCTEST_F(PvcProductHelper, givenProductHelperWhenGetRequiredDetectIndirectVersionCalledThenReturnCorrectVersion) {
     EXPECT_EQ(IndirectDetectionVersions::requiredDetectIndirectVersionPVC, productHelper->getRequiredDetectIndirectVersion());
-    EXPECT_EQ(IndirectDetectionVersions::requiredDetectIndirectVersionPVC, productHelper->getRequiredDetectIndirectVersionVC());
+    EXPECT_EQ(IndirectDetectionVersions::requiredDetectIndirectVersionPVCVectorCompiler, productHelper->getRequiredDetectIndirectVersionVC());
 }

@@ -204,7 +204,7 @@ class CommandQueueHw : public CommandQueue {
                             size_t size,
                             cl_uint numEventsInWaitList,
                             const cl_event *eventWaitList,
-                            cl_event *event) override;
+                            cl_event *event, CommandStreamReceiver *csrParam) override;
 
     cl_int enqueueSVMMemFill(void *svmPtr,
                              const void *pattern,
@@ -269,6 +269,18 @@ class CommandQueueHw : public CommandQueue {
                             const cl_event *eventWaitList,
                             cl_event *event) override;
 
+    cl_int enqueueReadImageImpl(Image *srcImage,
+                                cl_bool blockingRead,
+                                const size_t *origin,
+                                const size_t *region,
+                                size_t rowPitch,
+                                size_t slicePitch,
+                                void *ptr,
+                                GraphicsAllocation *mapAllocation,
+                                cl_uint numEventsInWaitList,
+                                const cl_event *eventWaitList,
+                                cl_event *event, CommandStreamReceiver &csr) override;
+
     cl_int enqueueWriteBuffer(Buffer *buffer,
                               cl_bool blockingWrite,
                               size_t offset,
@@ -304,6 +316,11 @@ class CommandQueueHw : public CommandQueue {
                              cl_uint numEventsInWaitList,
                              const cl_event *eventWaitList,
                              cl_event *event) override;
+
+    cl_int enqueueWriteImageImpl(Image *dstImage, cl_bool blockingWrite, const size_t *origin,
+                                 const size_t *region, size_t inputRowPitch, size_t inputSlicePitch,
+                                 const void *ptr, GraphicsAllocation *mapAllocation, cl_uint numEventsInWaitList,
+                                 const cl_event *eventWaitList, cl_event *event, CommandStreamReceiver &csr) override;
 
     cl_int enqueueCopyBufferToImage(Buffer *srcBuffer,
                                     Image *dstImage,

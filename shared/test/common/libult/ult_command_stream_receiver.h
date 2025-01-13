@@ -78,6 +78,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     using BaseClass::makeResident;
     using BaseClass::pageTableManagerInitialized;
     using BaseClass::perDssBackedBuffer;
+    using BaseClass::pollForCompletion;
     using BaseClass::postInitFlagsSetup;
     using BaseClass::primaryCsr;
     using BaseClass::programActivePartitionConfig;
@@ -322,6 +323,13 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return BaseClass::waitForTaskCountWithKmdNotifyFallback(taskCountToWait, flushStampToWait, useQuickKmdSleep, throttle);
     }
 
+    WaitStatus waitForTaskCount(TaskCountType requiredTaskCount) override {
+        if (waitForTaskCountReturnValue.has_value()) {
+            return *waitForTaskCountReturnValue;
+        }
+        return BaseClass::waitForTaskCount(requiredTaskCount);
+    }
+
     void overrideCsrSizeReqFlags(CsrSizeRequestFlags &flags) { this->csrSizeRequestFlags = flags; }
     GraphicsAllocation *getPreemptionAllocation() const { return this->preemptionAllocation; }
 
@@ -479,8 +487,12 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return commandStreamReceiverType;
     }
 
-    void pollForCompletion() override {
+    void pollForCompletion(bool skipTaskCountCheck) override {
         pollForCompletionCalled++;
+    }
+
+    void pollForAubCompletion() override {
+        pollForAubCompletionCalled++;
     }
 
     bool checkGpuHangDetected(CommandStreamReceiver::TimeType currentTime, CommandStreamReceiver::TimeType &lastHangCheckTime) const override {
@@ -525,6 +537,8 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
         return BaseClass::waitUserFence(waitValue, hostAddress, timeout, userInterrupt, externalInterruptId, allocForInterruptWait);
     }
 
+    bool waitUserFenceSupported() override { return isUserFenceWaitSupported; }
+
     void unblockPagingFenceSemaphore(uint64_t pagingFenceValue) override {
         this->pagingFenceValueToUnblock = pagingFenceValue;
         BaseClass::unblockPagingFenceSemaphore(pagingFenceValue);
@@ -566,6 +580,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     uint32_t initDirectSubmissionCalled = 0;
     uint32_t fillReusableAllocationsListCalled = 0;
     uint32_t pollForCompletionCalled = 0;
+    uint32_t pollForAubCompletionCalled = 0;
     uint32_t initializeDeviceWithFirstSubmissionCalled = 0;
     uint32_t drainPagingFenceQueueCalled = 0;
     uint32_t flushHandlerCalled = 0;
@@ -577,6 +592,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     uint32_t createAllocationForHostSurfaceCalled = 0;
     WaitStatus returnWaitForCompletionWithTimeout = WaitStatus::ready;
     std::optional<WaitStatus> waitForTaskCountWithKmdNotifyFallbackReturnValue{};
+    std::optional<WaitStatus> waitForTaskCountReturnValue{};
     std::optional<SubmissionStatus> flushReturnValue{};
     CommandStreamReceiverType commandStreamReceiverType = CommandStreamReceiverType::hardware;
     std::atomic<uint32_t> downloadAllocationsCalledCount = 0;
@@ -613,6 +629,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily>, publ
     bool stopDirectSubmissionCalled = false;
     bool stopDirectSubmissionCalledBlocking = false;
     bool registeredDcFlushForDcFlushMitigation = false;
+    bool isUserFenceWaitSupported = false;
 };
 
 } // namespace NEO

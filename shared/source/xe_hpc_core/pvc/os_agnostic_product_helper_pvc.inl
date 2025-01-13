@@ -12,10 +12,6 @@
 #include "aubstream/product_family.h"
 
 namespace NEO {
-template <>
-bool ProductHelperHw<gfxProduct>::isDummyBlitWaRequired() const {
-    return true;
-}
 
 template <>
 bool ProductHelperHw<gfxProduct>::isMaxThreadsForWorkgroupWARequired(const HardwareInfo &hwInfo) const {
@@ -209,7 +205,7 @@ uint32_t ProductHelperHw<gfxProduct>::getRequiredDetectIndirectVersion() const {
 
 template <>
 uint32_t ProductHelperHw<gfxProduct>::getRequiredDetectIndirectVersionVC() const {
-    return IndirectDetectionVersions::requiredDetectIndirectVersionPVC;
+    return IndirectDetectionVersions::requiredDetectIndirectVersionPVCVectorCompiler;
 }
 
 template <>

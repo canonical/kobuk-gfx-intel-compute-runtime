@@ -44,7 +44,6 @@ class ReleaseHelper {
     virtual bool isBFloat16ConversionSupported() const = 0;
     virtual bool isAuxSurfaceModeOverrideRequired() const = 0;
     virtual bool isResolvingSubDeviceIDNeeded() const = 0;
-    virtual bool shouldAdjustDepth() const = 0;
     virtual bool isDirectSubmissionSupported() const = 0;
     virtual bool isRcsExposureDisabled() const = 0;
     virtual std::vector<uint32_t> getSupportedNumGrfs() const = 0;
@@ -52,17 +51,18 @@ class ReleaseHelper {
     virtual bool isGlobalBindlessAllocatorEnabled() const = 0;
     virtual uint32_t getNumThreadsPerEu() const = 0;
     virtual uint64_t getTotalMemBankSize() const = 0;
-    virtual const ThreadsPerEUConfigs getThreadsPerEUConfigs() const = 0;
+    virtual const ThreadsPerEUConfigs getThreadsPerEUConfigs(uint32_t numThreadsPerEu) const = 0;
     virtual const std::string getDeviceConfigString(uint32_t tileCount, uint32_t sliceCount, uint32_t subSliceCount, uint32_t euPerSubSliceCount) const = 0;
     virtual bool isRayTracingSupported() const = 0;
-    virtual uint32_t getL3BankCount() const = 0;
-    virtual uint64_t getL3CacheBankSizeInKb() const = 0;
     virtual uint32_t getAdditionalFp16Caps() const = 0;
     virtual uint32_t getAdditionalExtraCaps() const = 0;
     virtual uint32_t getStackSizePerRay() const = 0;
     virtual bool isLocalOnlyAllowed() const = 0;
     virtual bool isDisablingMsaaRequired() const = 0;
+    virtual bool isDummyBlitWaRequired() const = 0;
     virtual const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const = 0;
+    virtual bool isNumRtStacksPerDssFixedValue() const = 0;
+    virtual bool getFtrXe2Compression() const = 0;
 
   protected:
     ReleaseHelper(HardwareIpVersion hardwareIpVersion) : hardwareIpVersion(hardwareIpVersion) {}
@@ -86,7 +86,6 @@ class ReleaseHelperHw : public ReleaseHelper {
     bool isBFloat16ConversionSupported() const override;
     bool isAuxSurfaceModeOverrideRequired() const override;
     bool isResolvingSubDeviceIDNeeded() const override;
-    bool shouldAdjustDepth() const override;
     bool isDirectSubmissionSupported() const override;
     bool isRcsExposureDisabled() const override;
     std::vector<uint32_t> getSupportedNumGrfs() const override;
@@ -94,17 +93,18 @@ class ReleaseHelperHw : public ReleaseHelper {
     bool isGlobalBindlessAllocatorEnabled() const override;
     uint32_t getNumThreadsPerEu() const override;
     uint64_t getTotalMemBankSize() const override;
-    const StackVec<uint32_t, 6> getThreadsPerEUConfigs() const override;
+    const StackVec<uint32_t, 6> getThreadsPerEUConfigs(uint32_t numThreadsPerEu) const override;
     const std::string getDeviceConfigString(uint32_t tileCount, uint32_t sliceCount, uint32_t subSliceCount, uint32_t euPerSubSliceCount) const override;
     bool isRayTracingSupported() const override;
-    uint32_t getL3BankCount() const override;
-    uint64_t getL3CacheBankSizeInKb() const override;
     uint32_t getAdditionalFp16Caps() const override;
     uint32_t getAdditionalExtraCaps() const override;
     uint32_t getStackSizePerRay() const override;
     bool isLocalOnlyAllowed() const override;
     bool isDisablingMsaaRequired() const override;
+    bool isDummyBlitWaRequired() const override;
     const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const override;
+    bool isNumRtStacksPerDssFixedValue() const override;
+    bool getFtrXe2Compression() const override;
 
   protected:
     ReleaseHelperHw(HardwareIpVersion hardwareIpVersion) : ReleaseHelper(hardwareIpVersion) {}

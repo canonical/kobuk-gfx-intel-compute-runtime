@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -127,7 +127,7 @@ NEO::SubmissionStatus CommandQueueImp::submitBatchBuffer(size_t offset, NEO::Res
 
     NEO::BatchBuffer batchBuffer(this->startingCmdBuffer->getGraphicsAllocation(), offset, 0, 0, nullptr, false,
                                  NEO::getThrottleFromPowerSavingUint(csr->getUmdPowerHintValue()), NEO::QueueSliceCount::defaultSliceCount,
-                                 this->startingCmdBuffer->getUsed(), this->startingCmdBuffer, endingCmdPtr, csr->getNumClients(), true, false, true);
+                                 this->startingCmdBuffer->getUsed(), this->startingCmdBuffer, endingCmdPtr, csr->getNumClients(), true, false, true, false);
     batchBuffer.disableFlatRingBuffer = true;
 
     if (this->startingCmdBuffer != &this->commandStream) {
@@ -171,7 +171,8 @@ ze_result_t CommandQueueImp::synchronizeByPollingForTaskCount(uint64_t timeoutNa
 
     auto taskCountToWait = getTaskCount();
     bool enableTimeout = true;
-    int64_t timeoutMicroseconds = static_cast<int64_t>(timeoutNanoseconds / 1000);
+    auto microsecondResolution = device->getNEODevice()->getMicrosecondResolution();
+    int64_t timeoutMicroseconds = static_cast<int64_t>(timeoutNanoseconds / microsecondResolution);
     if (timeoutNanoseconds == std::numeric_limits<uint64_t>::max()) {
         enableTimeout = false;
         timeoutMicroseconds = NEO::TimeoutControls::maxTimeout;

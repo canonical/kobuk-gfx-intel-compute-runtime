@@ -10,6 +10,7 @@
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/blit_commands_helper_base.inl"
 #include "shared/source/helpers/local_memory_access_modes.h"
+#include "shared/source/release_helper/release_helper.h"
 
 namespace NEO {
 
@@ -189,11 +190,9 @@ template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::getBlitAllocationProperties(const GraphicsAllocation &allocation, uint32_t &pitch, uint32_t &qPitch,
                                                                 GMM_TILE_TYPE &tileType, uint32_t &mipTailLod, uint32_t &compressionDetails,
                                                                 const RootDeviceEnvironment &rootDeviceEnvironment, GMM_YUV_PLANE_ENUM plane) {
-    using XY_BLOCK_COPY_BLT = typename GfxFamily::XY_BLOCK_COPY_BLT;
-
     if (allocation.getDefaultGmm()) {
         auto gmmResourceInfo = allocation.getDefaultGmm()->gmmResourceInfo.get();
-        mipTailLod = gmmResourceInfo->getMipTailStartLodSurfaceState();
+        mipTailLod = gmmResourceInfo->getMipTailStartLODSurfaceState();
         auto resInfo = gmmResourceInfo->getResourceFlags()->Info;
         if (resInfo.Tile4) {
             tileType = GMM_TILED_4;
@@ -280,7 +279,7 @@ void BlitCommandsHelper<GfxFamily>::appendSliceOffsets(const BlitProperties &bli
 template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::appendTilingEnable(typename GfxFamily::XY_COLOR_BLT &blitCmd) {
     using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
-    blitCmd.setDestinationSurfaceType(XY_COLOR_BLT::DESTINATION_SURFACE_TYPE::DESTINATION_SURFACE_TYPE_2D);
+    blitCmd.setDestinationSurfaceType(XY_COLOR_BLT::DESTINATION_SURFACE_TYPE::DESTINATION_SURFACE_TYPE_SURFTYPE_2D);
 }
 
 template <typename GfxFamily>
@@ -363,8 +362,9 @@ bool BlitCommandsHelper<GfxFamily>::isDummyBlitWaNeeded(const EncodeDummyBlitWaA
         if (debugManager.flags.ForceDummyBlitWa.get() != -1) {
             return debugManager.flags.ForceDummyBlitWa.get();
         }
-        auto &productHelper = waArgs.rootDeviceEnvironment->getProductHelper();
-        return productHelper.isDummyBlitWaRequired();
+        auto releaseHelper = waArgs.rootDeviceEnvironment->getReleaseHelper();
+        UNRECOVERABLE_IF(!releaseHelper);
+        return releaseHelper->isDummyBlitWaRequired();
     }
     return false;
 }

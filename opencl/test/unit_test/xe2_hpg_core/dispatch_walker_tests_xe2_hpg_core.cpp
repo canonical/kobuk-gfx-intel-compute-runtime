@@ -20,8 +20,6 @@ using namespace NEO;
 using WalkerDispatchTestsXe2HpGCore = ::testing::Test;
 
 XE2_HPG_CORETEST_F(WalkerDispatchTestsXe2HpGCore, whenEncodeAdditionalWalkerFieldsIsCalledThenComputeDispatchAllIsCorrectlySet) {
-    using COMPUTE_WALKER = typename FamilyType::COMPUTE_WALKER;
-
     DebugManagerStateRestore debugRestorer;
     auto walkerCmd = FamilyType::cmdInitGpgpuWalker;
 
@@ -30,7 +28,7 @@ XE2_HPG_CORETEST_F(WalkerDispatchTestsXe2HpGCore, whenEncodeAdditionalWalkerFiel
         kernelDescriptor,                     // kernelDescriptor
         KernelExecutionType::concurrent,      // kernelExecutionType
         NEO::RequiredDispatchWalkOrder::none, // requiredDispatchWalkOrder
-        0,                                    // additionalSizeParam
+        0,                                    // localRegionSize
         0,                                    // maxFrontEndThreads
         true};                                // requiredSystemFence
     {

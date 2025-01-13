@@ -137,7 +137,7 @@ struct CommandListCoreFamily : public CommandListImp {
                                 ze_memory_advice_t advice) override;
     ze_result_t appendMemoryCopy(void *dstptr, const void *srcptr, size_t size,
                                  ze_event_handle_t hSignalEvent, uint32_t numWaitEvents,
-                                 ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch, bool forceDisableCopyOnlyInOrderSignaling) override;
+                                 ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) override;
     ze_result_t appendPageFaultCopy(NEO::GraphicsAllocation *dstAllocation,
                                     NEO::GraphicsAllocation *srcAllocation,
                                     size_t size,
@@ -152,7 +152,7 @@ struct CommandListCoreFamily : public CommandListImp {
                                        uint32_t srcSlicePitch,
                                        ze_event_handle_t hSignalEvent,
                                        uint32_t numWaitEvents,
-                                       ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch, bool forceDisableCopyOnlyInOrderSignaling) override;
+                                       ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) override;
     ze_result_t appendMemoryPrefetch(const void *ptr, size_t count) override;
     ze_result_t appendMemoryFill(void *ptr, const void *pattern,
                                  size_t patternSize, size_t size,
@@ -185,7 +185,7 @@ struct CommandListCoreFamily : public CommandListImp {
     void appendWaitOnInOrderDependency(std::shared_ptr<NEO::InOrderExecInfo> &inOrderExecInfo, CommandToPatchContainer *outListCommands,
                                        uint64_t waitValue, uint32_t offset, bool relaxedOrderingAllowed, bool implicitDependency,
                                        bool skipAddingWaitEventsToResidency, bool noopDispatch, bool copyOffloadOperation);
-    void appendSignalInOrderDependencyCounter(Event *signalEvent, bool copyOffloadOperation);
+    void appendSignalInOrderDependencyCounter(Event *signalEvent, bool copyOffloadOperation, bool stall);
     void handleInOrderDependencyCounter(Event *signalEvent, bool nonWalkerInOrderCmdsChaining, bool copyOffloadOperation);
 
     ze_result_t appendWriteGlobalTimestamp(uint64_t *dstptr, ze_event_handle_t hSignalEvent,
@@ -210,7 +210,7 @@ struct CommandListCoreFamily : public CommandListImp {
     ze_result_t executeCommandListImmediateImpl(bool performMigration, L0::CommandQueue *cmdQImmediate);
     size_t getReserveSshSize();
     void patchInOrderCmds() override;
-    bool handleCounterBasedEventOperations(Event *signalEvent);
+    MOCKABLE_VIRTUAL bool handleCounterBasedEventOperations(Event *signalEvent);
     bool isCbEventBoundToCmdList(Event *event) const;
 
   protected:
@@ -304,8 +304,8 @@ struct CommandListCoreFamily : public CommandListImp {
                                   const void **pRanges);
 
     ze_result_t setGlobalWorkSizeIndirect(NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress, uint32_t lws[3]);
-    ze_result_t programSyncBuffer(Kernel &kernel, NEO::Device &device, const ze_group_count_t &threadGroupDimensions);
-    void programRegionGroupBarrier(Kernel &kernel, const ze_group_count_t &threadGroupDimensions, size_t additionalSizeParam);
+    ze_result_t programSyncBuffer(Kernel &kernel, NEO::Device &device, const ze_group_count_t &threadGroupDimensions, size_t &patchIndex);
+    void programRegionGroupBarrier(Kernel &kernel, const ze_group_count_t &threadGroupDimensions, size_t localRegionSize, size_t &patchIndex);
     void appendWriteKernelTimestamp(Event *event, CommandToPatchContainer *outTimeStampSyncCmds, bool beforeWalker, bool maskLsb, bool workloadPartition, bool copyOperation);
     void adjustWriteKernelTimestamp(uint64_t globalAddress, uint64_t contextAddress, uint64_t baseAddress, CommandToPatchContainer *outTimeStampSyncCmds, bool maskLsb, uint32_t mask, bool workloadPartition, bool copyOperation);
     void appendEventForProfiling(Event *event, CommandToPatchContainer *outTimeStampSyncCmds, bool beforeWalker, bool skipBarrierForEndProfiling, bool skipAddingEventToResidency, bool copyOperation);
@@ -354,7 +354,7 @@ struct CommandListCoreFamily : public CommandListImp {
     }
     void postInitComputeSetup();
     NEO::PreemptionMode obtainKernelPreemptionMode(Kernel *kernel);
-    virtual bool isRelaxedOrderingDispatchAllowed(uint32_t numWaitEvents, bool copyOffload) const { return false; }
+    virtual bool isRelaxedOrderingDispatchAllowed(uint32_t numWaitEvents, bool copyOffload) { return false; }
     virtual void setupFlushMethod(const NEO::RootDeviceEnvironment &rootDeviceEnvironment) {}
     bool canSkipInOrderEventWait(Event &event, bool ignorCbEventBoundToCmdList) const;
     bool handleInOrderImplicitDependencies(bool relaxedOrderingAllowed, bool copyOffloadOperation);

@@ -22,8 +22,17 @@ DeviceTimeDrm::DeviceTimeDrm(OSInterface &osInterface) {
     pDrm = osInterface.getDriverModel()->as<Drm>();
 }
 
-bool DeviceTimeDrm::getGpuCpuTimeImpl(TimeStampData *pGpuCpuTime, OSTime *osTime) {
-    return pDrm->getIoctlHelper()->setGpuCpuTimes(pGpuCpuTime, osTime);
+TimeQueryStatus DeviceTimeDrm::getGpuCpuTimeImpl(TimeStampData *pGpuCpuTime, OSTime *osTime) {
+
+    if (!pDrm->getIoctlHelper()->setGpuCpuTimes(pGpuCpuTime, osTime)) {
+        if (pDrm->getErrno() == EOPNOTSUPP) {
+            return TimeQueryStatus::unsupportedFeature;
+        } else {
+            return TimeQueryStatus::deviceLost;
+        }
+    }
+
+    return TimeQueryStatus::success;
 }
 
 double DeviceTimeDrm::getDynamicDeviceTimerResolution() const {
@@ -52,7 +61,7 @@ uint64_t DeviceTimeDrm::getDynamicDeviceTimerClock() const {
 }
 
 bool DeviceTimeDrm::isTimestampsRefreshEnabled() const {
-    bool timestampsRefreshEnabled = false;
+    bool timestampsRefreshEnabled = pDrm->getIoctlHelper()->isTimestampsRefreshEnabled();
     if (debugManager.flags.EnableReusingGpuTimestamps.get() != -1) {
         timestampsRefreshEnabled = debugManager.flags.EnableReusingGpuTimestamps.get();
     }

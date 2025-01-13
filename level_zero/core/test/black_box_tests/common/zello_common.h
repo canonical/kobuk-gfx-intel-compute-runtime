@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "level_zero/driver_experimental/zex_event.h"
 #include <level_zero/ze_api.h>
 
 #include <bitset>
@@ -28,6 +29,8 @@ inline void validate(ResulT result, const char *message);
 #define SUCCESS_OR_WARNING_BOOL(FLAG) LevelZeroBlackBoxTests::validate<false>(!(FLAG), #FLAG)
 
 namespace LevelZeroBlackBoxTests {
+
+using pfnZexCounterBasedEventCreate2 = decltype(&L0::zexCounterBasedEventCreate2);
 
 #define QTR(a) #a
 #define TOSTR(b) QTR(b)
@@ -85,7 +88,7 @@ void printResult(bool aubMode, bool outputValidationSuccessful, const std::strin
 
 void printResult(bool aubMode, bool outputValidationSuccessful, const std::string &blackBoxName);
 
-uint32_t getCommandQueueOrdinal(ze_device_handle_t &device);
+uint32_t getCommandQueueOrdinal(ze_device_handle_t &device, bool useCooperativeFlag);
 
 std::vector<uint32_t> getComputeQueueOrdinals(ze_device_handle_t &device);
 
@@ -93,15 +96,15 @@ uint32_t getCopyOnlyCommandQueueOrdinal(ze_device_handle_t &device);
 
 ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_device_handle_t &device,
                                              uint32_t *ordinal, ze_command_queue_mode_t mode,
-                                             ze_command_queue_priority_t priority);
+                                             ze_command_queue_priority_t priority, bool useCooperativeFlag);
 
 ze_command_queue_handle_t createCommandQueueWithOrdinal(ze_context_handle_t &context, ze_device_handle_t &device,
                                                         uint32_t ordinal, ze_command_queue_mode_t mode,
                                                         ze_command_queue_priority_t priority);
 
-ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_device_handle_t &device, uint32_t *ordinal);
+ze_command_queue_handle_t createCommandQueue(ze_context_handle_t &context, ze_device_handle_t &device, uint32_t *ordinal, bool useCooperativeFlag);
 
-ze_result_t createCommandList(ze_context_handle_t &context, ze_device_handle_t &device, ze_command_list_handle_t &cmdList);
+ze_result_t createCommandList(ze_context_handle_t &context, ze_device_handle_t &device, ze_command_list_handle_t &cmdList, bool useCooperativeFlag);
 ze_result_t createCommandList(ze_context_handle_t &context, ze_device_handle_t &device, ze_command_list_handle_t &cmdList, uint32_t ordinal);
 
 void createEventPoolAndEvents(ze_context_handle_t &context,
@@ -109,7 +112,8 @@ void createEventPoolAndEvents(ze_context_handle_t &context,
                               ze_event_pool_handle_t &eventPool,
                               ze_event_pool_flags_t poolFlag,
                               bool counterEvents,
-                              ze_event_pool_counter_based_exp_flags_t poolCounterFlag,
+                              const zex_counter_based_event_desc_t *counterBasedDesc,
+                              pfnZexCounterBasedEventCreate2 zexCounterBasedEventCreate2Func,
                               uint32_t poolSize,
                               ze_event_handle_t *events,
                               ze_event_scope_flags_t signalScope,

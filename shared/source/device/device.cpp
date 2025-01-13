@@ -7,6 +7,7 @@
 
 #include "shared/source/device/device.h"
 
+#include "shared/source/ail/ail_configuration.h"
 #include "shared/source/built_ins/sip.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/preemption.h"
@@ -43,6 +44,9 @@ Device::Device(ExecutionEnvironment *executionEnvironment, const uint32_t rootDe
     : executionEnvironment(executionEnvironment), rootDeviceIndex(rootDeviceIndex), isaPoolAllocator(this) {
     this->executionEnvironment->incRefInternal();
     this->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setDummyBlitProperties(rootDeviceIndex);
+    if (auto ailHelper = this->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->getAILConfigurationHelper(); ailHelper && ailHelper->isAdjustMicrosecondResolutionRequired()) {
+        microsecondResolution = ailHelper->getMicrosecondResolution();
+    }
 }
 
 Device::~Device() {
@@ -704,15 +708,17 @@ EngineControl &Device::getEngine(uint32_t index) {
 bool Device::getDeviceAndHostTimer(uint64_t *deviceTimestamp, uint64_t *hostTimestamp) const {
     TimeStampData timeStamp;
     auto retVal = getOSTime()->getGpuCpuTime(&timeStamp, true);
-    if (retVal) {
+    if (retVal == TimeQueryStatus::success) {
         *hostTimestamp = timeStamp.cpuTimeinNS;
         if (debugManager.flags.EnableDeviceBasedTimestamps.get()) {
             auto resolution = getOSTime()->getDynamicDeviceTimerResolution();
             *deviceTimestamp = getGfxCoreHelper().getGpuTimeStampInNS(timeStamp.gpuTimeStamp, resolution);
-        } else
+        } else {
             *deviceTimestamp = *hostTimestamp;
+        }
+        return true;
     }
-    return retVal;
+    return false;
 }
 
 bool Device::getHostTimer(uint64_t *hostTimestamp) const {
@@ -1120,7 +1126,7 @@ void Device::allocateRTDispatchGlobals(uint32_t maxBvhLevels) {
         dispatchGlobals.callStackHandlerKSP = reinterpret_cast<uint64_t>(nullptr);
         auto releaseHelper = getReleaseHelper();
         dispatchGlobals.stackSizePerRay = releaseHelper ? releaseHelper->getStackSizePerRay() : 0;
-        dispatchGlobals.numDSSRTStacks = getHardwareInfo().capabilityTable.syncNumRTStacksPerDSS;
+        dispatchGlobals.numDSSRTStacks = RayTracingHelper::getNumRtStacksPerDss(*this);
         dispatchGlobals.maxBVHLevels = maxBvhLevels;
 
         uint32_t *dispatchGlobalsAsArray = reinterpret_cast<uint32_t *>(&dispatchGlobals);
@@ -1229,6 +1235,22 @@ EngineControl *SecondaryContexts::getEngine(EngineUsage usage) {
     }
 
     return &engines[secondaryEngineIndex];
+}
+
+void Device::stopDirectSubmissionForCopyEngine() {
+    auto internalBcsEngine = getInternalCopyEngine();
+    if (internalBcsEngine == nullptr || getHardwareInfo().featureTable.ftrBcsInfo.count() > 1) {
+        return;
+    }
+    auto regularBcsEngine = tryGetEngine(internalBcsEngine->osContext->getEngineType(), EngineUsage::regular);
+    if (regularBcsEngine == nullptr) {
+        return;
+    }
+    auto regularBcs = regularBcsEngine->commandStreamReceiver;
+    if (regularBcs->isAnyDirectSubmissionEnabled()) {
+        auto lock = regularBcs->obtainUniqueOwnership();
+        regularBcs->stopDirectSubmission(false);
+    }
 }
 
 } // namespace NEO

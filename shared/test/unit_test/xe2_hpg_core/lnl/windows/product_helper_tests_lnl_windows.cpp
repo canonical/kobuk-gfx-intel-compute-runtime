@@ -23,9 +23,9 @@ LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenCheckDirectSubmissionSu
     EXPECT_TRUE(productHelper->isDirectSubmissionSupported(releaseHelper));
 }
 
-LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenDcFlushMitigationThenReturnTrue) {
-    EXPECT_TRUE(productHelper->mitigateDcFlush());
-    EXPECT_TRUE(productHelper->isDcFlushMitigated());
+LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenDcFlushMitigationThenReturnFalse) {
+    EXPECT_FALSE(productHelper->mitigateDcFlush());
+    EXPECT_FALSE(productHelper->isDcFlushMitigated());
 }
 
 LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenOverridePatIndexCalledThenCorrectValueIsReturned) {
@@ -72,10 +72,6 @@ LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenOverridePatIndexCalledT
     debugManager.flags.OverrideWriteOnlyPatForDcFlushMitigation.set(static_cast<int32_t>(expectedPatIndexOverride));
     EXPECT_EQ(expectedPatIndexOverride, productHelper->overridePatIndex(0u, expectedPatIndex, AllocationType::linearStream));
     EXPECT_EQ(expectedPatIndexOverride, productHelper->overridePatIndex(0u, expectedPatIndex, AllocationType::internalHeap));
-}
-
-LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenIsStagingBuffersEnabledThenTrueIsReturned) {
-    EXPECT_TRUE(productHelper->isStagingBuffersEnabled());
 }
 
 LNLTEST_F(LnlProductHelperWindows, givenProductHelperWhenCheckIsCopyBufferRectSplitSupportedThenReturnsTrue) {

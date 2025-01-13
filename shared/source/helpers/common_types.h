@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace NEO {
@@ -20,6 +21,23 @@ using MultiDeviceEngineControlContainer = StackVec<EngineControlContainer, 6u>;
 class Device;
 using DeviceVector = std::vector<std::unique_ptr<Device>>;
 using PrivateAllocsToReuseContainer = StackVec<std::pair<uint32_t, GraphicsAllocation *>, 8>;
+
+// std::to_underlying is C++23 feature
+template <typename EnumT>
+constexpr auto toUnderlying(EnumT scopedEnumValue) {
+    static_assert(std::is_enum_v<EnumT>);
+    static_assert(!std::is_convertible_v<EnumT, std::underlying_type_t<EnumT>>);
+
+    return static_cast<std::underlying_type_t<EnumT>>(scopedEnumValue);
+}
+
+template <typename EnumT>
+constexpr auto toEnum(std::underlying_type_t<EnumT> region) {
+    static_assert(std::is_enum_v<EnumT>);
+    static_assert(!std::is_convertible_v<EnumT, std::underlying_type_t<EnumT>>);
+
+    return static_cast<EnumT>(region);
+}
 
 enum class DebugPauseState : uint32_t {
     disabled,
@@ -54,6 +72,7 @@ enum class CacheRegion : uint16_t {
     count,
     none = 0xFFFF
 };
+constexpr auto toCacheRegion(std::underlying_type_t<CacheRegion> region) { return toEnum<CacheRegion>(region); }
 
 enum class CacheLevel : uint16_t {
     defaultLevel = 0,
@@ -98,4 +117,8 @@ namespace InterruptId {
 static constexpr uint32_t notUsed = std::numeric_limits<uint32_t>::max();
 }
 
+namespace TypeTraits {
+template <typename T>
+constexpr bool isPodV = std::is_standard_layout_v<T> && std::is_trivial_v<T> && std::is_trivially_copyable_v<T>;
+}
 } // namespace NEO

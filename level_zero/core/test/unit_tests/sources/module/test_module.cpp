@@ -27,6 +27,7 @@
 #include "shared/test/common/helpers/mock_file_io.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_compiler_product_helper.h"
+#include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_elf.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
@@ -35,7 +36,6 @@
 #include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
-#include "level_zero/api/driver_experimental/public/zex_module.h"
 #include "level_zero/core/source/kernel/kernel_imp.h"
 #include "level_zero/core/source/module/module_build_log.h"
 #include "level_zero/core/source/module/module_imp.h"
@@ -44,6 +44,7 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_device.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_kernel.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
+#include "level_zero/driver_experimental/zex_module.h"
 
 namespace L0 {
 namespace ult {
@@ -699,6 +700,28 @@ HWTEST_F(ModuleTest, GivenIncorrectNameWhenCreatingKernelThenResultErrorInvalidA
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_KERNEL_NAME, res);
 }
 
+struct DerivedModuleImp : public L0::ModuleImp {
+    using ModuleImp::kernelImmDatas;
+    using ModuleImp::translationUnit;
+    DerivedModuleImp(L0::Device *device) : ModuleImp(device, nullptr, ModuleType::user){};
+    ~DerivedModuleImp() override = default;
+
+    bool canModulesShareIsaAllocation() {
+        size_t kernelsCount = this->kernelImmDatas.size();
+        size_t kernelsIsaTotalSize = 0lu;
+        for (auto i = 0lu; i < kernelsCount; i++) {
+            auto kernelInfo = this->translationUnit->programInfo.kernelInfos[i];
+            auto chunkSize = this->computeKernelIsaAllocationAlignedSizeWithPadding(kernelInfo->heapInfo.kernelHeapSize, ((i + 1) == kernelsCount));
+            kernelsIsaTotalSize += chunkSize;
+        }
+        if (kernelsIsaTotalSize <= this->isaAllocationPageSize) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+};
+
 HWTEST_F(ModuleTest, whenMultipleModulesCreatedThenModulesShareIsaAllocation) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
@@ -711,58 +734,63 @@ HWTEST_F(ModuleTest, whenMultipleModulesCreatedThenModulesShareIsaAllocation) {
     NEO::GraphicsAllocation *allocation;
     std::vector<std::unique_ptr<L0::ModuleImp>> modules;
     constexpr size_t numModules = 10;
-    auto &ultCsr = neoDevice->getUltCommandStreamReceiver<FamilyType>();
-    auto initialWriteMemoryCount = ultCsr.writeMemoryParams.totalCallCount;
-    for (auto i = 0u; i < numModules; i++) {
-        modules.emplace_back(new L0::ModuleImp(device, moduleBuildLog, ModuleType::user));
-        modules[i]->initialize(&moduleDesc, device->getNEODevice());
-        EXPECT_EQ(initialWriteMemoryCount, ultCsr.writeMemoryParams.totalCallCount);
+    auto testModule = std::make_unique<DerivedModuleImp>(device);
+    testModule->initialize(&moduleDesc, device->getNEODevice());
+    bool canShareIsaAllocation = testModule->canModulesShareIsaAllocation();
+    if (canShareIsaAllocation) {
+        auto &ultCsr = neoDevice->getUltCommandStreamReceiver<FamilyType>();
+        auto initialWriteMemoryCount = ultCsr.writeMemoryParams.totalCallCount;
+        for (auto i = 0u; i < numModules; i++) {
+            modules.emplace_back(new L0::ModuleImp(device, moduleBuildLog, ModuleType::user));
+            modules[i]->initialize(&moduleDesc, device->getNEODevice());
+            EXPECT_EQ(initialWriteMemoryCount, ultCsr.writeMemoryParams.totalCallCount);
 
-        if (i == 0) {
-            allocation = modules[i]->getKernelsIsaParentAllocation();
+            if (i == 0) {
+                allocation = modules[i]->getKernelsIsaParentAllocation();
+            }
+            auto &vec = modules[i]->getKernelImmutableDataVector();
+            auto offsetForImmData = vec[0]->getIsaOffsetInParentAllocation();
+            for (auto &immData : vec) {
+                EXPECT_EQ(offsetForImmData, immData->getIsaOffsetInParentAllocation());
+                offsetForImmData += immData->getIsaSubAllocationSize();
+            }
+            // Verify that all imm datas share same parent allocation
+            if (i != 0) {
+                EXPECT_EQ(allocation, modules[i]->getKernelsIsaParentAllocation());
+            }
         }
-        auto &vec = modules[i]->getKernelImmutableDataVector();
-        auto offsetForImmData = vec[0]->getIsaOffsetInParentAllocation();
-        for (auto &immData : vec) {
-            EXPECT_EQ(offsetForImmData, immData->getIsaOffsetInParentAllocation());
-            offsetForImmData += immData->getIsaSubAllocationSize();
+        modules.clear();
+
+        ultCsr.commandStreamReceiverType = CommandStreamReceiverType::aub;
+
+        for (auto i = 0u; i < 5; i++) {
+            modules.emplace_back(new L0::ModuleImp(device, moduleBuildLog, ModuleType::user));
+            modules[i]->initialize(&moduleDesc, device->getNEODevice());
+            EXPECT_EQ(initialWriteMemoryCount + i + 1, ultCsr.writeMemoryParams.totalCallCount);
+
+            if (i == 0) {
+                allocation = modules[i]->getKernelsIsaParentAllocation();
+            }
+            auto &vec = modules[i]->getKernelImmutableDataVector();
+            auto offsetForImmData = vec[0]->getIsaOffsetInParentAllocation();
+            for (auto &immData : vec) {
+                EXPECT_EQ(offsetForImmData, immData->getIsaOffsetInParentAllocation());
+                offsetForImmData += immData->getIsaSubAllocationSize();
+            }
+            // Verify that all imm datas share same parent allocation
+            if (i != 0) {
+                EXPECT_EQ(allocation, modules[i]->getKernelsIsaParentAllocation());
+            }
         }
-        // Verify that all imm datas share same parent allocation
-        if (i != 0) {
-            EXPECT_EQ(allocation, modules[i]->getKernelsIsaParentAllocation());
-        }
+        modules.clear();
+
+        ultCsr.commandStreamReceiverType = CommandStreamReceiverType::tbx;
+        initialWriteMemoryCount = ultCsr.writeMemoryParams.totalCallCount;
+
+        auto module = std::make_unique<L0::ModuleImp>(device, moduleBuildLog, ModuleType::user);
+        module->initialize(&moduleDesc, device->getNEODevice());
+        EXPECT_EQ(initialWriteMemoryCount + 1, ultCsr.writeMemoryParams.totalCallCount);
     }
-    modules.clear();
-
-    ultCsr.commandStreamReceiverType = CommandStreamReceiverType::aub;
-
-    for (auto i = 0u; i < 5; i++) {
-        modules.emplace_back(new L0::ModuleImp(device, moduleBuildLog, ModuleType::user));
-        modules[i]->initialize(&moduleDesc, device->getNEODevice());
-        EXPECT_EQ(initialWriteMemoryCount + i + 1, ultCsr.writeMemoryParams.totalCallCount);
-
-        if (i == 0) {
-            allocation = modules[i]->getKernelsIsaParentAllocation();
-        }
-        auto &vec = modules[i]->getKernelImmutableDataVector();
-        auto offsetForImmData = vec[0]->getIsaOffsetInParentAllocation();
-        for (auto &immData : vec) {
-            EXPECT_EQ(offsetForImmData, immData->getIsaOffsetInParentAllocation());
-            offsetForImmData += immData->getIsaSubAllocationSize();
-        }
-        // Verify that all imm datas share same parent allocation
-        if (i != 0) {
-            EXPECT_EQ(allocation, modules[i]->getKernelsIsaParentAllocation());
-        }
-    }
-    modules.clear();
-
-    ultCsr.commandStreamReceiverType = CommandStreamReceiverType::tbx;
-    initialWriteMemoryCount = ultCsr.writeMemoryParams.totalCallCount;
-
-    auto module = std::make_unique<L0::ModuleImp>(device, moduleBuildLog, ModuleType::user);
-    module->initialize(&moduleDesc, device->getNEODevice());
-    EXPECT_EQ(initialWriteMemoryCount + 1, ultCsr.writeMemoryParams.totalCallCount);
 };
 
 template <typename T1, typename T2>
@@ -2905,12 +2933,12 @@ HWTEST_F(MultiDeviceModuleSetArgBufferTest,
 
         auto svmAllocsManager = device->getDriverHandle()->getSvmAllocsManager();
         auto virtualAlloc = svmAllocsManager->getSVMAlloc(ptr);
-        virtualAlloc->virtualReservationData->mappedAllocations.at(offsetAddress)->mappedAllocation->allocation->setSize((MemoryConstants::gigaByte * 4) - MemoryConstants::pageSize64k);
+        virtualAlloc->virtualReservationData->mappedAllocations.at(offsetAddress)->mappedAllocation.allocation->setSize((MemoryConstants::gigaByte * 4) - MemoryConstants::pageSize64k);
 
         L0::KernelImp *kernel = reinterpret_cast<L0::KernelImp *>(Kernel::fromHandle(kernelHandle));
         kernel->setArgBuffer(0, sizeof(ptr), &ptr);
 
-        virtualAlloc->virtualReservationData->mappedAllocations.at(offsetAddress)->mappedAllocation->allocation->setSize(size);
+        virtualAlloc->virtualReservationData->mappedAllocations.at(offsetAddress)->mappedAllocation.allocation->setSize(size);
 
         bool phys1Resident = false;
         bool phys2Resident = false;
@@ -3471,9 +3499,8 @@ HWTEST_F(ModuleTranslationUnitTest, WithNoCompilerWhenCallingBuildFromSpirvThenF
     auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
     rootDeviceEnvironment->compilerInterface.reset(nullptr);
     auto oldFclDllName = Os::frontEndDllName;
-    auto oldIgcDllName = Os::igcDllName;
     Os::frontEndDllName = "_invalidFCL";
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
 
     L0::ModuleTranslationUnit moduleTu(this->device);
     moduleTu.options = "abcd";
@@ -3481,7 +3508,6 @@ HWTEST_F(ModuleTranslationUnitTest, WithNoCompilerWhenCallingBuildFromSpirvThenF
     ze_result_t result = ZE_RESULT_SUCCESS;
     result = moduleTu.buildFromSpirV("", 0U, nullptr, "", nullptr);
     EXPECT_EQ(result, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
-    Os::igcDllName = oldIgcDllName;
     Os::frontEndDllName = oldFclDllName;
 }
 
@@ -3489,9 +3515,8 @@ HWTEST_F(ModuleTranslationUnitTest, WithNoCompilerWhenCallingCompileGenBinaryThe
     auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
     rootDeviceEnvironment->compilerInterface.reset(nullptr);
     auto oldFclDllName = Os::frontEndDllName;
-    auto oldIgcDllName = Os::igcDllName;
     Os::frontEndDllName = "_invalidFCL";
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
 
     L0::ModuleTranslationUnit moduleTu(this->device);
     moduleTu.options = "abcd";
@@ -3500,7 +3525,6 @@ HWTEST_F(ModuleTranslationUnitTest, WithNoCompilerWhenCallingCompileGenBinaryThe
     TranslationInput inputArgs = {IGC::CodeType::spirV, IGC::CodeType::oclGenBin};
     result = moduleTu.compileGenBinary(inputArgs, false);
     EXPECT_EQ(result, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
-    Os::igcDllName = oldIgcDllName;
     Os::frontEndDllName = oldFclDllName;
 }
 
@@ -3508,9 +3532,8 @@ HWTEST_F(ModuleTranslationUnitTest, WithNoCompilerWhenCallingStaticLinkSpirVThen
     auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
     rootDeviceEnvironment->compilerInterface.reset(nullptr);
     auto oldFclDllName = Os::frontEndDllName;
-    auto oldIgcDllName = Os::igcDllName;
     Os::frontEndDllName = "_invalidFCL";
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
 
     L0::ModuleTranslationUnit moduleTu(this->device);
     moduleTu.options = "abcd";
@@ -3521,7 +3544,6 @@ HWTEST_F(ModuleTranslationUnitTest, WithNoCompilerWhenCallingStaticLinkSpirVThen
     std::vector<const ze_module_constants_t *> specConstants;
     result = moduleTu.staticLinkSpirV(inputSpirVs, inputModuleSizes, "", "", specConstants);
     EXPECT_EQ(result, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
-    Os::igcDllName = oldIgcDllName;
     Os::frontEndDllName = oldFclDllName;
 }
 
@@ -4331,11 +4353,6 @@ TEST_F(ModuleDebugDataTest, GivenDebugDataWithRelocationsWhenCreatingRelocatedDe
     auto cip = new NEO::MockCompilerInterfaceCaptureBuildOptions();
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->compilerInterface.reset(cip);
 
-    uint8_t binary[10];
-    ze_module_desc_t moduleDesc = {};
-    moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
-    moduleDesc.pInputModule = binary;
-    moduleDesc.inputSize = 10;
     ModuleBuildLog *moduleBuildLog = nullptr;
 
     auto module = std::make_unique<MockModule>(device, moduleBuildLog, ModuleType::user);

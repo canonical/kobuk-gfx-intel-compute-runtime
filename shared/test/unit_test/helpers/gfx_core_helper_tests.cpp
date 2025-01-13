@@ -117,12 +117,12 @@ HWTEST2_F(GfxCoreHelperTest, WhenSettingRenderSurfaceStateForBufferThenL1CachePo
     gfxCoreHelper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, false,
                                                           false);
 
-    EXPECT_NE(FamilyType::RENDER_SURFACE_STATE::L1_CACHE_POLICY_WB, surfaceState->getL1CachePolicyL1CacheControl());
+    EXPECT_NE(FamilyType::RENDER_SURFACE_STATE::L1_CACHE_CONTROL_WB, surfaceState->getL1CacheControlCachePolicy());
 
     gfxCoreHelper.setRenderSurfaceStateForScratchResource(rootDeviceEnvironment, stateBuffer, size, addr, offset, pitch, nullptr, false, type, false,
                                                           true);
 
-    EXPECT_EQ(FamilyType::RENDER_SURFACE_STATE::L1_CACHE_POLICY_WB, surfaceState->getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(FamilyType::RENDER_SURFACE_STATE::L1_CACHE_CONTROL_WB, surfaceState->getL1CacheControlCachePolicy());
 
     alignedFree(stateBuffer);
 }
@@ -219,7 +219,7 @@ using LriHelperTests = ::testing::Test;
 
 HWTEST_F(LriHelperTests, givenAddressAndOffsetWhenHelperIsUsedThenProgramCmdStream) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint32_t address = 0x8888;
@@ -240,7 +240,7 @@ HWTEST_F(LriHelperTests, givenAddressAndOffsetWhenHelperIsUsedThenProgramCmdStre
 
 HWTEST_F(LriHelperTests, givenAddressAndOffsetAndRemapAndNotBlitterWhenHelperIsUsedThenProgramCmdStream) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint32_t address = 0x8888;
@@ -261,7 +261,7 @@ HWTEST_F(LriHelperTests, givenAddressAndOffsetAndRemapAndNotBlitterWhenHelperIsU
 
 HWTEST_F(LriHelperTests, givenAddressAndOffsetAndNotRemapAndBlitterWhenHelperIsUsedThenProgramCmdStream) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint32_t address = 0x8888;
@@ -282,7 +282,7 @@ HWTEST_F(LriHelperTests, givenAddressAndOffsetAndNotRemapAndBlitterWhenHelperIsU
 
 HWTEST_F(LriHelperTests, givenAddressAndOffsetAndRemapAndBlitterWhenHelperIsUsedThenProgramCmdStream) {
     using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint32_t address = 0x8888;
@@ -305,7 +305,7 @@ using PipeControlHelperTests = ::testing::Test;
 
 HWTEST_F(PipeControlHelperTests, givenPostSyncWriteTimestampModeWhenHelperIsUsedThenProperFieldsAreProgrammed) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint64_t address = 0x1234567887654321;
@@ -347,7 +347,7 @@ HWTEST_F(PipeControlHelperTests, givenGfxCoreHelperwhenAskingForDcFlushThenRetur
 
 HWTEST_F(PipeControlHelperTests, givenDcFlushNotAllowedWhenProgrammingPipeControlThenDontSetDcFlush) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
 
@@ -364,7 +364,7 @@ HWTEST_F(PipeControlHelperTests, givenDcFlushNotAllowedWhenProgrammingPipeContro
 
 HWTEST_F(PipeControlHelperTests, givenPostSyncWriteImmediateDataModeWhenHelperIsUsedThenProperFieldsAreProgrammed) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint64_t address = 0x1234567887654321;
@@ -402,7 +402,7 @@ HWTEST_F(PipeControlHelperTests, givenPostSyncWriteImmediateDataModeWhenHelperIs
 
 HWTEST_F(PipeControlHelperTests, givenNotifyEnableArgumentIsTrueWhenHelperIsUsedThenNotifyEnableFlagIsTrue) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint64_t address = 0x1234567887654321;
@@ -455,7 +455,7 @@ HWTEST_F(PipeControlHelperTests, WhenIsDcFlushAllowedIsCalledThenCorrectResultIs
 
 HWTEST_F(PipeControlHelperTests, WhenPipeControlPostSyncTimestampUsedThenCorrectPostSyncUsed) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint64_t address = 0x1234567887654320;
@@ -473,7 +473,7 @@ HWTEST_F(PipeControlHelperTests, WhenPipeControlPostSyncTimestampUsedThenCorrect
 
 HWTEST_F(PipeControlHelperTests, WhenPipeControlPostSyncWriteImmediateDataUsedThenCorrectPostSyncUsed) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     uint64_t address = 0x1234567887654320;
@@ -620,7 +620,6 @@ HWTEST2_F(GfxCoreHelperTest, givenCreatedSurfaceStateBufferWhenAllocationProvide
 HWTEST2_F(GfxCoreHelperTest, givenCreatedSurfaceStateBufferWhenGmmAndAllocationCompressionEnabledAnNonAuxDisabledThenSetCoherencyToGpuAndAuxModeToCompression, MatchAny) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     using SURFACE_TYPE = typename RENDER_SURFACE_STATE::SURFACE_TYPE;
-    using AUXILIARY_SURFACE_MODE = typename RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
 
     auto &rootDeviceEnvironment = pDevice->getRootDeviceEnvironment();
     void *stateBuffer = alignedMalloc(sizeof(RENDER_SURFACE_STATE), sizeof(RENDER_SURFACE_STATE));
@@ -1079,7 +1078,7 @@ HWTEST_F(PipeControlHelperTests, WhenGettingPipeControSizeForCacheFlushThenRetur
 
 HWTEST_F(PipeControlHelperTests, WhenProgrammingCacheFlushThenExpectBasicFieldsSet) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     MockExecutionEnvironment mockExecutionEnvironment{};
@@ -1106,7 +1105,7 @@ HWTEST_F(PipeControlHelperTests, WhenGettingPipeControSizeForInstructionCacheFlu
 
 HWTEST_F(PipeControlHelperTests, WhenProgrammingInstructionCacheFlushThenExpectInstructionCacheInvalidateEnableFieldSet) {
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    std::unique_ptr<uint8_t> buffer(new uint8_t[128]);
+    auto buffer = std::make_unique<uint8_t[]>(128);
 
     LinearStream stream(buffer.get(), 128);
     MockExecutionEnvironment mockExecutionEnvironment{};
@@ -1874,10 +1873,40 @@ HWTEST_F(GfxCoreHelperTest, givenGetDeviceTimestampWidthCalledThenReturnCorrectV
     EXPECT_EQ(64u, helper.getDeviceTimestampWidth());
 }
 
-HWTEST2_F(GfxCoreHelperTest, givenHwHelperWhenAligningThreadGroupCountToDssSizeThenThreadGroupCountDoesNotChange, IsAtMostXe2HpgCore) {
+HWTEST_F(GfxCoreHelperTest, givenHwHelperWhenAligningThreadGroupCountToDssSizeThenThreadGroupCountChanged) {
     auto &helper = getHelper<GfxCoreHelper>();
     uint32_t threadGroupCountBefore = 4096;
     uint32_t threadCount = threadGroupCountBefore;
     helper.alignThreadGroupCountToDssSize(threadCount, 1, 1, 1);
-    EXPECT_EQ(threadGroupCountBefore, threadCount);
+    EXPECT_NE(threadGroupCountBefore, threadCount);
+}
+
+HWTEST_F(GfxCoreHelperTest, givenHwHelperWhenThreadGroupCountIsAlignedToDssThenThreadCountNotChanged) {
+    auto &helper = getHelper<GfxCoreHelper>();
+    uint32_t dssCount = 16;
+    uint32_t threadGroupSize = 32;
+    uint32_t threadsPerDss = 2 * threadGroupSize;
+    uint32_t maxThreadCount = (dssCount * threadsPerDss) / threadGroupSize;
+    uint32_t threadCount = maxThreadCount;
+    helper.alignThreadGroupCountToDssSize(threadCount, dssCount, threadsPerDss, threadGroupSize);
+    EXPECT_EQ(2 * dssCount, threadCount);
+}
+
+HWTEST_F(GfxCoreHelperTest, givenHwHelperWhenThreadGroupCountIsAlignedToDssThenThreadCountChanged) {
+    auto &helper = getHelper<GfxCoreHelper>();
+    uint32_t dssCount = 16;
+    uint32_t threadGroupSize = 32;
+    uint32_t threadsPerDss = 2 * threadGroupSize - 1;
+    uint32_t maxThreadCount = (dssCount * threadsPerDss) / threadGroupSize;
+    uint32_t threadCount = maxThreadCount;
+    helper.alignThreadGroupCountToDssSize(threadCount, dssCount, threadsPerDss, threadGroupSize);
+    EXPECT_EQ(dssCount, threadCount);
+}
+
+HWTEST_F(GfxCoreHelperTest, givenDebugFlagForceUseOnlyGlobalTimestampsSetWhenCallUseOnlyGlobalTimestampsThenTrueIsReturned) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.ForceUseOnlyGlobalTimestamps.set(1);
+
+    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    EXPECT_TRUE(gfxCoreHelper.useOnlyGlobalTimestamps());
 }

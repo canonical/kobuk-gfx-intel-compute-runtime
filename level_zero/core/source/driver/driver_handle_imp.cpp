@@ -25,7 +25,6 @@
 #include "shared/source/os_interface/os_library.h"
 #include "shared/source/utilities/logger.h"
 
-#include "level_zero/api/driver_experimental/public/zex_common.h"
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
 #include "level_zero/core/source/context/context_imp.h"
 #include "level_zero/core/source/device/device_imp.h"
@@ -35,6 +34,7 @@
 #include "level_zero/core/source/fabric/fabric.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/source/image/image.h"
+#include "level_zero/driver_experimental/zex_common.h"
 
 #include "driver_version.h"
 
@@ -784,17 +784,32 @@ NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
                                                             void *basePtr,
                                                             uintptr_t *peerGpuAddress,
                                                             NEO::SvmAllocationData **peerAllocData) {
-    DeviceImp *deviceImp = static_cast<DeviceImp *>(device);
+    return getPeerAllocation(device, static_cast<DeviceImp *>(device)->peerAllocations, allocData, basePtr, peerGpuAddress, peerAllocData);
+}
+
+NEO::GraphicsAllocation *DriverHandleImp::getCounterPeerAllocation(Device *device, NEO::GraphicsAllocation &graphicsAllocation) {
+    NEO::SvmAllocationData allocData(graphicsAllocation.getRootDeviceIndex());
+    allocData.gpuAllocations.addAllocation(&graphicsAllocation);
+
+    return getPeerAllocation(device, static_cast<DeviceImp *>(device)->peerCounterAllocations, &allocData, reinterpret_cast<void *>(graphicsAllocation.getGpuAddress()), nullptr, nullptr);
+}
+
+NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
+                                                            NEO::SVMAllocsManager::MapBasedAllocationTracker &storage,
+                                                            NEO::SvmAllocationData *allocData,
+                                                            void *basePtr,
+                                                            uintptr_t *peerGpuAddress,
+                                                            NEO::SvmAllocationData **peerAllocData) {
     NEO::GraphicsAllocation *alloc = nullptr;
     void *peerMapAddress = basePtr;
     void *peerPtr = nullptr;
 
     NEO::SvmAllocationData *peerAllocDataInternal = nullptr;
 
-    std::unique_lock<NEO::SpinLock> lock(deviceImp->peerAllocationsMutex);
+    std::unique_lock<NEO::SpinLock> lock(storage.mutex);
 
-    auto iter = deviceImp->peerAllocations.allocations.find(basePtr);
-    if (iter != deviceImp->peerAllocations.allocations.end()) {
+    auto iter = storage.allocations.find(basePtr);
+    if (iter != storage.allocations.end()) {
         peerAllocDataInternal = &iter->second;
         alloc = peerAllocDataInternal->gpuAllocations.getDefaultGraphicsAllocation();
         UNRECOVERABLE_IF(alloc == nullptr);
@@ -852,10 +867,10 @@ NEO::GraphicsAllocation *DriverHandleImp::getPeerAllocation(Device *device,
         if (peerMapAddress == nullptr) {
             peerAllocDataInternal = this->getSvmAllocsManager()->getSVMAlloc(peerPtr);
         }
-        deviceImp->peerAllocations.allocations.insert(std::make_pair(basePtr, *peerAllocDataInternal));
+        storage.allocations.insert(std::make_pair(basePtr, *peerAllocDataInternal));
         // Point to the new peer Alloc Data after it is recreated in the peer allocations map
         if (peerMapAddress) {
-            peerAllocDataInternal = &deviceImp->peerAllocations.allocations.at(basePtr);
+            peerAllocDataInternal = &storage.allocations.at(basePtr);
         }
     }
 

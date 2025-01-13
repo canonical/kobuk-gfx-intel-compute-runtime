@@ -23,8 +23,8 @@
 namespace L0 {
 namespace ult {
 
-HWTEST_EXCLUDE_PRODUCT(AppendMemoryCopy, givenCopyCommandListWhenTimestampPassedToMemoryCopyRegionBlitThenTimeStampRegistersAreAdded_MatchAny, IGFX_XE2_HPG_CORE);
-HWTEST_EXCLUDE_PRODUCT(AppendMemoryCopy, givenCopyCommandListWhenTimestampPassedToMemoryCopyThenAppendProfilingCalledOnceBeforeAndAfterCommand_MatchAny, IGFX_XE2_HPG_CORE);
+HWTEST_EXCLUDE_PRODUCT(AppendMemoryCopyTests, givenCopyCommandListWhenTimestampPassedToMemoryCopyRegionBlitThenTimeStampRegistersAreAdded_MatchAny, IGFX_XE2_HPG_CORE);
+HWTEST_EXCLUDE_PRODUCT(AppendMemoryCopyTests, givenCopyCommandListWhenTimestampPassedToMemoryCopyThenAppendProfilingCalledOnceBeforeAndAfterCommand_MatchAny, IGFX_XE2_HPG_CORE);
 
 using Platforms = IsAtLeastXe2HpgCore;
 
@@ -285,7 +285,6 @@ HWTEST2_F(InOrderCmdListTests, givenDebugFlagWhenPostSyncWithInOrderExecInfoIsCr
     DebugManagerStateRestore restorer;
     NEO::debugManager.flags.ForcePostSyncL1Flush.set(0);
     using WalkerVariant = typename FamilyType::WalkerVariant;
-    using POSTSYNC_DATA = typename FamilyType::POSTSYNC_DATA;
 
     auto immCmdList = createImmCmdList<gfxCoreFamily>();
     auto cmdStream = immCmdList->getCmdContainer().getCommandStream();

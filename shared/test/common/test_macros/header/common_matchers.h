@@ -32,6 +32,7 @@ using IsBeforeXeHpcCore = IsBeforeGfxCore<IGFX_XE_HPC_CORE>;
 
 using IsAtLeastXe2HpgCore = IsAtLeastGfxCore<IGFX_XE2_HPG_CORE>;
 using IsAtMostXe2HpgCore = IsAtMostGfxCore<IGFX_XE2_HPG_CORE>;
+using IsWithinXeHpCoreAndXe2HpgCore = IsWithinGfxCore<IGFX_XE_HP_CORE, IGFX_XE2_HPG_CORE>;
 
 using IsXeHpOrXeHpgCore = IsAnyGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPG_CORE>;
 using IsXeHpOrXeHpcCore = IsAnyGfxCores<IGFX_XE_HP_CORE, IGFX_XE_HPC_CORE>;
@@ -62,6 +63,7 @@ using IsLNL = IsProduct<IGFX_LUNARLAKE>;
 using IsAtLeastMtl = IsAtLeastProduct<IGFX_METEORLAKE>;
 using IsAtMostDg2 = IsAtMostProduct<IGFX_DG2>;
 
+using IsNotDG1 = IsNotWithinProducts<IGFX_DG1, IGFX_DG1>;
 using IsAtLeastPVC = IsAtLeastProduct<IGFX_PVC>;
 using IsAtMostPVC = IsAtMostProduct<IGFX_PVC>;
 using IsNotPVC = IsNotWithinProducts<IGFX_PVC, IGFX_PVC>;

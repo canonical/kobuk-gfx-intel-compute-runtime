@@ -66,8 +66,14 @@ inline void AILConfigurationHw<IGFX_DG2>::applyExt(RuntimeCapabilityTable &runti
 
 template <>
 bool AILConfigurationHw<IGFX_DG2>::isBufferPoolEnabled() {
-    auto iterator = applicationsBufferPoolDisabledDg2.find(processName);
-    return iterator == applicationsBufferPoolDisabledDg2.end();
+    auto iterator = applicationsBufferPoolDisabledXe.find(processName);
+    return iterator == applicationsBufferPoolDisabledXe.end();
+}
+
+template <>
+inline bool AILConfigurationHw<IGFX_DG2>::isFallbackToPatchtokensRequired() {
+    auto iterator = applicationsFallbackToPatchtokensRequiredDg2.find(processName);
+    return iterator != applicationsFallbackToPatchtokensRequiredDg2.end();
 }
 
 template class AILConfigurationHw<IGFX_DG2>;

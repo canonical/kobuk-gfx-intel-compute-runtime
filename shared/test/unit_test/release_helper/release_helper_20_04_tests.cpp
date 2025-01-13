@@ -42,10 +42,9 @@ TEST_F(ReleaseHelper2004Tests, whenGettingCapabilitiesThenCorrectPropertiesAreRe
         EXPECT_TRUE(releaseHelper->isRayTracingSupported());
         EXPECT_FALSE(releaseHelper->isDisablingMsaaRequired());
         EXPECT_TRUE(releaseHelper->isGlobalBindlessAllocatorEnabled());
+        EXPECT_TRUE(releaseHelper->isNumRtStacksPerDssFixedValue());
+        EXPECT_FALSE(releaseHelper->getFtrXe2Compression());
     }
-}
-TEST_F(ReleaseHelper2004Tests, whenShouldAdjustCalledThenTrueReturned) {
-    whenShouldAdjustCalledThenTrueReturned();
 }
 
 TEST_F(ReleaseHelper2004Tests, whenGettingSupportedNumGrfsThenCorrectValuesAreReturned) {
@@ -70,6 +69,10 @@ TEST_F(ReleaseHelper2004Tests, whenGettingAdditionalExtraKernelCapabilitiesThenR
 
 TEST_F(ReleaseHelper2004Tests, whenIsLocalOnlyAllowedCalledThenFalseReturned) {
     whenIsLocalOnlyAllowedCalledThenFalseReturned();
+}
+
+TEST_F(ReleaseHelper2004Tests, whenIsDummyBlitWaRequiredCalledThenFalseReturned) {
+    whenIsDummyBlitWaRequiredCalledThenFalseReturned();
 }
 
 TEST_F(ReleaseHelper2004Tests, whenGettingPreferredSlmSizeThenAllEntriesHaveCorrectValues) {

@@ -27,13 +27,17 @@ add_executable(igdrcl_${target_name}
                ${NEO_SHARED_DIRECTORY}/dll/device_dll.cpp
                ${NEO_SHARED_DIRECTORY}/dll/direct_submission_controller_enabled.cpp
                ${NEO_SHARED_DIRECTORY}/dll/linux/drm_neo_create.cpp
-               ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.cpp
+               ${NEO_SHARED_DIRECTORY}/dll/linux${BRANCH_DIR_SUFFIX}/options_linux.cpp
+               ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.inl
                ${NEO_SHARED_DIRECTORY}/dll/linux/os_interface.cpp
                ${NEO_SOURCE_DIR}/opencl/source/dll/command_queue_dll.cpp
                ${NEO_SOURCE_DIR}/opencl/source/os_interface/linux/platform_teardown_linux.cpp
 )
 if(NEO__LIBVA_FOUND)
   target_sources(igdrcl_${target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/va_tests.cpp)
+endif()
+if(NOT DISABLE_WDDM_LINUX)
+  target_sources(igdrcl_${target_name} PRIVATE ${NEO_SHARED_DIRECTORY}/dll/wddm/wddm_create.cpp)
 endif()
 
 target_link_libraries(igdrcl_${target_name} ${NEO_MOCKABLE_LIB_NAME} ${NEO_SHARED_MOCKABLE_LIB_NAME} igdrcl_mocks ${NEO_EXTRA_LIBS} gmock-gtest)

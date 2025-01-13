@@ -24,9 +24,9 @@
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
-#include "level_zero/include/zet_intel_gpu_debug.h"
 #include "level_zero/tools/source/debug/linux/debug_session_factory.h"
 #include "level_zero/tools/source/debug/linux/drm_helper.h"
+#include "level_zero/zet_intel_gpu_debug.h"
 #include <level_zero/ze_api.h>
 
 #include "common/StateSaveAreaHeader.h"
@@ -971,7 +971,8 @@ uint64_t DebugSessionLinuxi915::getVmHandleFromClientAndlrcHandle(uint64_t clien
 void DebugSessionLinuxi915::handleAttentionEvent(prelim_drm_i915_debug_event_eu_attention *attention) {
     NEO::EngineClassInstance engineClassInstance = {attention->ci.engine_class, attention->ci.engine_instance};
     auto tileIndex = DrmHelper::getEngineTileIndex(connectedDevice, engineClassInstance);
-    if (interruptSent && attention->base.seqno <= euControlInterruptSeqno[tileIndex]) {
+    auto tmpInterruptSent = tileSessionsEnabled ? tileSessions[tileIndex].first->isInterruptSent() : interruptSent.load();
+    if (tmpInterruptSent && attention->base.seqno <= euControlInterruptSeqno[tileIndex]) {
         PRINT_DEBUGGER_INFO_LOG("Discarding EU ATTENTION event for interrupt request. Event seqno == %d <= %d == interrupt seqno\n",
                                 (uint32_t)attention->base.seqno,
                                 (uint32_t)euControlInterruptSeqno[tileIndex]);
@@ -986,7 +987,7 @@ void DebugSessionLinuxi915::handleAttentionEvent(prelim_drm_i915_debug_event_eu_
     std::vector<EuThread::ThreadId> threadsWithAttention;
     auto hwInfo = connectedDevice->getHwInfo();
     auto &l0GfxCoreHelper = connectedDevice->getL0GfxCoreHelper();
-    if (interruptSent) {
+    if (tmpInterruptSent) {
         std::unique_ptr<uint8_t[]> bitmask;
         size_t bitmaskSize;
         auto attReadResult = threadControl({}, tileIndex, ThreadControlCmd::stopped, bitmask, bitmaskSize);

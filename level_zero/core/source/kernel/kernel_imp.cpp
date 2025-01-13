@@ -39,7 +39,6 @@
 #include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/arrayref.h"
 
-#include "level_zero/api/driver_experimental/public/zex_module.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
@@ -50,6 +49,7 @@
 #include "level_zero/core/source/module/module_imp.h"
 #include "level_zero/core/source/printf_handler/printf_handler.h"
 #include "level_zero/core/source/sampler/sampler.h"
+#include "level_zero/driver_experimental/zex_module.h"
 
 #include "encode_surface_state_args.h"
 
@@ -503,28 +503,24 @@ ze_result_t KernelImp::suggestGroupSize(uint32_t globalSizeX, uint32_t globalSiz
 }
 
 uint32_t KernelImp::suggestMaxCooperativeGroupCount(NEO::EngineGroupType engineGroupType, uint32_t *groupSize, bool forceSingleTileQuery) {
-    auto &rootDeviceEnvironment = module->getDevice()->getNEODevice()->getRootDeviceEnvironment();
-    auto &helper = rootDeviceEnvironment.getHelper<NEO::GfxCoreHelper>();
+    auto &neoDevice = *module->getDevice()->getNEODevice();
+    auto &helper = neoDevice.getGfxCoreHelper();
     auto &descriptor = kernelImmData->getDescriptor();
 
     auto usedSlmSize = helper.alignSlmSize(slmArgsTotalSize + descriptor.kernelAttributes.slmInlineSize);
     const uint32_t workDim = 3;
     const size_t localWorkSize[] = {groupSize[0], groupSize[1], groupSize[2]};
 
-    uint32_t numSubDevicesForExecution = 1;
-
-    auto deviceBitfield = module->getDevice()->getNEODevice()->getDeviceBitfield();
-    if (!forceSingleTileQuery && this->implicitScalingEnabled) {
-        numSubDevicesForExecution = static_cast<uint32_t>(deviceBitfield.count());
-    }
-
-    return NEO::KernelHelper::getMaxWorkGroupCount(rootDeviceEnvironment,
-                                                   descriptor,
-                                                   numSubDevicesForExecution,
+    return NEO::KernelHelper::getMaxWorkGroupCount(neoDevice,
+                                                   descriptor.kernelAttributes.numGrfRequired,
+                                                   descriptor.kernelAttributes.simdSize,
+                                                   descriptor.kernelAttributes.barrierCount,
                                                    usedSlmSize,
                                                    workDim,
                                                    localWorkSize,
-                                                   engineGroupType);
+                                                   engineGroupType,
+                                                   this->implicitScalingEnabled,
+                                                   forceSingleTileQuery);
 }
 
 ze_result_t KernelImp::setIndirectAccess(ze_kernel_indirect_access_flags_t flags) {
@@ -623,9 +619,13 @@ ze_result_t KernelImp::setArgRedescribedImage(uint32_t argIndex, ze_image_handle
             auto ssInHeap = image->getBindlessSlot();
             auto patchLocation = ptrOffset(getCrossThreadData(), arg.bindless);
             // redescribed image's surface state is after image's implicit args and sampler
-            auto bindlessSlotOffset = ssInHeap->surfaceStateOffset + surfaceStateSize * NEO::BindlessImageSlot::redescribedImage;
-            auto patchValue = gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(bindlessSlotOffset));
-            patchWithRequiredSize(const_cast<uint8_t *>(patchLocation), sizeof(patchValue), patchValue);
+            uint64_t bindlessSlotOffset = ssInHeap->surfaceStateOffset + surfaceStateSize * NEO::BindlessImageSlot::redescribedImage;
+            uint32_t patchSize = this->heaplessEnabled ? 8u : 4u;
+            uint64_t patchValue = this->heaplessEnabled
+                                      ? bindlessSlotOffset + bindlessHeapsHelper->getGlobalHeapsBase()
+                                      : gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(bindlessSlotOffset));
+
+            patchWithRequiredSize(const_cast<uint8_t *>(patchLocation), patchSize, patchValue);
 
             image->copyRedescribedSurfaceStateToSSH(ptrOffset(ssInHeap->ssPtr, surfaceStateSize * NEO::BindlessImageSlot::redescribedImage), 0u);
             isBindlessOffsetSet[argIndex] = true;
@@ -816,8 +816,12 @@ ze_result_t KernelImp::setArgImage(uint32_t argIndex, size_t argSize, const void
             auto ssInHeap = image->getBindlessSlot();
             auto patchLocation = ptrOffset(getCrossThreadData(), arg.bindless);
             auto bindlessSlotOffset = ssInHeap->surfaceStateOffset;
-            auto patchValue = gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(bindlessSlotOffset));
-            patchWithRequiredSize(const_cast<uint8_t *>(patchLocation), sizeof(patchValue), patchValue);
+            uint32_t patchSize = this->heaplessEnabled ? 8u : 4u;
+            uint64_t patchValue = this->heaplessEnabled
+                                      ? bindlessSlotOffset + bindlessHeapsHelper->getGlobalHeapsBase()
+                                      : gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(bindlessSlotOffset));
+
+            patchWithRequiredSize(const_cast<uint8_t *>(patchLocation), patchSize, patchValue);
 
             image->copySurfaceStateToSSH(ssInHeap->ssPtr, 0u, isMediaBlockImage);
             image->copyImplicitArgsSurfaceStateToSSH(ptrOffset(ssInHeap->ssPtr, surfaceStateSize), 0u);
@@ -1061,6 +1065,8 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
                                                               this->kernelImmData->getKernelInfo()->heapInfo.pKernelHeap,
                                                               static_cast<size_t>(this->kernelImmData->getKernelInfo()->heapInfo.kernelHeapSize));
     }
+
+    this->kernelArgHandlers.reserve(kernelDescriptor.payloadMappings.explicitArgs.size());
 
     for (const auto &argT : kernelDescriptor.payloadMappings.explicitArgs) {
         switch (argT.type) {

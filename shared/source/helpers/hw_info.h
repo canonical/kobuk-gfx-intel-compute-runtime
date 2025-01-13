@@ -68,7 +68,6 @@ struct RuntimeCapabilityTable {
     bool l0DebuggerSupported;
     bool supportsFloatAtomics;
     uint32_t cxlType;
-    uint32_t syncNumRTStacksPerDSS;
 };
 
 inline bool operator==(const RuntimeCapabilityTable &lhs, const RuntimeCapabilityTable &rhs) {
@@ -169,6 +168,7 @@ void setHwInfoValuesFromConfig(const uint64_t hwInfoConfig, HardwareInfo &hwInfo
 bool parseHwInfoConfigString(const std::string &hwInfoConfigStr, uint64_t &hwInfoConfig);
 aub_stream::EngineType getChosenEngineType(const HardwareInfo &hwInfo);
 void setupDefaultGtSysInfo(HardwareInfo *hwInfo, const ReleaseHelper *releaseHelper);
-void setupDefaultFeatureTableAndWorkaroundTable(HardwareInfo *hwInfo);
+void setupDefaultFeatureTableAndWorkaroundTable(HardwareInfo *hwInfo, const ReleaseHelper &releaseHelper);
+uint32_t getNumSubSlicesPerSlice(const HardwareInfo &hwInfo);
 
 } // namespace NEO

@@ -259,7 +259,8 @@ cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id platform,
 
         cl_uint retNum = 0;
         for (auto platformDeviceIndex = 0u; platformDeviceIndex < numDev; platformDeviceIndex++) {
-            bool exposeSubDevices = pPlatform->peekExecutionEnvironment()->isExposingSubDevicesAsDevices();
+            bool exposeSubDevices = pPlatform->peekExecutionEnvironment()->isExposingSubDevicesAsDevices() ||
+                                    pPlatform->peekExecutionEnvironment()->isCombinedDeviceHierarchy();
 
             ClDevice *device = pPlatform->getClDevice(platformDeviceIndex);
             UNRECOVERABLE_IF(device == nullptr);
@@ -2964,7 +2965,7 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
             TRACING_EXIT(ClEnqueueWriteImage, &retVal);
             return retVal;
         }
-        if (pCommandQueue->isValidForStagingWriteImage(pImage, ptr, numEventsInWaitList > 0)) {
+        if (pCommandQueue->isValidForStagingTransferImage(pImage, ptr, numEventsInWaitList > 0)) {
             retVal = pCommandQueue->enqueueStagingWriteImage(pImage, blockingWrite, origin, region, inputRowPitch, inputSlicePitch, ptr, event);
         } else {
             retVal = pCommandQueue->enqueueWriteImage(
@@ -4946,7 +4947,8 @@ cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue commandQueue,
                 size,
                 numEventsInWaitList,
                 eventWaitList,
-                event);
+                event,
+                nullptr);
         }
     } else {
         retVal = pCommandQueue->enqueueMarkerWithWaitList(numEventsInWaitList, eventWaitList, event);

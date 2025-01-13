@@ -181,7 +181,6 @@ class ProductHelper {
     virtual bool useLocalPreferredForCacheableBuffers() const = 0;
     virtual bool useGemCreateExtInAllocateMemoryByKMD() const = 0;
     virtual bool isTlbFlushRequired() const = 0;
-    virtual bool isDummyBlitWaRequired() const = 0;
     virtual bool isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t precompiledKernelIndirectDetectionVersion) const = 0;
     virtual uint32_t getRequiredDetectIndirectVersion() const = 0;
     virtual uint32_t getRequiredDetectIndirectVersionVC() const = 0;
@@ -237,6 +236,8 @@ class ProductHelper {
     virtual bool isNewCoherencyModelSupported() const = 0;
     virtual bool deferMOCSToPatIndex() const = 0;
     virtual const std::vector<uint32_t> getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const = 0;
+    virtual uint32_t getMaxLocalRegionSize(const HardwareInfo &hwInfo) const = 0;
+    virtual bool localDispatchSizeQuerySupported() const = 0;
     virtual bool supportReadOnlyAllocations() const = 0;
     virtual bool isDeviceToHostCopySignalingFenceRequired() const = 0;
     virtual size_t getMaxFillPaternSizeForCopyEngine() const = 0;

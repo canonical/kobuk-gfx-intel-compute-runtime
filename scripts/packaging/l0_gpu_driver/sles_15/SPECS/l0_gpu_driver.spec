@@ -6,6 +6,7 @@
 %global build_id xxx
 %global NEO_RELEASE_WITH_REGKEYS FALSE
 %global NEO_ENABLE_XE_EU_DEBUG_SUPPORT FALSE
+%global NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM FALSE
 %global NEO_ENABLE_I915_PRELIM_DETECTION FALSE
 %global NEO_ENABLE_XE_PRELIM_DETECTION FALSE
 %global NEO_I915_PRELIM_HEADERS_DIR %{nil}
@@ -80,6 +81,7 @@ Intel(R) Graphics Compute Runtime for oneAPI Level Zero - development headers
    -DNEO_ENABLE_I915_PRELIM_DETECTION=%{NEO_ENABLE_I915_PRELIM_DETECTION} \
    -DNEO_ENABLE_XE_PRELIM_DETECTION=%{NEO_ENABLE_XE_PRELIM_DETECTION} \
    -DNEO_ENABLE_XE_EU_DEBUG_SUPPORT=%{NEO_ENABLE_XE_EU_DEBUG_SUPPORT} \
+   -DNEO_USE_XE_EU_DEBUG_EXP_UPSTREAM=%{NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM} \
    -DRELEASE_WITH_REGKEYS=%{NEO_RELEASE_WITH_REGKEYS} \
    -DL0_INSTALL_UDEV_RULES=1 \
    -DUDEV_RULES_DIR=/etc/udev/rules.d/ \
@@ -122,6 +124,17 @@ fi
 
 %files -n intel-level-zero-gpu%{?name_suffix}-devel
 %{_includedir}/level_zero/zet_intel_gpu_debug.h
+%{_includedir}/level_zero/ze_intel_gpu.h
+%{_includedir}/level_zero/ze_stypes.h
+%{_includedir}/level_zero/driver_experimental/ze_bindless_image_exp.h
+%{_includedir}/level_zero/driver_experimental/zex_api.h
+%{_includedir}/level_zero/driver_experimental/zex_cmdlist.h
+%{_includedir}/level_zero/driver_experimental/zex_context.h
+%{_includedir}/level_zero/driver_experimental/zex_common.h
+%{_includedir}/level_zero/driver_experimental/zex_driver.h
+%{_includedir}/level_zero/driver_experimental/zex_event.h
+%{_includedir}/level_zero/driver_experimental/zex_memory.h
+%{_includedir}/level_zero/driver_experimental/zex_module.h
 
 %doc
 

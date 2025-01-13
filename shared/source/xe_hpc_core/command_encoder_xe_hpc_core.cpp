@@ -7,31 +7,25 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_container/command_encoder.inl"
+#include "shared/source/command_container/command_encoder_from_gen12lp_to_xe2_hpg.inl"
+#include "shared/source/command_container/command_encoder_from_xe_hpg_core_to_xe2_hpg.inl"
+#include "shared/source/command_container/command_encoder_from_xe_hpg_core_to_xe3_core.inl"
 #include "shared/source/command_container/command_encoder_pre_xe2_hpg_core.inl"
+#include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
+#include "shared/source/command_container/command_encoder_xe_hpc_core_and_later.inl"
+#include "shared/source/command_container/command_encoder_xe_hpg_core_and_xe_hpc.inl"
 #include "shared/source/command_container/command_encoder_xehp_and_later.inl"
-#include "shared/source/command_container/encode_compute_mode_tgllp_and_later.inl"
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/release_helper/release_helper.h"
-#include "shared/source/utilities/lookup_array.h"
 #include "shared/source/xe_hpc_core/hw_cmds_xe_hpc_core_base.h"
 
 using Family = NEO::XeHpcCoreFamily;
 
 #include "shared/source/command_container/command_encoder_heap_addressing.inl"
-#include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
-#include "shared/source/command_container/command_encoder_xe_hpc_core_and_later.inl"
-#include "shared/source/command_container/command_encoder_xe_hpg_core_and_later.inl"
-#include "shared/source/command_container/image_surface_state/compression_params_tgllp_and_later.inl"
-#include "shared/source/command_container/image_surface_state/compression_params_xehp_and_later.inl"
 
 namespace NEO {
-
-template <>
-inline void EncodeAtomic<Family>::setMiAtomicAddress(MI_ATOMIC &atomic, uint64_t writeAddress) {
-    atomic.setMemoryAddress(writeAddress);
-}
 
 template <>
 void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const RootDeviceEnvironment &rootDeviceEnvironment) {
@@ -143,24 +137,6 @@ inline void EncodeMiFlushDW<Family>::adjust(MI_FLUSH_DW *miFlushDwCmd, const Pro
 }
 
 template <>
-template <>
-void EncodeDispatchKernel<Family>::programBarrierEnable(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor,
-                                                        uint32_t value,
-                                                        const HardwareInfo &hwInfo) {
-    using BARRIERS = INTERFACE_DESCRIPTOR_DATA::NUMBER_OF_BARRIERS;
-    static const LookupArray<uint32_t, BARRIERS, 8> barrierLookupArray({{{0, BARRIERS::NUMBER_OF_BARRIERS_NONE},
-                                                                         {1, BARRIERS::NUMBER_OF_BARRIERS_B1},
-                                                                         {2, BARRIERS::NUMBER_OF_BARRIERS_B2},
-                                                                         {4, BARRIERS::NUMBER_OF_BARRIERS_B4},
-                                                                         {8, BARRIERS::NUMBER_OF_BARRIERS_B8},
-                                                                         {16, BARRIERS::NUMBER_OF_BARRIERS_B16},
-                                                                         {24, BARRIERS::NUMBER_OF_BARRIERS_B24},
-                                                                         {32, BARRIERS::NUMBER_OF_BARRIERS_B32}}});
-    BARRIERS numBarriers = barrierLookupArray.lookUp(value);
-    interfaceDescriptor.setNumberOfBarriers(numBarriers);
-}
-
-template <>
 void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
     auto enablePrefetch = EncodeSurfaceState<Family>::doBindingTablePrefetch();
 
@@ -179,6 +155,10 @@ void EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(WalkerType &wa
         walkerCmd.setComputeDispatchAllWalkerEnable(overrideDispatchAllWalkerEnableInComputeWalker);
     }
 }
+
+template <>
+template <typename WalkerType>
+void EncodeDispatchKernel<Family>::adjustWalkOrder(WalkerType &walkerCmd, uint32_t requiredWorkGroupOrder, const RootDeviceEnvironment &rootDeviceEnvironment) {}
 
 } // namespace NEO
 

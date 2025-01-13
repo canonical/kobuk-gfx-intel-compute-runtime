@@ -40,11 +40,6 @@ HWTEST2_F(KernelDebugSurfaceDG2Test, givenDebuggerWhenPatchWithImplicitSurfaceCa
          device->getNEODevice()->getDeviceBitfield()});
     static_cast<L0::DeviceImp *>(device)->setDebugSurface(debugSurface);
 
-    uint8_t binary[10];
-    ze_module_desc_t moduleDesc = {};
-    moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;
-    moduleDesc.pInputModule = binary;
-    moduleDesc.inputSize = 10;
     ModuleBuildLog *moduleBuildLog = nullptr;
 
     std::unique_ptr<MockModule> module = std::make_unique<MockModule>(device,
@@ -78,7 +73,7 @@ HWTEST2_F(KernelDebugSurfaceDG2Test, givenDebuggerWhenPatchWithImplicitSurfaceCa
     auto debugSurfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(kernel.surfaceStateHeapData.get());
     debugSurfaceState = ptrOffset(debugSurfaceState, sizeof(RENDER_SURFACE_STATE));
 
-    EXPECT_EQ(RENDER_SURFACE_STATE::L1_CACHE_POLICY_WBP, debugSurfaceState->getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(RENDER_SURFACE_STATE::L1_CACHE_CONTROL_WBP, debugSurfaceState->getL1CacheControlCachePolicy());
 }
 
 HWTEST2_F(KernelDebugSurfaceDG2Test, givenNoDebuggerWhenPatchWithImplicitSurfaceCalledThenCachePolicyIsWB, IsDG2) {
@@ -99,11 +94,6 @@ HWTEST2_F(KernelDebugSurfaceDG2Test, givenNoDebuggerWhenPatchWithImplicitSurface
          device->getNEODevice()->getDeviceBitfield()});
     static_cast<L0::DeviceImp *>(device)->setDebugSurface(debugSurface);
 
-    uint8_t binary[10];
-    ze_module_desc_t moduleDesc = {};
-    moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;
-    moduleDesc.pInputModule = binary;
-    moduleDesc.inputSize = 10;
     ModuleBuildLog *moduleBuildLog = nullptr;
 
     std::unique_ptr<MockModule> module = std::make_unique<MockModule>(device,
@@ -138,7 +128,7 @@ HWTEST2_F(KernelDebugSurfaceDG2Test, givenNoDebuggerWhenPatchWithImplicitSurface
     auto debugSurfaceState = reinterpret_cast<RENDER_SURFACE_STATE *>(kernel.surfaceStateHeapData.get());
     debugSurfaceState = ptrOffset(debugSurfaceState, sizeof(RENDER_SURFACE_STATE));
 
-    EXPECT_EQ(RENDER_SURFACE_STATE::L1_CACHE_POLICY_WB, debugSurfaceState->getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(RENDER_SURFACE_STATE::L1_CACHE_CONTROL_WB, debugSurfaceState->getL1CacheControlCachePolicy());
 }
 
 } // namespace ult

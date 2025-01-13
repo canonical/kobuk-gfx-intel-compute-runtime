@@ -7,6 +7,7 @@
 
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/compiler_product_helper.h"
+#include "shared/source/memory_manager/allocation_type.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/xe2_hpg_core/hw_cmds_bmg.h"
 #include "shared/source/xe2_hpg_core/hw_info_xe2_hpg_core.h"
@@ -68,6 +69,15 @@ BMGTEST_F(BmgProductHelper, givenProductHelperWhenGetCommandsStreamPropertiesSup
     EXPECT_FALSE(productHelper->getPipelineSelectPropertySystolicModeSupport());
 }
 
+BMGTEST_F(BmgProductHelper, whenCheckPreferredAllocationMethodThenAllocateByKmdIsReturnedExceptTagBufferAndTimestampPacketTagBuffer) {
+    for (auto i = 0; i < static_cast<int>(AllocationType::count); i++) {
+        auto allocationType = static_cast<AllocationType>(i);
+        auto preferredAllocationMethod = productHelper->getPreferredAllocationMethod(allocationType);
+        EXPECT_TRUE(preferredAllocationMethod.has_value());
+        EXPECT_EQ(GfxMemoryAllocationMethod::allocateByKmd, preferredAllocationMethod.value());
+    }
+}
+
 BMGTEST_F(BmgProductHelper, WhenFillingScmPropertiesSupportThenExpectUseCorrectExtraGetters) {
     StateComputeModePropertiesSupport scmPropertiesSupport = {};
 
@@ -111,4 +121,8 @@ BMGTEST_F(BmgProductHelper, givenProductHelperWhenAdjustNumberOfCcsThenOverrideT
 BMGTEST_F(BmgProductHelper, givenProductHelperWhenGettingThreadEuRatioForScratchThen16IsReturned) {
     auto hwInfo = *defaultHwInfo;
     EXPECT_EQ(16u, productHelper->getThreadEuRatioForScratch(hwInfo));
+}
+
+BMGTEST_F(BmgProductHelper, givenProductHelperWhenCheckDirectSubmissionSupportedThenTrueIsReturned) {
+    EXPECT_TRUE(productHelper->isDirectSubmissionSupported(releaseHelper));
 }

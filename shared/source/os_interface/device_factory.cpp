@@ -7,6 +7,7 @@
 
 #include "shared/source/os_interface/device_factory.h"
 
+#include "shared/source/ail/ail_configuration.h"
 #include "shared/source/aub/aub_center.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/root_device.h"
@@ -118,6 +119,9 @@ bool DeviceFactory::prepareDeviceEnvironmentsForProductFamilyOverride(ExecutionE
             hardwareInfo->capabilityTable.slmSize = debugManager.flags.OverrideSlmSize.get();
             hardwareInfo->gtSystemInfo.SLMSizeInKb = debugManager.flags.OverrideSlmSize.get();
         }
+        if (debugManager.flags.OverrideRegionCount.get() != -1) {
+            hardwareInfo->featureTable.regionCount = static_cast<uint32_t>(debugManager.flags.OverrideRegionCount.get());
+        }
 
         [[maybe_unused]] bool result = rootDeviceEnvironment.initAilConfiguration();
         DEBUG_BREAK_IF(!result);
@@ -173,6 +177,9 @@ static bool initHwDeviceIdResources(ExecutionEnvironment &executionEnvironment,
         auto hardwareInfo = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getMutableHardwareInfo();
         hardwareInfo->capabilityTable.slmSize = debugManager.flags.OverrideSlmSize.get();
         hardwareInfo->gtSystemInfo.SLMSizeInKb = debugManager.flags.OverrideSlmSize.get();
+    }
+    if (debugManager.flags.OverrideRegionCount.get() != -1) {
+        executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getMutableHardwareInfo()->featureTable.regionCount = static_cast<uint32_t>(debugManager.flags.OverrideRegionCount.get());
     }
 
     executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->initGmm();
@@ -243,6 +250,7 @@ std::unique_ptr<Device> DeviceFactory::createDevice(ExecutionEnvironment &execut
         return device;
     }
 
+    executionEnvironment.memoryManager->reInitDeviceSpecificGfxPartition(rootDeviceIndex);
     executionEnvironment.memoryManager->createDeviceSpecificMemResources(rootDeviceIndex);
     executionEnvironment.memoryManager->reInitLatestContextId();
     device = createRootDeviceFunc(executionEnvironment, rootDeviceIndex);

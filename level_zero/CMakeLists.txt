@@ -255,7 +255,7 @@ if(BUILD_WITH_L0)
                    ${NEO_SHARED_DIRECTORY}/dll/wddm/create_gdi.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/wddm/wddm_create.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/windows/debugger_l0_windows.cpp
-                   ${NEO_SHARED_DIRECTORY}/dll/windows/options_windows.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/windows${BRANCH_DIR_SUFFIX}/options_windows.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/windows/os_interface.cpp
                    ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory_base.cpp
                    ${NEO_SHARED_DIRECTORY}/gmm_helper/windows/gmm_memory.cpp
@@ -282,7 +282,7 @@ if(BUILD_WITH_L0)
                    ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
                    ${NEO_SHARED_DIRECTORY}/dll/linux/debugger_l0_dll_linux.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/linux/drm_neo_create.cpp
-                   ${NEO_SHARED_DIRECTORY}/dll/linux/options_linux.cpp
+                   ${NEO_SHARED_DIRECTORY}/dll/linux${BRANCH_DIR_SUFFIX}/options_linux.cpp
                    ${NEO_SHARED_DIRECTORY}/dll/linux/os_interface.cpp
                    ${NEO_SHARED_DIRECTORY}/os_interface/linux/gmm_interface_linux.cpp
     )
@@ -405,6 +405,7 @@ if(BUILD_WITH_L0)
                                ${IGC_OCL_ADAPTOR_DIR}
                                ${NEO__IGC_INCLUDE_DIR}
                                ${KHRONOS_HEADERS_DIR}
+                               ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
 
     if(WIN32 OR NOT DISABLE_WDDM_LINUX)
@@ -548,12 +549,6 @@ if(BUILD_WITH_L0)
 
   endif()
 
-  if(UNIX)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/zet_intel_gpu_debug.h"
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/level_zero
-            PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
-    )
-  endif()
 else()
   message(STATUS "Skipping level zero")
   set(BUILD_WITH_L0 FALSE PARENT_SCOPE)

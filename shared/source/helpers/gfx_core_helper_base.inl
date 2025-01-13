@@ -446,10 +446,12 @@ std::unique_ptr<TagAllocatorBase> GfxCoreHelperHw<GfxFamily>::createTimestampPac
     if (debugManager.flags.OverrideTimestampPacketSize.get() != -1) {
         if (debugManager.flags.OverrideTimestampPacketSize.get() == 4) {
             using TimestampPackets32T = TimestampPackets<uint32_t, GfxFamily::timestampPacketCount>;
-            return std::make_unique<TagAllocator<TimestampPackets32T>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPackets32T), doNotReleaseNodes, true, deviceBitfield);
+            return std::make_unique<TagAllocator<TimestampPackets32T>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPackets32T), NEO::TimestampPacketConstants::initValue,
+                                                                       doNotReleaseNodes, true, deviceBitfield);
         } else if (debugManager.flags.OverrideTimestampPacketSize.get() == 8) {
             using TimestampPackets64T = TimestampPackets<uint64_t, GfxFamily::timestampPacketCount>;
-            return std::make_unique<TagAllocator<TimestampPackets64T>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPackets64T), doNotReleaseNodes, true, deviceBitfield);
+            return std::make_unique<TagAllocator<TimestampPackets64T>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPackets64T), NEO::TimestampPacketConstants::initValue,
+                                                                       doNotReleaseNodes, true, deviceBitfield);
         } else {
             UNRECOVERABLE_IF(true);
         }
@@ -458,7 +460,8 @@ std::unique_ptr<TagAllocatorBase> GfxCoreHelperHw<GfxFamily>::createTimestampPac
     using TimestampPacketType = typename GfxFamily::TimestampPacketType;
     using TimestampPacketsT = TimestampPackets<TimestampPacketType, GfxFamily::timestampPacketCount>;
 
-    return std::make_unique<TagAllocator<TimestampPacketsT>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPacketsT), doNotReleaseNodes, true, deviceBitfield);
+    return std::make_unique<TagAllocator<TimestampPacketsT>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, sizeof(TimestampPacketsT), NEO::TimestampPacketConstants::initValue,
+                                                             doNotReleaseNodes, true, deviceBitfield);
 }
 
 template <typename GfxFamily>
@@ -550,7 +553,7 @@ int32_t GfxCoreHelperHw<GfxFamily>::getDefaultThreadArbitrationPolicy() const {
 
 template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::useOnlyGlobalTimestamps() const {
-    return false;
+    return debugManager.flags.ForceUseOnlyGlobalTimestamps.get();
 }
 
 template <typename GfxFamily>
@@ -802,6 +805,8 @@ uint32_t GfxCoreHelperHw<GfxFamily>::calculateAvailableThreadCount(const Hardwar
 
 template <typename GfxFamily>
 void GfxCoreHelperHw<GfxFamily>::alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const {
+    uint32_t availableTreadCount = (threadsPerDss / threadGroupSize) * dssCount;
+    threadCount = std::min(threadCount, availableTreadCount);
 }
 
 template <typename GfxFamily>

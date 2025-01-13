@@ -45,8 +45,8 @@ MetricDeviceContext::MetricDeviceContext(Device &inputDevice) : device(inputDevi
     metricSources[MetricSource::metricSourceTypeOa] = OaMetricSourceImp::create(*this);
     metricSources[MetricSource::metricSourceTypeIpSampling] = IpSamplingMetricSourceImp::create(*this);
 
-    if (NEO::debugManager.flags.EnableProgrammableMetricsSupport.get()) {
-        isProgrammableMetricsEnabled = true;
+    if (NEO::debugManager.flags.DisableProgrammableMetricsSupport.get()) {
+        isProgrammableMetricsEnabled = false;
     }
 }
 
@@ -209,6 +209,11 @@ ze_result_t MetricDeviceContext::enableMetricApi() {
 ze_result_t MetricDeviceContext::getConcurrentMetricGroups(uint32_t metricGroupCount,
                                                            zet_metric_group_handle_t *phMetricGroups,
                                                            uint32_t *pConcurrentGroupCount, uint32_t *pCountPerConcurrentGroup) {
+
+    if (!areMetricGroupsFromSameDeviceHierarchy(metricGroupCount, phMetricGroups)) {
+        METRICS_LOG_ERR("%s", "Mix of root device and sub-device metric group handle is not allowed");
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
 
     std::map<MetricSource *, std::vector<zet_metric_group_handle_t>> metricGroupsPerMetricSourceMap{};
     for (auto index = 0u; index < metricGroupCount; index++) {
@@ -407,6 +412,19 @@ ze_result_t MetricDeviceContext::createMetricGroupsFromMetrics(uint32_t metricCo
 
     *pMetricGroupCount = *pMetricGroupCount - remainingMetricGroupCount;
     return ZE_RESULT_SUCCESS;
+}
+
+bool MetricDeviceContext::areMetricGroupsFromSameDeviceHierarchy(uint32_t count, zet_metric_group_handle_t *phMetricGroups) {
+    bool isRootDevice = isImplicitScalingCapable();
+
+    // Verify whether all metricgroups have the same device heirarchy
+    for (uint32_t index = 0; index < count; index++) {
+        auto metricGroupImp = static_cast<MetricGroupImp *>(MetricGroup::fromHandle(phMetricGroups[index]));
+        if (isRootDevice != metricGroupImp->isRootDevice()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 ze_result_t MetricDeviceContext::metricGroupCreate(const char name[ZET_MAX_METRIC_GROUP_NAME],
@@ -688,20 +706,6 @@ ze_result_t HomogeneousMultiDeviceMetricCreated::destroy() {
 
 MetricImp *HomogeneousMultiDeviceMetricCreated::create(MetricSource &metricSource, std::vector<MetricImp *> &subDeviceMetrics) {
     return new (std::nothrow) HomogeneousMultiDeviceMetricCreated(metricSource, subDeviceMetrics);
-}
-
-void MetricProgrammable::setParamValueInfoDescription(zet_metric_programmable_param_value_info_exp_t *pValueInfo, const char *desc) {
-
-    auto pNext = const_cast<void *>(pValueInfo->pNext);
-    while (pNext != nullptr) {
-        auto baseProps = reinterpret_cast<zet_base_properties_t *>(pNext);
-        if (baseProps->stype == ZET_INTEL_STRUCTURE_TYPE_METRIC_PROGRAMMABLE_PARAM_VALUE_INFO_DESC_EXP) {
-            zet_intel_metric_programmable_param_value_info_exp_desc_t *infoDesc = reinterpret_cast<zet_intel_metric_programmable_param_value_info_exp_desc_t *>(baseProps);
-            snprintf(infoDesc->description, sizeof(infoDesc->description), "%s", desc);
-            break;
-        }
-        pNext = const_cast<void *>(baseProps->pNext);
-    }
 }
 
 ze_result_t metricProgrammableGet(zet_device_handle_t hDevice, uint32_t *pCount, zet_metric_programmable_exp_handle_t *phMetricProgrammables) {

@@ -15,11 +15,6 @@ namespace NEO {
 constexpr auto release = ReleaseType::release2001;
 
 template <>
-bool ReleaseHelperHw<release>::shouldAdjustDepth() const {
-    return true;
-}
-
-template <>
 inline bool ReleaseHelperHw<release>::isAuxSurfaceModeOverrideRequired() const {
     return true;
 }

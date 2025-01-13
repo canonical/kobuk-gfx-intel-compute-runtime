@@ -26,6 +26,8 @@
 
 namespace NEO {
 class Drm;
+class DrmAllocation;
+class DrmMemoryManager;
 class OsContextLinux;
 class IoctlHelper;
 class OSTime;
@@ -114,7 +116,7 @@ class IoctlHelper {
     virtual bool isVmBindAvailable() = 0;
     virtual int createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, uint64_t patIndex, std::optional<uint32_t> vmId, int32_t pairHandle, bool isChunked, uint32_t numOfChunks, std::optional<uint32_t> memPolicyMode, std::optional<std::vector<unsigned long>> memPolicyNodemask, std::optional<bool> isCoherent) = 0;
     virtual uint32_t createGem(uint64_t size, uint32_t memoryBanks, std::optional<bool> isCoherent) = 0;
-    virtual CacheRegion closAlloc() = 0;
+    virtual CacheRegion closAlloc(CacheLevel cacheLevel) = 0;
     virtual uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) = 0;
     virtual CacheRegion closFree(CacheRegion closIndex) = 0;
     virtual int waitUserFence(uint32_t ctxId, uint64_t address,
@@ -130,7 +132,7 @@ class IoctlHelper {
     virtual bool setGemTiling(void *setTiling) = 0;
     virtual bool getGemTiling(void *setTiling) = 0;
     virtual uint32_t getDirectSubmissionFlag() = 0;
-    virtual std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles) = 0;
+    virtual std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) = 0;
     virtual uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLockedMemory, bool readOnlyResource) = 0;
     virtual int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) = 0;
     virtual uint16_t getWaitUserFenceSoftFlag() = 0;
@@ -196,7 +198,6 @@ class IoctlHelper {
     virtual size_t getLocalMemoryRegionsSize(const MemoryInfo *memoryInfo, uint32_t subDevicesCount, uint32_t deviceBitfield) const = 0;
     virtual std::unique_ptr<EngineInfo> createEngineInfo(bool isSysmanEnabled) = 0;
     virtual bool getTopologyDataAndMap(const HardwareInfo &hwInfo, DrmQueryTopologyData &topologyData, TopologyMap &topologyMap) = 0;
-    virtual void fillBindInfoForIpcHandle(uint32_t handle, size_t size) = 0;
     virtual bool getFdFromVmExport(uint32_t vmId, uint32_t flags, int32_t *fd) = 0;
 
     virtual bool setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) = 0;
@@ -222,8 +223,17 @@ class IoctlHelper {
     virtual bool releaseInterrupt(uint32_t handle) { return false; }
 
     virtual uint64_t *getPagingFenceAddress(uint32_t vmHandleId, OsContextLinux *osContext);
+    virtual uint64_t acquireGpuRange(DrmMemoryManager &memoryManager, size_t &size, uint32_t rootDeviceIndex, HeapIndex heapIndex);
+    virtual void releaseGpuRange(DrmMemoryManager &memoryManager, void *address, size_t size, uint32_t rootDeviceIndex);
+    virtual void *mmapFunction(DrmMemoryManager &memoryManager, void *ptr, size_t size, int prot, int flags, int fd, off_t offset);
+    virtual int munmapFunction(DrmMemoryManager &memoryManager, void *ptr, size_t size);
+    virtual void registerMemoryToUnmap(DrmAllocation &allocation, void *pointer, size_t size, DrmAllocation::MemoryUnmapFunction unmapFunction);
+    virtual BufferObject *allocUserptr(DrmMemoryManager &memoryManager, const AllocationData &allocData, uintptr_t address, size_t size, uint32_t rootDeviceIndex);
+    virtual void syncUserptrAlloc(DrmMemoryManager &memoryManager, GraphicsAllocation &allocation) { return; };
 
     virtual bool queryDeviceParams(uint32_t *moduleId, uint16_t *serverType) { return false; }
+
+    virtual bool isTimestampsRefreshEnabled() { return false; }
 
   protected:
     Drm &drm;
@@ -233,6 +243,9 @@ class IoctlHelper {
 class IoctlHelperI915 : public IoctlHelper {
   public:
     using IoctlHelper::IoctlHelper;
+
+    static bool queryDeviceIdAndRevision(const Drm &drm);
+
     void fillExecObject(ExecObject &execObject, uint32_t handle, uint64_t gpuAddress, uint32_t drmContextId, bool bindInfo, bool isMarkedForCapture) override;
     void logExecObject(const ExecObject &execObject, std::stringstream &logger, size_t size) override;
     void fillExecBuffer(ExecBuffer &execBuffer, uintptr_t buffersPtr, uint32_t bufferCount, uint32_t startOffset, uint32_t size, uint64_t flags, uint32_t drmContextId) override;
@@ -251,7 +264,6 @@ class IoctlHelperI915 : public IoctlHelper {
     std::string getFileForMaxGpuFrequencyOfSubDevice(int tileId) const override;
     std::string getFileForMaxMemoryFrequencyOfSubDevice(int tileId) const override;
     bool getTopologyDataAndMap(const HardwareInfo &hwInfo, DrmQueryTopologyData &topologyData, TopologyMap &topologyMap) override;
-    void fillBindInfoForIpcHandle(uint32_t handle, size_t size) override;
     bool getFdFromVmExport(uint32_t vmId, uint32_t flags, int32_t *fd) override;
     uint32_t createGem(uint64_t size, uint32_t memoryBanks, std::optional<bool> isCoherent) override;
     bool setGemTiling(void *setTiling) override;
@@ -277,7 +289,7 @@ class IoctlHelperUpstream : public IoctlHelperI915 {
     bool isChunkingAvailable() override;
     bool isVmBindAvailable() override;
     int createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, uint64_t patIndex, std::optional<uint32_t> vmId, int32_t pairHandle, bool isChunked, uint32_t numOfChunks, std::optional<uint32_t> memPolicyMode, std::optional<std::vector<unsigned long>> memPolicyNodemask, std::optional<bool> isCoherent) override;
-    CacheRegion closAlloc() override;
+    CacheRegion closAlloc(CacheLevel cacheLevel) override;
     uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) override;
     CacheRegion closFree(CacheRegion closIndex) override;
     int waitUserFence(uint32_t ctxId, uint64_t address,
@@ -291,7 +303,7 @@ class IoctlHelperUpstream : public IoctlHelperI915 {
     bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) override;
     bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) override;
     uint32_t getDirectSubmissionFlag() override;
-    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles) override;
+    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) override;
     uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLockedMemory, bool readOnlyResource) override;
     int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) override;
     uint16_t getWaitUserFenceSoftFlag() override;
@@ -354,7 +366,7 @@ class IoctlHelperPrelim20 : public IoctlHelperI915 {
     bool isChunkingAvailable() override;
     bool isVmBindAvailable() override;
     int createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, uint64_t patIndex, std::optional<uint32_t> vmId, int32_t pairHandle, bool isChunked, uint32_t numOfChunks, std::optional<uint32_t> memPolicyMode, std::optional<std::vector<unsigned long>> memPolicyNodemask, std::optional<bool> isCoherent) override;
-    CacheRegion closAlloc() override;
+    CacheRegion closAlloc(CacheLevel cacheLevel) override;
     uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) override;
     CacheRegion closFree(CacheRegion closIndex) override;
     int waitUserFence(uint32_t ctxId, uint64_t address,
@@ -368,7 +380,7 @@ class IoctlHelperPrelim20 : public IoctlHelperI915 {
     bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) override;
     bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) override;
     uint32_t getDirectSubmissionFlag() override;
-    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles) override;
+    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) override;
     uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLockedMemory, bool readOnlyResource) override;
     int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) override;
     uint16_t getWaitUserFenceSoftFlag() override;
@@ -434,4 +446,5 @@ class IoctlHelperPrelim20 : public IoctlHelperI915 {
     uint64_t uuid = 0;
 };
 
+extern std::optional<std::function<std::unique_ptr<IoctlHelper>(Drm &drm)>> ioctlHelperFactory[IGFX_MAX_PRODUCT];
 } // namespace NEO

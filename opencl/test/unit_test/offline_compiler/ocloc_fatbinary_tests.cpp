@@ -32,7 +32,7 @@
 extern Environment *gEnvironment;
 
 namespace NEO {
-extern std::set<std::string> virtualFileList;
+extern std::map<std::string, std::stringstream> virtualFileList;
 
 auto searchInArchiveByFilename(const Ar::Ar &archive, const ConstStringRef &name) {
     const auto isSearchedFile = [&name](const auto &file) {
@@ -1534,7 +1534,7 @@ TEST_F(OclocFatBinaryProductAcronymsTests, givenOpenRangeToFamilyWhenFatBinaryBu
         auto familyFromId = static_cast<AOT::FAMILY>(static_cast<unsigned int>(AOT::UNKNOWN_FAMILY) + 1);
         auto familyToId = oclocArgHelperWithoutInput->productConfigHelper->getFamilyFromDeviceName(family.str());
 
-        while (familyFromId <= familyToId) {
+        while (familyFromId <= familyToId && familyFromId < AOT::FAMILY_MAX) {
             getProductsAcronymsForTarget(expected, familyFromId, oclocArgHelperWithoutInput.get());
             familyFromId = static_cast<AOT::FAMILY>(static_cast<unsigned int>(familyFromId) + 1);
         }

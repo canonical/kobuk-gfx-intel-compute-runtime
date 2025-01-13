@@ -35,59 +35,59 @@ const PLATFORM BMG::platform = {
 const RuntimeCapabilityTable BMG::capabilityTable{
     EngineDirectSubmissionInitVec{
         {aub_stream::ENGINE_CCS, {true, false, false, true}},
-        {aub_stream::ENGINE_CCS1, {true, false, true, true}}}, // directSubmissionEngines
-    {0, 0, 0, 0, false, false, false, false},                  // kmdNotifyProperties
-    MemoryConstants::max48BitAddress,                          // gpuAddressSpace
-    0,                                                         // sharedSystemMemCapabilities
-    MemoryConstants::pageSize,                                 // requiredPreemptionSurfaceSize
-    "",                                                        // deviceName
-    nullptr,                                                   // preferredPlatformName
-    PreemptionMode::MidThread,                                 // defaultPreemptionMode
-    aub_stream::ENGINE_CCS,                                    // defaultEngineType
-    0,                                                         // maxRenderFrequency
-    30,                                                        // clVersionSupport
-    CmdServicesMemTraceVersion::DeviceValues::Bmg,             // aubDeviceId
-    0,                                                         // extraQuantityThreadsPerEU
-    128,                                                       // slmSize
-    sizeof(BMG::GRF),                                          // grfSize
-    64,                                                        // timestampValidBits
-    64,                                                        // kernelTimestampValidBits
-    false,                                                     // blitterOperationsSupported
-    true,                                                      // ftrSupportsInteger64BitAtomics
-    true,                                                      // ftrSupportsFP64
-    false,                                                     // ftrSupportsFP64Emulation
-    true,                                                      // ftrSupports64BitMath
-    true,                                                      // ftrSvm
-    false,                                                     // ftrSupportsCoherency
-    false,                                                     // ftrSupportsVmeAvcTextureSampler
-    false,                                                     // ftrSupportsVmeAvcPreemption
-    false,                                                     // ftrRenderCompressedBuffers
-    false,                                                     // ftrRenderCompressedImages
-    true,                                                      // ftr64KBpages
-    true,                                                      // instrumentationEnabled
-    false,                                                     // supportsVme
-    false,                                                     // supportCacheFlushAfterWalker
-    true,                                                      // supportsImages
-    false,                                                     // supportsDeviceEnqueue
-    false,                                                     // supportsPipes
-    true,                                                      // supportsOcl21Features
-    true,                                                      // supportsOnDemandPageFaults
-    true,                                                      // supportsIndependentForwardProgress
-    false,                                                     // hostPtrTrackingEnabled
-    true,                                                      // levelZeroSupported
-    false,                                                     // isIntegratedDevice
-    false,                                                     // supportsMediaBlock
-    false,                                                     // p2pAccessSupported
-    false,                                                     // p2pAtomicAccessSupported
-    false,                                                     // fusedEuEnabled
-    true,                                                      // l0DebuggerSupported;
-    true,                                                      // supportsFloatAtomics
-    0,                                                         // cxlType
-    2048                                                       // syncNumRTStacksPerDSS
+        {aub_stream::ENGINE_CCS1, {true, false, true, true}},
+        {aub_stream::ENGINE_BCS, {true, false, true, true}}}, // directSubmissionEngines
+    {0, 0, 0, 0, false, false, false, false},                 // kmdNotifyProperties
+    MemoryConstants::max48BitAddress,                         // gpuAddressSpace
+    0,                                                        // sharedSystemMemCapabilities
+    MemoryConstants::pageSize,                                // requiredPreemptionSurfaceSize
+    "",                                                       // deviceName
+    nullptr,                                                  // preferredPlatformName
+    PreemptionMode::MidThread,                                // defaultPreemptionMode
+    aub_stream::ENGINE_CCS,                                   // defaultEngineType
+    0,                                                        // maxRenderFrequency
+    30,                                                       // clVersionSupport
+    CmdServicesMemTraceVersion::DeviceValues::Bmg,            // aubDeviceId
+    0,                                                        // extraQuantityThreadsPerEU
+    128,                                                      // slmSize
+    sizeof(BMG::GRF),                                         // grfSize
+    64,                                                       // timestampValidBits
+    64,                                                       // kernelTimestampValidBits
+    false,                                                    // blitterOperationsSupported
+    true,                                                     // ftrSupportsInteger64BitAtomics
+    true,                                                     // ftrSupportsFP64
+    false,                                                    // ftrSupportsFP64Emulation
+    true,                                                     // ftrSupports64BitMath
+    true,                                                     // ftrSvm
+    false,                                                    // ftrSupportsCoherency
+    false,                                                    // ftrSupportsVmeAvcTextureSampler
+    false,                                                    // ftrSupportsVmeAvcPreemption
+    false,                                                    // ftrRenderCompressedBuffers
+    false,                                                    // ftrRenderCompressedImages
+    true,                                                     // ftr64KBpages
+    true,                                                     // instrumentationEnabled
+    false,                                                    // supportsVme
+    false,                                                    // supportCacheFlushAfterWalker
+    true,                                                     // supportsImages
+    false,                                                    // supportsDeviceEnqueue
+    false,                                                    // supportsPipes
+    true,                                                     // supportsOcl21Features
+    true,                                                     // supportsOnDemandPageFaults
+    true,                                                     // supportsIndependentForwardProgress
+    false,                                                    // hostPtrTrackingEnabled
+    true,                                                     // levelZeroSupported
+    false,                                                    // isIntegratedDevice
+    false,                                                    // supportsMediaBlock
+    false,                                                    // p2pAccessSupported
+    false,                                                    // p2pAtomicAccessSupported
+    false,                                                    // fusedEuEnabled
+    true,                                                     // l0DebuggerSupported;
+    true,                                                     // supportsFloatAtomics
+    0                                                         // cxlType
 };
 
-void BMG::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
-    setupDefaultFeatureTableAndWorkaroundTable(hwInfo);
+void BMG::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo, const ReleaseHelper &releaseHelper) {
+    setupDefaultFeatureTableAndWorkaroundTable(hwInfo, releaseHelper);
     FeatureTable *featureTable = &hwInfo->featureTable;
 
     featureTable->flags.ftrLocalMemory = true;
@@ -95,7 +95,6 @@ void BMG::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
     featureTable->flags.ftrE2ECompression = true;
     featureTable->flags.ftrTile64Optimization = true;
     featureTable->flags.ftrWalkerMTP = true;
-    featureTable->flags.ftrXe2Compression = true;
     featureTable->flags.ftrXe2PlusTiling = true;
     featureTable->flags.ftrL3TransientDataFlush = true;
     featureTable->flags.ftrPml5Support = true;
@@ -122,7 +121,7 @@ void BMG::setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndW
 
     BMG::adjustHardwareInfo(hwInfo);
     if (setupFeatureTableAndWorkaroundTable) {
-        BMG::setupFeatureAndWorkaroundTable(hwInfo);
+        BMG::setupFeatureAndWorkaroundTable(hwInfo, *releaseHelper);
     }
 }
 

@@ -56,6 +56,51 @@ TEST(ExecutionEnvironment, WhenCreatingDevicesThenThoseDevicesAddRefcountsToExec
     EXPECT_EQ(expectedRefCounts, executionEnvironment->getRefInternalCount());
 }
 
+TEST(ExecutionEnvironment, givenDeviceCreatorWhenIsMicrosecondAdjustmendRequiredByAilThenGetMicrosecondResolutionCalled) {
+    auto executionEnvironment = new ExecutionEnvironment();
+    auto devices = DeviceFactory::createDevices(*executionEnvironment);
+    executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.reset(new MockAILConfiguration());
+    auto mockAIL = static_cast<MockAILConfiguration *>(executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.get());
+    mockAIL->adjustMicrosecondResolution = true;
+    auto device = Device::create<RootDevice>(executionEnvironment, 0u);
+    EXPECT_EQ(mockAIL->getMicrosecondResolutionCalledTimes, 1u);
+    delete device;
+}
+
+TEST(ExecutionEnvironment, givenDeviceCreatorWhenIsMicrosecondAdjustmendRequiredByAilThenMicrosecondResolutionIsSameAsInMock) {
+    auto executionEnvironment = new ExecutionEnvironment();
+    auto devices = DeviceFactory::createDevices(*executionEnvironment);
+    executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.reset(new MockAILConfiguration());
+    auto mockAIL = static_cast<MockAILConfiguration *>(executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.get());
+    mockAIL->adjustMicrosecondResolution = true;
+    uint32_t expectedResolution = 3u;
+    mockAIL->mockMicrosecondResolution = expectedResolution;
+    auto device = Device::create<RootDevice>(executionEnvironment, 0u);
+    EXPECT_EQ(device->getMicrosecondResolution(), expectedResolution);
+    delete device;
+}
+TEST(ExecutionEnvironment, givenDeviceCreatorWhenAilHelperIsNullThenDefaultValueReturned) {
+    auto executionEnvironment = new ExecutionEnvironment();
+    auto devices = DeviceFactory::createDevices(*executionEnvironment);
+    executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.reset();
+    uint32_t expectedResolution = 1000u;
+    auto device = Device::create<RootDevice>(executionEnvironment, 0u);
+    EXPECT_EQ(device->getMicrosecondResolution(), expectedResolution);
+    delete device;
+}
+
+TEST(ExecutionEnvironment, givenDeviceCreatorWhenIsMicrosecondAdjustmendIsNotRequiredByAilThenGetMicrosecondResolutionIsNotCalled) {
+    auto executionEnvironment = new ExecutionEnvironment();
+    auto devices = DeviceFactory::createDevices(*executionEnvironment);
+    MockAILConfiguration mockAilConfigurationHelper;
+    executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.reset(new MockAILConfiguration());
+    auto mockAIL = static_cast<MockAILConfiguration *>(executionEnvironment->rootDeviceEnvironments[0u]->ailConfiguration.get());
+    mockAIL->adjustMicrosecondResolution = false;
+    auto device = Device::create<RootDevice>(executionEnvironment, 0u);
+    EXPECT_EQ(mockAIL->getMicrosecondResolutionCalledTimes, 0u);
+    delete device;
+}
+
 TEST(ExecutionEnvironment, givenMemoryManagerIsNotInitializedInExecutionEnvironmentWhenCreatingDevicesThenEmptyDeviceVectorIsReturned) {
     class FailedInitializeMemoryManagerExecutionEnvironment : public MockExecutionEnvironment {
         bool initializeMemoryManager() override { return false; }
@@ -105,8 +150,8 @@ TEST(RootDeviceEnvironment, whenCreatingRootDeviceEnvironmentThenCreateOsAgnosti
     EXPECT_EQ(0u, rootDeviceEnvironment->osTime->getCpuRawTimestamp());
 
     TimeStampData tsData{1, 2};
-    EXPECT_TRUE(rootDeviceEnvironment->osTime->getGpuCpuTime(&tsData));
-    EXPECT_EQ(0u, tsData.cpuTimeinNS);
+    TimeQueryStatus error = rootDeviceEnvironment->osTime->getGpuCpuTime(&tsData);
+    EXPECT_EQ(error, TimeQueryStatus::success);
     EXPECT_EQ(0u, tsData.gpuTimeStamp);
 
     EXPECT_EQ(profilingTimerResolution, rootDeviceEnvironment->osTime->getDynamicDeviceTimerResolution());

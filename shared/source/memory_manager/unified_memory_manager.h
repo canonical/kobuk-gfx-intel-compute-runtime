@@ -13,6 +13,7 @@
 #include "shared/source/memory_manager/residency_container.h"
 #include "shared/source/unified_memory/unified_memory.h"
 #include "shared/source/utilities/sorted_vector.h"
+#include "shared/source/utilities/spinlock.h"
 
 #include "memory_properties_flags.h"
 
@@ -20,7 +21,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <shared_mutex>
 #include <type_traits>
 
@@ -100,7 +100,10 @@ class SVMAllocsManager {
         SvmAllocationData *get(const void *);
         size_t getNumAllocs() const { return allocations.size(); };
 
+        void freeAllocations(NEO::MemoryManager &memoryManager);
+
         SvmAllocationContainer allocations;
+        NEO::SpinLock mutex;
     };
 
     struct MapOperationsTracker {
@@ -162,15 +165,17 @@ class SVMAllocsManager {
         static constexpr double minimalAllocUtilization = 0.5;
 
         static bool sizeAllowed(size_t size) { return size <= SvmAllocationCache::maxServicedSize; }
-        bool insert(size_t size, void *);
+        bool insert(size_t size, void *ptr, SvmAllocationData *svmData);
         static bool allocUtilizationAllows(size_t requestedSize, size_t reuseCandidateSize);
-        void *get(size_t size, const UnifiedMemoryProperties &unifiedMemoryProperties, SVMAllocsManager *svmAllocsManager);
-        void trim(SVMAllocsManager *svmAllocsManager);
+        bool isInUse(SvmAllocationData *svmData);
+        void *get(size_t size, const UnifiedMemoryProperties &unifiedMemoryProperties);
+        void trim();
 
         std::vector<SvmCacheAllocationInfo> allocations;
         std::mutex mtx;
         size_t maxSize = 0;
-        size_t totalSize = 0;
+        SVMAllocsManager *svmAllocsManager = nullptr;
+        MemoryManager *memoryManager = nullptr;
     };
 
     enum class FreePolicyType : uint32_t {
@@ -203,13 +208,6 @@ class SVMAllocsManager {
     SvmAllocationData *getSVMAlloc(T *ptr) {
         std::shared_lock<std::shared_mutex> lock(mtx);
         return svmAllocs.get(ptr);
-    }
-
-    template <typename T,
-              std::enable_if_t<std::is_same_v<T, void *>, int> = 0>
-    SvmAllocationData *getSVMDeferFreeAlloc(T ptr) {
-        std::shared_lock<std::shared_mutex> lock(mtx);
-        return svmDeferFreeAllocs.get(ptr);
     }
 
     MOCKABLE_VIRTUAL bool freeSVMAlloc(void *ptr, bool blocking);

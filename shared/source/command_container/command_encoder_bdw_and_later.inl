@@ -53,7 +53,6 @@ template <typename WalkerType>
 void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDispatchKernelArgs &args) {
 
     using MEDIA_STATE_FLUSH = typename Family::MEDIA_STATE_FLUSH;
-    using MEDIA_INTERFACE_DESCRIPTOR_LOAD = typename Family::MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     using STATE_BASE_ADDRESS = typename Family::STATE_BASE_ADDRESS;
 
     auto &kernelDescriptor = args.dispatchInterface->getKernelDescriptor();
@@ -283,7 +282,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         kernelDescriptor,                                // kernelDescriptor
         KernelExecutionType::defaultType,                // kernelExecutionType
         args.requiredDispatchWalkOrder,                  // requiredDispatchWalkOrder
-        args.additionalSizeParam,                        // additionalSizeParam
+        args.localRegionSize,                            // localRegionSize
         args.device->getDeviceInfo().maxFrontEndThreads, // maxFrontEndThreads
         args.requiresSystemMemoryFence()};               // requiredSystemFence
     EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(rootDeviceEnvironment, cmd, walkerArgs);
@@ -635,11 +634,6 @@ size_t EncodeStates<Family>::getSshHeapSize() {
 }
 
 template <typename Family>
-void EncodeBatchBufferStartOrEnd<Family>::appendBatchBufferStart(MI_BATCH_BUFFER_START &cmd, bool indirect, bool predicate) {
-    cmd.setPredicationEnable(predicate);
-}
-
-template <typename Family>
 void InOrderPatchCommandHelpers::PatchCmd<Family>::patchComputeWalker(uint64_t appendCounterValue) {
     UNRECOVERABLE_IF(true);
 }
@@ -656,4 +650,42 @@ void EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(InterfaceDescriptor
                                                              WalkerType &walkerCmd) {
 }
 
+template <typename Family>
+size_t EncodeDispatchKernel<Family>::getScratchPtrOffsetOfImplicitArgs() {
+    return 0;
+}
+
+template <typename Family>
+void EncodeSurfaceState<Family>::setPitchForScratch(R_SURFACE_STATE *surfaceState, uint32_t pitch, const ProductHelper &productHelper) {
+    surfaceState->setSurfacePitch(pitch);
+}
+
+template <typename Family>
+uint32_t EncodeSurfaceState<Family>::getPitchForScratchInBytes(R_SURFACE_STATE *surfaceState, const ProductHelper &productHelper) {
+    return surfaceState->getSurfacePitch();
+}
+
+template <typename Family>
+void EncodeSemaphore<Family>::appendSemaphoreCommand(MI_SEMAPHORE_WAIT &cmd, uint64_t compareData, bool indirect, bool useQwordData, bool switchOnUnsuccessful) {
+    constexpr uint64_t upper32b = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) << 32;
+    UNRECOVERABLE_IF(useQwordData || (compareData & upper32b));
+}
+
+template <typename Family>
+template <bool isHeapless>
+void EncodeDispatchKernel<Family>::setScratchAddress(uint64_t &scratchAddress, uint32_t requiredScratchSlot0Size, uint32_t requiredScratchSlot1Size, IndirectHeap *ssh, CommandStreamReceiver &submissionCsr) {
+}
+
+template <typename Family>
+template <typename InterfaceDescriptorType>
+void EncodeDispatchKernel<Family>::encodeEuSchedulingPolicy(InterfaceDescriptorType *pInterfaceDescriptor, const KernelDescriptor &kernelDesc, int32_t defaultPipelinedThreadArbitrationPolicy) {
+}
+
+template <typename Family>
+template <typename WalkerType>
+void EncodeDispatchKernel<Family>::setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder) {}
+
+template <typename Family>
+template <typename WalkerType>
+void EncodeDispatchKernel<Family>::adjustTimestampPacket(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
 } // namespace NEO

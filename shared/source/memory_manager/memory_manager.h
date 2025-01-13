@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -43,6 +44,7 @@ class Gmm;
 class HostPtrManager;
 class OsContext;
 class PrefetchManager;
+class HeapAllocator;
 
 enum AllocationUsage {
     TEMPORARY_ALLOCATION,
@@ -59,10 +61,15 @@ struct AddressRange {
     size_t size;
 };
 
+struct PhysicalMemoryAllocation {
+    GraphicsAllocation *allocation;
+    Device *device;
+};
+
 struct MemoryMappedRange {
     const void *ptr;
     size_t size;
-    struct PhysicalMemoryAllocation *mappedAllocation;
+    PhysicalMemoryAllocation mappedAllocation;
 };
 
 struct VirtualMemoryReservation {
@@ -76,9 +83,9 @@ struct VirtualMemoryReservation {
     size_t reservationTotalSize;
 };
 
-struct PhysicalMemoryAllocation {
-    GraphicsAllocation *allocation;
-    Device *device;
+struct CustomHeapAllocatorConfig {
+    HeapAllocator *allocator = nullptr;
+    uint64_t gpuVaBase = std::numeric_limits<uint64_t>::max();
 };
 
 constexpr size_t paddingBufferSize = 2 * MemoryConstants::megaByte;
@@ -247,8 +254,8 @@ class MemoryManager {
     void *getReservedMemory(size_t size, size_t alignment);
     GfxPartition *getGfxPartition(uint32_t rootDeviceIndex) { return gfxPartitions.at(rootDeviceIndex).get(); }
     GmmHelper *getGmmHelper(uint32_t rootDeviceIndex);
-    virtual AddressRange reserveGpuAddress(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex) = 0;
-    virtual AddressRange reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) = 0;
+    virtual AddressRange reserveGpuAddress(const uint64_t requiredStartAddress, size_t size, const RootDeviceIndicesContainer &rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex) = 0;
+    virtual AddressRange reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, const RootDeviceIndicesContainer &rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) = 0;
     virtual size_t selectAlignmentAndHeap(size_t size, HeapIndex *heap) = 0;
     virtual void freeGpuAddress(AddressRange addressRange, uint32_t rootDeviceIndex) = 0;
     virtual AddressRange reserveCpuAddress(const uint64_t requiredStartAddress, size_t size) = 0;
@@ -279,6 +286,9 @@ class MemoryManager {
 
     virtual void releaseDeviceSpecificMemResources(uint32_t rootDeviceIndex){};
     virtual void createDeviceSpecificMemResources(uint32_t rootDeviceIndex){};
+    virtual void releaseDeviceSpecificGfxPartition(uint32_t rootDeviceIndex){};
+    virtual bool reInitDeviceSpecificGfxPartition(uint32_t rootDeviceIndex) { return true; };
+
     void reInitLatestContextId() {
         latestContextId = std::numeric_limits<uint32_t>::max();
     }
@@ -302,8 +312,10 @@ class MemoryManager {
     [[nodiscard]] std::unique_lock<std::mutex> lockVirtualMemoryReservationMap() { return std::unique_lock<std::mutex>(this->virtualMemoryReservationMapMutex); };
     std::map<void *, PhysicalMemoryAllocation *> &getPhysicalMemoryAllocationMap() { return this->physicalMemoryAllocationMap; };
     [[nodiscard]] std::unique_lock<std::mutex> lockPhysicalMemoryAllocationMap() { return std::unique_lock<std::mutex>(this->physicalMemoryAllocationMapMutex); };
-    virtual bool mapPhysicalToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) = 0;
-    virtual void unMapPhysicalToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) = 0;
+    virtual bool mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) = 0;
+    virtual bool mapPhysicalHostMemoryToVirtualMemory(RootDeviceIndicesContainer &rootDeviceIndices, MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) = 0;
+    virtual void unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) = 0;
+    virtual void unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) = 0;
     bool allocateBindlessSlot(GraphicsAllocation *allocation);
     static uint64_t adjustToggleBitFlagForGpuVa(AllocationType inputAllocationType, uint64_t gpuAddress);
     virtual bool allocateInterrupt(uint32_t &outHandle, uint32_t rootDeviceIndex) { return false; }
@@ -323,6 +335,26 @@ class MemoryManager {
     uint32_t getFirstContextIdForRootDevice(uint32_t rootDeviceIndex);
 
     virtual void getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) { return; }
+
+    std::unique_lock<std::mutex> obtainHostAllocationsReuseLock() const {
+        return std::unique_lock<std::mutex>(hostAllocationsReuseMtx);
+    }
+
+    void recordHostAllocationSaveForReuse(size_t size) {
+        hostAllocationsSavedForReuseSize += size;
+    }
+
+    void recordHostAllocationGetFromReuse(size_t size) {
+        hostAllocationsSavedForReuseSize -= size;
+    }
+
+    size_t getHostAllocationsSavedForReuseSize() const {
+        return hostAllocationsSavedForReuseSize;
+    }
+
+    void addCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool, const CustomHeapAllocatorConfig &config);
+    std::optional<std::reference_wrapper<CustomHeapAllocatorConfig>> getCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool);
+    void removeCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool);
 
   protected:
     bool getAllocationData(AllocationData &allocationData, const AllocationProperties &properties, const void *hostPtr, const StorageInfo &storageInfo);
@@ -350,6 +382,7 @@ class MemoryManager {
     virtual GraphicsAllocation *allocateMemoryByKMD(const AllocationData &allocationData) = 0;
     virtual GraphicsAllocation *allocatePhysicalLocalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) = 0;
     virtual GraphicsAllocation *allocatePhysicalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) = 0;
+    virtual GraphicsAllocation *allocatePhysicalHostMemory(const AllocationData &allocationData, AllocationStatus &status) = 0;
     virtual void *lockResourceImpl(GraphicsAllocation &graphicsAllocation) = 0;
     virtual void unlockResourceImpl(GraphicsAllocation &graphicsAllocation) = 0;
     virtual void freeAssociatedResourceImpl(GraphicsAllocation &graphicsAllocation) { return unlockResourceImpl(graphicsAllocation); };
@@ -395,6 +428,9 @@ class MemoryManager {
     std::mutex physicalMemoryAllocationMapMutex;
     std::unique_ptr<std::atomic<size_t>[]> localMemAllocsSize;
     std::atomic<size_t> sysMemAllocsSize;
+    size_t hostAllocationsSavedForReuseSize = 0u;
+    mutable std::mutex hostAllocationsReuseMtx;
+    std::map<std::pair<AllocationType, bool>, CustomHeapAllocatorConfig> customHeapAllocators;
 };
 
 std::unique_ptr<DeferredDeleter> createDeferredDeleter();

@@ -13,7 +13,7 @@
 struct ReleaseHelper2001Tests : public ReleaseHelperTests<20, 1> {
 
     std::vector<uint32_t> getRevisions() override {
-        return {0, 1, 4};
+        return {0};
     }
 };
 
@@ -41,11 +41,8 @@ TEST_F(ReleaseHelper2001Tests, whenGettingCapabilitiesThenCorrectPropertiesAreRe
         EXPECT_TRUE(releaseHelper->isRayTracingSupported());
         EXPECT_FALSE(releaseHelper->isDisablingMsaaRequired());
         EXPECT_TRUE(releaseHelper->isGlobalBindlessAllocatorEnabled());
+        EXPECT_TRUE(releaseHelper->isNumRtStacksPerDssFixedValue());
     }
-}
-
-TEST_F(ReleaseHelper2001Tests, whenShouldAdjustCalledThenTrueReturned) {
-    whenShouldAdjustCalledThenTrueReturned();
 }
 
 TEST_F(ReleaseHelper2001Tests, whenGettingSupportedNumGrfsThenCorrectValuesAreReturned) {
@@ -70,6 +67,10 @@ TEST_F(ReleaseHelper2001Tests, whenGettingAdditionalExtraKernelCapabilitiesThenR
 
 TEST_F(ReleaseHelper2001Tests, whenIsLocalOnlyAllowedCalledThenFalseReturned) {
     whenIsLocalOnlyAllowedCalledThenFalseReturned();
+}
+
+TEST_F(ReleaseHelper2001Tests, whenIsDummyBlitWaRequiredCalledThenFalseReturned) {
+    whenIsDummyBlitWaRequiredCalledThenFalseReturned();
 }
 
 TEST_F(ReleaseHelper2001Tests, whenGettingPreferredSlmSizeThenAllEntriesHaveCorrectValues) {

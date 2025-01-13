@@ -1691,8 +1691,6 @@ HWTEST_F(ImageTransformTest, givenSurfaceStateWhenTransformImage2dArrayTo3dIsCal
 }
 
 HWTEST_F(ImageTransformTest, givenSurfaceBaseAddressAndUnifiedSurfaceWhenSetUnifiedAuxAddressCalledThenAddressIsSet) {
-    using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
-    using SURFACE_TYPE = typename RENDER_SURFACE_STATE::SURFACE_TYPE;
     MockContext context;
     auto image = std::unique_ptr<Image>(ImageHelper<Image3dDefaults>::create(&context));
     auto surfaceState = FamilyType::cmdInitRenderSurfaceState;
@@ -1947,7 +1945,7 @@ TEST(ImageTest, givenImageWhenFalsePassedToSet3DUavOrRtvThenValueInImageIsSetToF
 
 using ImageAdjustDepthTests = ::testing::Test;
 
-HWTEST_F(ImageAdjustDepthTests, givenSurfaceStateWhenImage3DRTVOrUAVThenDepthCalculationIsDone) {
+HWTEST2_F(ImageAdjustDepthTests, givenSurfaceStateWhenImage3DRTVOrUAVThenDepthCalculationIsDone, IsAtLeastXe2HpgCore) {
 
     typename FamilyType::RENDER_SURFACE_STATE ss;
     uint32_t minArrayElement = 1;
@@ -1955,49 +1953,31 @@ HWTEST_F(ImageAdjustDepthTests, givenSurfaceStateWhenImage3DRTVOrUAVThenDepthCal
     uint32_t originalDepth = 10;
     uint32_t mipCount = 1;
     ss.setDepth(originalDepth);
-    auto releaseHelper = std::make_unique<MockReleaseHelper>();
-    releaseHelper->shouldAdjustDepthResult = true;
 
-    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, true, releaseHelper.get());
+    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, true);
     EXPECT_NE(ss.getDepth(), originalDepth);
 }
 
-HWTEST_F(ImageAdjustDepthTests, givenSurfaceStateWhenImageIsNot3DRTVOrUAVThenDepthCalculationIsDone) {
+HWTEST2_F(ImageAdjustDepthTests, givenSurfaceStateWhenImageIsNot3DRTVOrUAVThenDepthCalculationIsDone, IsAtLeastXe2HpgCore) {
     typename FamilyType::RENDER_SURFACE_STATE ss;
     uint32_t minArrayElement = 1;
     uint32_t renderTargetViewExtent = 1;
     uint32_t originalDepth = 10;
     uint32_t mipCount = 1;
     ss.setDepth(originalDepth);
-    auto releaseHelper = std::make_unique<MockReleaseHelper>();
-    releaseHelper->shouldAdjustDepthResult = true;
 
-    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, false, releaseHelper.get());
+    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, false);
     EXPECT_EQ(ss.getDepth(), originalDepth);
 }
 
-HWTEST_F(ImageAdjustDepthTests, givenSurfaceStateWhenAdjustDepthReturnFalseThenOriginalDepthIsUsed) {
+HWTEST2_F(ImageAdjustDepthTests, givenSurfaceStateWhenAdjustDepthReturnFalseThenOriginalDepthIsUsed, IsAtMostXeHpcCore) {
     typename FamilyType::RENDER_SURFACE_STATE ss;
     uint32_t minArrayElement = 1;
     uint32_t renderTargetViewExtent = 1;
     uint32_t originalDepth = 10;
     uint32_t mipCount = 1;
     ss.setDepth(originalDepth);
-    auto releaseHelper = std::make_unique<MockReleaseHelper>();
-    releaseHelper->shouldAdjustDepthResult = false;
 
-    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, true, releaseHelper.get());
-    EXPECT_EQ(ss.getDepth(), originalDepth);
-}
-
-HWTEST_F(ImageAdjustDepthTests, givenSurfaceStateWhenReeaseHelperIsNullprThenOriginalDepthIsUsed) {
-    typename FamilyType::RENDER_SURFACE_STATE ss;
-    uint32_t minArrayElement = 1;
-    uint32_t renderTargetViewExtent = 1;
-    uint32_t originalDepth = 10;
-    uint32_t mipCount = 1;
-    ss.setDepth(originalDepth);
-    ReleaseHelper *releaseHelper = nullptr;
-    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, true, releaseHelper);
+    ImageHw<FamilyType>::adjustDepthLimitations(&ss, minArrayElement, renderTargetViewExtent, originalDepth, mipCount, true);
     EXPECT_EQ(ss.getDepth(), originalDepth);
 }

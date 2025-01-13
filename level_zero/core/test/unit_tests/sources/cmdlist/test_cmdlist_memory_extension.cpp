@@ -15,10 +15,10 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
-#include "level_zero/api/driver_experimental/public/zex_api.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
+#include "level_zero/driver_experimental/zex_api.h"
 
 namespace L0 {
 namespace ult {
@@ -318,7 +318,6 @@ HWTEST2_F(CommandListAppendWaitOnMem, givenInvalidCmdListWhenWaitOnMemory64Calle
 
 HWTEST2_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenProgramLri, MatchAny) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
-    using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
 
     if (!FamilyType::isQwordInOrderCounter) {
         GTEST_SKIP();
@@ -488,7 +487,6 @@ HWTEST_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithValidAddressAndData
 }
 
 HWTEST_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithValidAddressAndInvalidOpThenReturnsInvalid) {
-    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     ze_result_t result = ZE_RESULT_SUCCESS;
 
     zex_wait_on_mem_desc_t desc;
@@ -736,7 +734,6 @@ HWTEST2_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithNoScopeAndSystemMe
 }
 
 HWTEST2_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithHostMemAndNoScopeThenMiMemFenceEncoded, IsXeHpcCore) {
-    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     ze_result_t result = ZE_RESULT_SUCCESS;
     auto &commandContainer = commandList->commandContainer;
@@ -769,7 +766,6 @@ HWTEST2_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithHostMemAndNoScopeT
 }
 
 HWTEST2_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithDeviceMemAndNoScopeThenMiMemFenceNotEncoded, IsXeHpcCore) {
-    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     ze_result_t result = ZE_RESULT_SUCCESS;
     auto &commandContainer = commandList->commandContainer;
@@ -1104,7 +1100,6 @@ HWTEST_F(ImmediateCommandListAppendWaitOnMem, givenAppendWaitOnMemWithValidAddre
 }
 
 HWTEST_F(ImmediateCommandListAppendWaitOnMem, givenAppendWaitOnMemWithValidAddressAndInvalidOpThenReturnsInvalid) {
-    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     ze_result_t result = ZE_RESULT_SUCCESS;
 
     zex_wait_on_mem_desc_t desc;
@@ -1307,7 +1302,6 @@ HWTEST_F(ImmediateCommandListAppendWaitOnMem, givenAppendWaitOnMemOnBcsWithSigna
 }
 
 HWTEST2_F(ImmediateCommandListAppendWaitOnMem, givenAppendWaitOnMemWithHostMemAndNoScopeThenMiMemFenceEncoded, IsXeHpcCore) {
-    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     ze_result_t result = ZE_RESULT_SUCCESS;
     auto &commandContainer = immCommandList->commandContainer;
@@ -1340,7 +1334,6 @@ HWTEST2_F(ImmediateCommandListAppendWaitOnMem, givenAppendWaitOnMemWithHostMemAn
 }
 
 HWTEST2_F(ImmediateCommandListAppendWaitOnMem, givenAppendWaitOnMemWithDeviceMemAndNoScopeThenMiMemFenceNotEncoded, IsXeHpcCore) {
-    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     ze_result_t result = ZE_RESULT_SUCCESS;
     auto &commandContainer = immCommandList->commandContainer;

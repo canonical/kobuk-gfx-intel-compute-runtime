@@ -24,7 +24,6 @@ class MockReleaseHelper : public ReleaseHelper {
     ADDMETHOD_CONST_NOBASE(isBFloat16ConversionSupported, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isAuxSurfaceModeOverrideRequired, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isResolvingSubDeviceIDNeeded, bool, false, ());
-    ADDMETHOD_CONST_NOBASE(shouldAdjustDepth, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isDirectSubmissionSupported, bool, false, ());
     ADDMETHOD_CONST_NOBASE(isRcsExposureDisabled, bool, false, ());
     ADDMETHOD_CONST_NOBASE(getSupportedNumGrfs, std::vector<uint32_t>, {128}, ());
@@ -32,16 +31,17 @@ class MockReleaseHelper : public ReleaseHelper {
     ADDMETHOD_CONST_NOBASE(isGlobalBindlessAllocatorEnabled, bool, false, ());
     ADDMETHOD_CONST_NOBASE(getNumThreadsPerEu, uint32_t, 8u, ());
     ADDMETHOD_CONST_NOBASE(getTotalMemBankSize, uint64_t, 32ull * MemoryConstants::gigaByte, ());
-    ADDMETHOD_CONST_NOBASE(getThreadsPerEUConfigs, const ThreadsPerEUConfigs, {}, ());
+    ADDMETHOD_CONST_NOBASE(getThreadsPerEUConfigs, const ThreadsPerEUConfigs, {}, (uint32_t numThreadsPerEu));
     ADDMETHOD_CONST_NOBASE(getDeviceConfigString, const std::string, {}, (uint32_t tileCount, uint32_t sliceCount, uint32_t subSliceCount, uint32_t euPerSubSliceCount));
     ADDMETHOD_CONST_NOBASE(isRayTracingSupported, bool, true, ());
-    ADDMETHOD_CONST_NOBASE(getL3BankCount, uint32_t, 0u, ());
-    ADDMETHOD_CONST_NOBASE(getL3CacheBankSizeInKb, uint64_t, {}, ());
     ADDMETHOD_CONST_NOBASE(getAdditionalFp16Caps, uint32_t, {}, ());
     ADDMETHOD_CONST_NOBASE(getAdditionalExtraCaps, uint32_t, {}, ());
     ADDMETHOD_CONST_NOBASE(getStackSizePerRay, uint32_t, {}, ());
     ADDMETHOD_CONST_NOBASE(isLocalOnlyAllowed, bool, {}, ());
     ADDMETHOD_CONST_NOBASE(isDisablingMsaaRequired, bool, false, ());
+    ADDMETHOD_CONST_NOBASE(isDummyBlitWaRequired, bool, false, ());
+    ADDMETHOD_CONST_NOBASE(isNumRtStacksPerDssFixedValue, bool, true, ());
+    ADDMETHOD_CONST_NOBASE(getFtrXe2Compression, bool, false, ());
 
     const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const override {
         static SizeToPreferredSlmValueArray sizeToPreferredSlmValue = {};

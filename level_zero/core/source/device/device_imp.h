@@ -146,12 +146,16 @@ struct DeviceImp : public Device, NEO::NonCopyableOrMovableClass {
 
     BcsSplit bcsSplit;
 
+    ze_command_list_handle_t globalTimestampCommandList = nullptr;
+    void *globalTimestampAllocation = nullptr;
+    std::mutex globalTimestampMutex;
+
     bool resourcesReleased = false;
     bool calculationForDisablingEuFusionWithDpasNeeded = false;
     void releaseResources();
 
     NEO::SVMAllocsManager::MapBasedAllocationTracker peerAllocations;
-    NEO::SpinLock peerAllocationsMutex;
+    NEO::SVMAllocsManager::MapBasedAllocationTracker peerCounterAllocations;
     std::unordered_map<const void *, L0::Image *> peerImageAllocations;
     NEO::SpinLock peerImageAllocationsMutex;
     std::map<NEO::SvmAllocationData *, NEO::MemAdviseFlags> memAdviseSharedAllocations;
@@ -178,6 +182,8 @@ struct DeviceImp : public Device, NEO::NonCopyableOrMovableClass {
     uint32_t getCopyEngineOrdinal() const;
 
   protected:
+    ze_result_t getGlobalTimestampsUsingSubmission(uint64_t *hostTimestamp, uint64_t *deviceTimestamp);
+    ze_result_t getGlobalTimestampsUsingOsInterface(uint64_t *hostTimestamp, uint64_t *deviceTimestamp);
     const char *getDeviceMemoryName();
     void adjustCommandQueueDesc(uint32_t &ordinal, uint32_t &index);
     NEO::EngineGroupType getEngineGroupTypeForOrdinal(uint32_t ordinal) const;

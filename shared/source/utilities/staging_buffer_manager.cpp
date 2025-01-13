@@ -13,7 +13,6 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/utilities/heap_allocator.h"
-
 namespace NEO {
 
 StagingBuffer::StagingBuffer(void *baseAddress, size_t size) : baseAddress(baseAddress) {
@@ -24,7 +23,16 @@ StagingBuffer::StagingBuffer(StagingBuffer &&other) : baseAddress(other.baseAddr
     this->allocator.reset(other.allocator.release());
 }
 
-StagingBufferManager::StagingBufferManager(SVMAllocsManager *svmAllocsManager, const RootDeviceIndicesContainer &rootDeviceIndices, const std::map<uint32_t, DeviceBitfield> &deviceBitfields) : svmAllocsManager(svmAllocsManager), rootDeviceIndices(rootDeviceIndices), deviceBitfields(deviceBitfields) {
+bool StagingBufferTracker::isReady() const {
+    return csr->testTaskCountReady(csr->getTagAddress(), taskCountToWait);
+}
+
+void StagingBufferTracker::freeChunk() const {
+    allocator->free(chunkAddress, size);
+}
+
+StagingBufferManager::StagingBufferManager(SVMAllocsManager *svmAllocsManager, const RootDeviceIndicesContainer &rootDeviceIndices, const std::map<uint32_t, DeviceBitfield> &deviceBitfields, bool requiresWritable)
+    : svmAllocsManager(svmAllocsManager), rootDeviceIndices(rootDeviceIndices), deviceBitfields(deviceBitfields), requiresWritable(requiresWritable) {
     if (debugManager.flags.StagingBufferSize.get() != -1) {
         chunkSize = debugManager.flags.StagingBufferSize.get() * MemoryConstants::kiloByte;
     }
@@ -37,22 +45,45 @@ StagingBufferManager::~StagingBufferManager() {
 }
 
 /*
- * This method performs 4 steps for single chunk transfer
- * 1. Get existing chunk of staging buffer, if can't - allocate new one,
- * 2. Perform actual transfer,
- * 3. Store used buffer to tracking container (with current task count)
- * 4. Update tag if required to reuse this buffer in next chunk copies
+ * This method performs single chunk transfer. If transfer is a read operation, it will fetch oldest staging
+ * buffer from the queue, otherwise it allocates or reuses buffer from the pool.
+ * After transfer is submitted to GPU, it stores used buffer to either queue in case of reads,
+ * or tracking container for further reusage.
  */
 template <class Func, class... Args>
-int32_t StagingBufferManager::performChunkTransfer(CommandStreamReceiver *csr, size_t size, Func &func, Args... args) {
-    auto allocatedSize = size;
-    auto [allocator, stagingBuffer] = requestStagingBuffer(allocatedSize, csr);
-    auto ret = func(addrToPtr(stagingBuffer), size, args...);
-    trackChunk({allocator, stagingBuffer, allocatedSize, csr->peekTaskCount()});
+StagingTransferStatus StagingBufferManager::performChunkTransfer(bool isRead, void *userPtr, size_t size, StagingQueue &currentStagingBuffers, CommandStreamReceiver *csr, Func &func, Args... args) {
+    StagingTransferStatus result{};
+    StagingBufferTracker tracker{};
+    if (currentStagingBuffers.size() > 1) {
+        if (fetchHead(currentStagingBuffers, tracker) == WaitStatus::gpuHang) {
+            result.waitStatus = WaitStatus::gpuHang;
+            return result;
+        }
+    } else {
+        auto allocatedSize = size;
+        auto [allocator, stagingBuffer] = requestStagingBuffer(allocatedSize);
+        tracker = StagingBufferTracker{allocator, stagingBuffer, allocatedSize, csr};
+    }
+
+    auto stagingBuffer = addrToPtr(tracker.chunkAddress);
+    if (!isRead) {
+        memcpy(stagingBuffer, userPtr, size);
+    }
+
+    result.chunkCopyStatus = func(stagingBuffer, args...);
+
+    tracker.taskCountToWait = csr->peekTaskCount();
+    if (isRead) {
+        UserDstData dstData{userPtr, size};
+        currentStagingBuffers.push({dstData, tracker});
+    } else {
+        trackChunk(tracker);
+    }
+
     if (csr->isAnyDirectSubmissionEnabled()) {
         csr->flushTagUpdate();
     }
-    return ret;
+    return result;
 }
 
 /*
@@ -60,38 +91,40 @@ int32_t StagingBufferManager::performChunkTransfer(CommandStreamReceiver *csr, s
  * Each chunk copy contains staging buffer which should be used instead of non-usm memory during transfers on GPU.
  * Caller provides actual function to transfer data for single chunk.
  */
-int32_t StagingBufferManager::performCopy(void *dstPtr, const void *srcPtr, size_t size, ChunkCopyFunction &chunkCopyFunc, CommandStreamReceiver *csr) {
+StagingTransferStatus StagingBufferManager::performCopy(void *dstPtr, const void *srcPtr, size_t size, ChunkCopyFunction &chunkCopyFunc, CommandStreamReceiver *csr) {
+    StagingQueue stagingQueue;
     auto copiesNum = size / chunkSize;
     auto remainder = size % chunkSize;
-
+    StagingTransferStatus result{};
     for (auto i = 0u; i < copiesNum; i++) {
         auto chunkDst = ptrOffset(dstPtr, i * chunkSize);
         auto chunkSrc = ptrOffset(srcPtr, i * chunkSize);
-        auto ret = performChunkTransfer(csr, chunkSize, chunkCopyFunc, chunkDst, chunkSrc);
-        if (ret) {
-            return ret;
+        result = performChunkTransfer(false, const_cast<void *>(chunkSrc), chunkSize, stagingQueue, csr, chunkCopyFunc, chunkDst, chunkSize);
+        if (result.chunkCopyStatus != 0) {
+            return result;
         }
     }
 
     if (remainder != 0) {
         auto chunkDst = ptrOffset(dstPtr, copiesNum * chunkSize);
         auto chunkSrc = ptrOffset(srcPtr, copiesNum * chunkSize);
-        auto ret = performChunkTransfer(csr, remainder, chunkCopyFunc, chunkDst, chunkSrc);
-        if (ret) {
-            return ret;
+        auto result = performChunkTransfer(false, const_cast<void *>(chunkSrc), remainder, stagingQueue, csr, chunkCopyFunc, chunkDst, remainder);
+        if (result.chunkCopyStatus != 0) {
+            return result;
         }
     }
-    return 0;
+    return result;
 }
 
 /*
- * This method orchestrates write operation for images with given origin and region.
+ * This method orchestrates transfer operation for images with given origin and region.
  * Transfer is splitted into chunks, each chunk represents sub-region to transfer.
  * Each chunk contains staging buffer which should be used instead of non-usm memory during transfers on GPU.
  * Several rows are packed into single chunk unless size of single row exceeds maximum chunk size (2MB).
- * Caller provides actual function to enqueue write operation for single chunk.
+ * Caller provides actual function to enqueue read/write operation for single chunk.
  */
-int32_t StagingBufferManager::performImageWrite(const void *ptr, const size_t *globalOrigin, const size_t *globalRegion, size_t rowPitch, ChunkWriteImageFunc &chunkWriteImageFunc, CommandStreamReceiver *csr) {
+StagingTransferStatus StagingBufferManager::performImageTransfer(const void *ptr, const size_t *globalOrigin, const size_t *globalRegion, size_t rowPitch, ChunkTransferImageFunc &chunkTransferImageFunc, CommandStreamReceiver *csr, bool isRead) {
+    StagingQueue stagingQueue;
     size_t origin[3] = {};
     size_t region[3] = {};
     origin[0] = globalOrigin[0];
@@ -102,15 +135,16 @@ int32_t StagingBufferManager::performImageWrite(const void *ptr, const size_t *g
     rowsPerChunk = std::min<size_t>(rowsPerChunk, globalRegion[1]);
     auto numOfChunks = globalRegion[1] / rowsPerChunk;
     auto remainder = globalRegion[1] % (rowsPerChunk * numOfChunks);
+    StagingTransferStatus result{};
 
     for (auto i = 0u; i < numOfChunks; i++) {
         origin[1] = globalOrigin[1] + i * rowsPerChunk;
         region[1] = rowsPerChunk;
         auto size = region[1] * rowPitch;
         auto chunkPtr = ptrOffset(ptr, i * rowsPerChunk * rowPitch);
-        auto ret = performChunkTransfer(csr, size, chunkWriteImageFunc, chunkPtr, origin, region);
-        if (ret) {
-            return ret;
+        result = performChunkTransfer(isRead, const_cast<void *>(chunkPtr), size, stagingQueue, csr, chunkTransferImageFunc, origin, region);
+        if (result.chunkCopyStatus != 0 || result.waitStatus == WaitStatus::gpuHang) {
+            return result;
         }
     }
 
@@ -119,19 +153,57 @@ int32_t StagingBufferManager::performImageWrite(const void *ptr, const size_t *g
         region[1] = remainder;
         auto size = region[1] * rowPitch;
         auto chunkPtr = ptrOffset(ptr, numOfChunks * rowsPerChunk * rowPitch);
-        auto ret = performChunkTransfer(csr, size, chunkWriteImageFunc, chunkPtr, origin, region);
-        if (ret) {
-            return ret;
+        result = performChunkTransfer(isRead, const_cast<void *>(chunkPtr), size, stagingQueue, csr, chunkTransferImageFunc, origin, region);
+        if (result.chunkCopyStatus != 0 || result.waitStatus == WaitStatus::gpuHang) {
+            return result;
         }
     }
-    return 0;
+
+    result.waitStatus = drainAndReleaseStagingQueue(stagingQueue);
+    return result;
+}
+
+/*
+ * This method is used for read transfers. It waits for oldest transfer to finish
+ * and copies data associated with that transfer to host allocation.
+ * Returned tracker contains staging buffer ready for reuse.
+ */
+WaitStatus StagingBufferManager::fetchHead(StagingQueue &stagingQueue, StagingBufferTracker &tracker) const {
+    auto &head = stagingQueue.front();
+    auto status = head.second.csr->waitForTaskCount(head.second.taskCountToWait);
+    if (status == WaitStatus::gpuHang) {
+        return status;
+    }
+
+    auto &userData = head.first;
+    tracker = head.second;
+    auto stagingBuffer = addrToPtr(tracker.chunkAddress);
+    memcpy(userData.ptr, stagingBuffer, userData.size);
+    stagingQueue.pop();
+    return WaitStatus::ready;
+}
+
+/*
+ * Waits for all pending transfers to finish.
+ * Releases staging buffers back to pool for reuse.
+ */
+WaitStatus StagingBufferManager::drainAndReleaseStagingQueue(StagingQueue &stagingQueue) const {
+    StagingBufferTracker tracker{};
+    while (!stagingQueue.empty()) {
+        auto status = fetchHead(stagingQueue, tracker);
+        if (status == WaitStatus::gpuHang) {
+            return status;
+        }
+        tracker.freeChunk();
+    }
+    return WaitStatus::ready;
 }
 
 /*
  * This method returns allocator and chunk from staging buffer.
  * Creates new staging buffer if it failed to allocate chunk from existing buffers.
  */
-std::pair<HeapAllocator *, uint64_t> StagingBufferManager::requestStagingBuffer(size_t &size, CommandStreamReceiver *csr) {
+std::pair<HeapAllocator *, uint64_t> StagingBufferManager::requestStagingBuffer(size_t &size) {
     auto lock = std::lock_guard<std::mutex>(mtx);
 
     auto [allocator, chunkBuffer] = getExistingBuffer(size);
@@ -139,7 +211,7 @@ std::pair<HeapAllocator *, uint64_t> StagingBufferManager::requestStagingBuffer(
         return {allocator, chunkBuffer};
     }
 
-    clearTrackedChunks(csr);
+    clearTrackedChunks();
 
     auto [retriedAllocator, retriedChunkBuffer] = getExistingBuffer(size);
     if (retriedChunkBuffer != 0) {
@@ -169,6 +241,11 @@ std::pair<HeapAllocator *, uint64_t> StagingBufferManager::getExistingBuffer(siz
         allocator = stagingBuffer.getAllocator();
         buffer = allocator->allocate(size);
         if (buffer != 0) {
+            if (requiresWritable) {
+                auto alloc = svmAllocsManager->getSVMAlloc(stagingBuffer.getBaseAddress())->gpuAllocations.getDefaultGraphicsAllocation();
+                alloc->setTbxWritable(true, std::numeric_limits<uint32_t>::max());
+                alloc->setAubWritable(true, std::numeric_limits<uint32_t>::max());
+            }
             break;
         }
     }
@@ -196,8 +273,8 @@ bool StagingBufferManager::isValidForCopy(const Device &device, void *dstPtr, co
     return stagingCopyEnabled && hostToUsmCopy && !hasDependencies && (isUsedByOsContext || size <= chunkSize);
 }
 
-bool StagingBufferManager::isValidForStagingWriteImage(const Device &device, const void *ptr, bool hasDependencies) const {
-    auto stagingCopyEnabled = false;
+bool StagingBufferManager::isValidForStagingTransferImage(const Device &device, const void *ptr, bool hasDependencies) const {
+    auto stagingCopyEnabled = device.getProductHelper().isStagingBuffersEnabled();
     if (debugManager.flags.EnableCopyWithStagingBuffers.get() != -1) {
         stagingCopyEnabled = debugManager.flags.EnableCopyWithStagingBuffers.get();
     }
@@ -205,10 +282,10 @@ bool StagingBufferManager::isValidForStagingWriteImage(const Device &device, con
     return stagingCopyEnabled && !hasDependencies && nonUsmPtr;
 }
 
-void StagingBufferManager::clearTrackedChunks(CommandStreamReceiver *csr) {
+void StagingBufferManager::clearTrackedChunks() {
     for (auto iterator = trackers.begin(); iterator != trackers.end();) {
-        if (csr->testTaskCountReady(csr->getTagAddress(), iterator->taskCountToWait)) {
-            iterator->allocator->free(iterator->chunkAddress, iterator->size);
+        if (iterator->isReady()) {
+            iterator->freeChunk();
             iterator = trackers.erase(iterator);
         } else {
             break;

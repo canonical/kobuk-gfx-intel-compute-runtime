@@ -18,11 +18,6 @@ namespace NEO {
 constexpr auto release = ReleaseType::release2004;
 
 template <>
-bool ReleaseHelperHw<release>::shouldAdjustDepth() const {
-    return true;
-}
-
-template <>
 inline bool ReleaseHelperHw<release>::isAuxSurfaceModeOverrideRequired() const {
     return true;
 }
@@ -49,6 +44,11 @@ const SizeToPreferredSlmValueArray &ReleaseHelperHw<release>::getSizeToPreferred
         {std::numeric_limits<uint32_t>::max(), PREFERRED_SLM_ALLOCATION_SIZE::PREFERRED_SLM_ALLOCATION_SIZE_128K},
     }};
     return sizeToPreferredSlmValue;
+}
+
+template <>
+bool ReleaseHelperHw<release>::getFtrXe2Compression() const {
+    return false;
 }
 
 } // namespace NEO

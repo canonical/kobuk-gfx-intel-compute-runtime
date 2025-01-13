@@ -212,6 +212,56 @@ TEST_F(DrmMemoryManagerTest, GivenAllocatePhysicalDeviceMemoryThenSuccessReturne
     memoryManager->freeGraphicsMemory(allocation);
 }
 
+TEST_F(DrmMemoryManagerTest, GivenAllocatePhysicalHostMemoryWithoutMemoryInfoThenNullptrIsReturned) {
+    allocationData.size = MemoryConstants::pageSize;
+    allocationData.flags.shareable = true;
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    auto allocation = memoryManager->allocatePhysicalHostMemory(allocationData, status);
+    EXPECT_EQ(status, MemoryManager::AllocationStatus::Error);
+    EXPECT_EQ(nullptr, allocation);
+}
+
+TEST_F(DrmMemoryManagerTest, GivenAllocatePhysicalHostMemoryAndMmapOffsetFailsThenNullptrIsReturned) {
+    mock->ioctlExpected.gemCreateExt = 1;
+    mock->ioctlExpected.gemMmapOffset = 1;
+    mock->ioctlExpected.gemClose = 1;
+
+    mock->failOnMmapOffset = true;
+
+    std::vector<MemoryRegion> regionInfo(1);
+    regionInfo[0].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_SYSTEM, 0};
+    this->mock->memoryInfo.reset(new MemoryInfo(regionInfo, *mock));
+    this->mock->memoryInfoQueried = true;
+
+    allocationData.size = MemoryConstants::pageSize;
+    allocationData.flags.shareable = true;
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    auto allocation = memoryManager->allocatePhysicalHostMemory(allocationData, status);
+    EXPECT_EQ(status, MemoryManager::AllocationStatus::Error);
+    EXPECT_EQ(nullptr, allocation);
+}
+
+TEST_F(DrmMemoryManagerTest, GivenAllocatePhysicalHostMemoryThenSuccessReturnedAndNoVirtualMemoryAssigned) {
+    mock->ioctlExpected.gemWait = 1;
+    mock->ioctlExpected.gemCreateExt = 1;
+    mock->ioctlExpected.gemMmapOffset = 1;
+    mock->ioctlExpected.gemClose = 1;
+
+    std::vector<MemoryRegion> regionInfo(1);
+    regionInfo[0].region = {drm_i915_gem_memory_class::I915_MEMORY_CLASS_SYSTEM, 0};
+    this->mock->memoryInfo.reset(new MemoryInfo(regionInfo, *mock));
+    this->mock->memoryInfoQueried = true;
+
+    allocationData.size = MemoryConstants::pageSize;
+    allocationData.flags.shareable = true;
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    auto allocation = memoryManager->allocatePhysicalHostMemory(allocationData, status);
+    EXPECT_EQ(status, MemoryManager::AllocationStatus::Success);
+    EXPECT_NE(nullptr, allocation);
+    EXPECT_EQ(0u, allocation->getGpuAddress());
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
 TEST_F(DrmMemoryManagerTest, whenCallingCheckUnexpectedGpuPagedfaultThenAllEnginesWereChecked) {
     mock->ioctlExpected.total = -1; // don't care
     memoryManager->checkUnexpectedGpuPageFault();
@@ -349,6 +399,66 @@ TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDrmMemoryManagerWhenGp
     auto addressRange = memoryManager->reserveGpuAddressOnHeap(0ull, MemoryConstants::pageSize, rootDeviceIndices, &rootDeviceIndexReserved, heap, alignment);
     EXPECT_NE(static_cast<int>(addressRange.address), 0);
     EXPECT_NE(static_cast<int>(addressRange.size), 0);
+    memoryManager->freeGpuAddress(addressRange, 0);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDrmMemoryManagerWhenGpuAddressReservationIsAttemptedWithSizeEqualToHalfOfHeapLimitThenSuccessReturned) {
+    auto memoryManager = std::make_unique<TestedDrmMemoryManager>(false, true, false, *executionEnvironment);
+    auto gfxPartition = memoryManager->getGfxPartition(0);
+
+    if (!gfxPartition->getHeapLimit(HeapIndex::heapExtended)) {
+        GTEST_SKIP();
+    }
+
+    gfxPartition->heapInitWithAllocationAlignment(HeapIndex::heapExtended, 0x0, 0x800000000000, MemoryConstants::pageSize);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    uint32_t rootDeviceIndexReserved = 1;
+
+    HeapIndex heap = HeapIndex::heapStandard;
+    size_t size = 64 * MemoryConstants::teraByte;
+    auto alignment = memoryManager->selectAlignmentAndHeap(size, &heap);
+    auto addressRange = memoryManager->reserveGpuAddressOnHeap(0ull, size, rootDeviceIndices, &rootDeviceIndexReserved, heap, alignment);
+    EXPECT_EQ(heap, HeapIndex::heapExtended);
+    EXPECT_EQ(size, alignment);
+    EXPECT_NE(addressRange.address, 0ull);
+    EXPECT_NE(addressRange.size, 0ull);
+
+    memoryManager->freeGpuAddress(addressRange, 0);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDrmMemoryManagerWhenGpuAddressReservationIsAttemptedWithDifferentSizesThenCorrectResultsReturned) {
+    auto memoryManager = std::make_unique<TestedDrmMemoryManager>(false, true, false, *executionEnvironment);
+    auto gfxPartition = memoryManager->getGfxPartition(0);
+
+    if (!gfxPartition->getHeapLimit(HeapIndex::heapExtended)) {
+        GTEST_SKIP();
+    }
+
+    gfxPartition->heapInitWithAllocationAlignment(HeapIndex::heapExtended, 0x0, 0x800200400000, MemoryConstants::pageSize);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    uint32_t rootDeviceIndexReserved = 1;
+
+    HeapIndex heap = HeapIndex::heapStandard;
+    size_t size = 128 * MemoryConstants::teraByte;
+    auto alignment = memoryManager->selectAlignmentAndHeap(size, &heap);
+    auto addressRange = memoryManager->reserveGpuAddressOnHeap(0ull, size, rootDeviceIndices, &rootDeviceIndexReserved, heap, alignment);
+    EXPECT_EQ(heap, HeapIndex::heapExtended);
+    EXPECT_EQ(size, alignment);
+    EXPECT_NE(addressRange.address, 0ull);
+    EXPECT_NE(addressRange.size, 0ull);
+
+    heap = HeapIndex::heapStandard;
+    size = 8 * MemoryConstants::gigaByte;
+    alignment = memoryManager->selectAlignmentAndHeap(size, &heap);
+    auto addressRange2 = memoryManager->reserveGpuAddressOnHeap(0ull, size, rootDeviceIndices, &rootDeviceIndexReserved, heap, alignment);
+    EXPECT_EQ(heap, HeapIndex::heapExtended);
+    EXPECT_EQ(size, alignment);
+    EXPECT_EQ(addressRange2.address, 0ull);
+
     memoryManager->freeGpuAddress(addressRange, 0);
 }
 
@@ -4806,7 +4916,7 @@ TEST_F(DrmAllocationTests, givenDrmAllocationWhenDefaultCacheInfoIsAvailableThen
 TEST_F(DrmAllocationTests, givenDrmAllocationWhenCacheRegionIsNotSetThenReturnFalse) {
     const uint32_t rootDeviceIndex = 0u;
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
-    drm.cacheInfo.reset(new MockCacheInfo(*drm.getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
+    drm.l3CacheInfo.reset(new MockCacheInfo(*drm.getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
 
     MockDrmAllocation allocation(rootDeviceIndex, AllocationType::buffer, MemoryPool::localMemory);
 
@@ -4817,7 +4927,7 @@ TEST_F(DrmAllocationTests, givenDrmAllocationWhenCacheRegionIsSetSuccessfullyThe
     const uint32_t rootDeviceIndex = 0u;
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
     drm.queryAndSetVmBindPatIndexProgrammingSupport();
-    drm.cacheInfo.reset(new MockCacheInfo(*drm.getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
+    drm.l3CacheInfo.reset(new MockCacheInfo(*drm.getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
 
     MockDrmAllocation allocation(rootDeviceIndex, AllocationType::buffer, MemoryPool::localMemory);
     auto &productHelper = executionEnvironment->rootDeviceEnvironments[0]->getHelper<ProductHelper>();
@@ -4834,7 +4944,7 @@ TEST_F(DrmAllocationTests, givenDrmAllocationWhenCacheRegionIsSetSuccessfullyThe
     const uint32_t rootDeviceIndex = 0u;
     DrmMock drm(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
     drm.queryAndSetVmBindPatIndexProgrammingSupport();
-    drm.cacheInfo.reset(new MockCacheInfo(*drm.getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
+    drm.l3CacheInfo.reset(new MockCacheInfo(*drm.getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
 
     MockBufferObject bo(rootDeviceIndex, &drm, 3, 0, 0, 1);
     MockDrmAllocation allocation(rootDeviceIndex, AllocationType::buffer, MemoryPool::localMemory);
@@ -4990,7 +5100,7 @@ TEST_F(DrmMemoryManagerTest, givenDrmAllocationWithHostPtrWhenItIsCreatedWithCac
     }
     mock->ioctlExpected.total = -1;
     auto drm = static_cast<DrmMockCustom *>(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface->getDriverModel()->as<Drm>());
-    drm->cacheInfo.reset(new MockCacheInfo(*drm->getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
+    drm->l3CacheInfo.reset(new MockCacheInfo(*drm->getIoctlHelper(), 32 * MemoryConstants::kiloByte, 2, 32));
 
     auto ptr = reinterpret_cast<void *>(0x1000);
     auto size = MemoryConstants::pageSize;
@@ -5133,8 +5243,17 @@ TEST_F(DrmMemoryManagerTest, whenDebugFlagToNotFreeResourcesIsSpecifiedThenFreeI
     TestedDrmMemoryManager memoryManager(false, false, false, *executionEnvironment);
     size_t sizeIn = 1024llu;
     uint64_t gpuAddress = 0x1337llu;
-    DrmAllocation stackDrmAllocation(0u, 1u /*num gmms*/, AllocationType::buffer, nullptr, nullptr, gpuAddress, sizeIn, MemoryPool::system64KBPages);
-    memoryManager.freeGraphicsMemoryImpl(&stackDrmAllocation);
+    auto drmAllocation = std::make_unique<DrmAllocation>(0u, 1u /*num gmms*/, AllocationType::buffer, nullptr, nullptr, gpuAddress, sizeIn, MemoryPool::system64KBPages);
+    memoryManager.freeGraphicsMemoryImpl(drmAllocation.get());
+
+    EXPECT_EQ(drmAllocation->getNumGmms(), 1u);
+    EXPECT_EQ(drmAllocation->getRootDeviceIndex(), 0u);
+    EXPECT_EQ(drmAllocation->getBOs().size(), EngineLimits::maxHandleCount);
+    EXPECT_EQ(drmAllocation->getAllocationType(), AllocationType::buffer);
+    EXPECT_EQ(drmAllocation->getGpuAddress(), gpuAddress);
+    EXPECT_EQ(drmAllocation->getUnderlyingBufferSize(), sizeIn);
+    EXPECT_EQ(drmAllocation->getMemoryPool(), MemoryPool::system64KBPages);
+    EXPECT_EQ(drmAllocation->getUnderlyingBuffer(), nullptr);
 }
 
 TEST_F(DrmMemoryManagerTest, given2MbPagesDisabledWhenWddmMemoryManagerIsCreatedThenAlignmentSelectorHasExpectedAlignments) {
@@ -6051,7 +6170,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenUAllocat
     allocData.cacheRegion = 0xFFFF;
 
     auto &drm = static_cast<DrmMockCustom &>(memoryManager->getDrm(0));
-    drm.cacheInfo.reset(nullptr);
+    drm.l3CacheInfo.reset(nullptr);
 
     auto allocation = memoryManager->allocatePhysicalLocalDeviceMemory(allocData, status);
     EXPECT_EQ(nullptr, allocation);
@@ -6494,7 +6613,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
     EXPECT_EQ(MemoryPool::localMemory, allocation->getMemoryPool());
     EXPECT_EQ(0u, allocation->getGpuAddress());
     EXPECT_EQ(EngineLimits::maxHandleCount, allocation->getNumGmms());
-    memoryManager->mapPhysicalToVirtualMemory(allocation, gpuAddress, allocData.size);
+    memoryManager->mapPhysicalDeviceMemoryToVirtualMemory(allocation, gpuAddress, allocData.size);
     EXPECT_EQ(gpuAddress, allocation->getGpuAddress());
 
     auto drmAllocation = static_cast<DrmAllocation *>(allocation);
@@ -6510,7 +6629,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
         boAddress += boSize;
     }
     auto osContext = device->getDefaultEngine().osContext;
-    memoryManager->unMapPhysicalToVirtualMemory(allocation, gpuAddress, allocData.size, osContext, 0u);
+    memoryManager->unMapPhysicalDeviceMemoryFromVirtualMemory(allocation, gpuAddress, allocData.size, osContext, 0u);
     EXPECT_EQ(0u, allocation->getGpuAddress());
     memoryManager->freeGraphicsMemory(allocation);
 }
@@ -6531,7 +6650,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
 
     EXPECT_NE(nullptr, kernelIsaAllocation);
 
-    memoryManager->mapPhysicalToVirtualMemory(kernelIsaAllocation, gpuAddress, allocData.size);
+    memoryManager->mapPhysicalDeviceMemoryToVirtualMemory(kernelIsaAllocation, gpuAddress, allocData.size);
 
     auto gpuAddressReserved = kernelIsaAllocation->getGpuAddress();
     auto &bos = kernelIsaAllocation->getBOs();
@@ -6550,7 +6669,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
     EXPECT_EQ(0b1011u, storageInfo.memoryBanks.to_ulong());
 
     auto osContext = device->getDefaultEngine().osContext;
-    memoryManager->unMapPhysicalToVirtualMemory(kernelIsaAllocation, gpuAddress, allocData.size, osContext, 0u);
+    memoryManager->unMapPhysicalDeviceMemoryFromVirtualMemory(kernelIsaAllocation, gpuAddress, allocData.size, osContext, 0u);
 
     memoryManager->freeGraphicsMemory(kernelIsaAllocation);
 }
@@ -6573,7 +6692,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
     EXPECT_EQ(MemoryPool::localMemory, allocation->getMemoryPool());
     EXPECT_EQ(0u, allocation->getGpuAddress());
     EXPECT_EQ(EngineLimits::maxHandleCount, allocation->getNumGmms());
-    memoryManager->mapPhysicalToVirtualMemory(allocation, gpuAddress, allocData.size);
+    memoryManager->mapPhysicalDeviceMemoryToVirtualMemory(allocation, gpuAddress, allocData.size);
     EXPECT_EQ(gpuAddress, allocation->getGpuAddress());
 
     auto drmAllocation = static_cast<DrmAllocation *>(allocation);
@@ -6589,7 +6708,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
         boAddress += boSize;
     }
     auto osContext = device->getDefaultEngine().osContext;
-    memoryManager->unMapPhysicalToVirtualMemory(allocation, gpuAddress, allocData.size, osContext, 0u);
+    memoryManager->unMapPhysicalDeviceMemoryFromVirtualMemory(allocation, gpuAddress, allocData.size, osContext, 0u);
     for (auto handleId = 0u; handleId < EngineLimits::maxHandleCount; handleId++) {
         auto bo = bos[handleId];
         auto contextId = bo->getOsContextId(osContext);
@@ -6697,6 +6816,210 @@ TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenAllocati
     EXPECT_EQ(0b1011u, storageInfo.memoryBanks.to_ulong());
 
     memoryManager->freeGraphicsMemory(kernelIsaAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDeviceBitfieldWithHolesWhenMappingPhysicalHostMemoryThenMappingIsSuccessful) {
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    rootDeviceIndices.pushUnique(1);
+    rootDeviceIndices.pushUnique(2);
+    MultiGraphicsAllocation multiGraphicsAllocation{static_cast<uint32_t>(rootDeviceIndices.size())};
+    EXPECT_TRUE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+    for (uint32_t i = 0; i < static_cast<uint32_t>(rootDeviceIndices.size()); i++) {
+        EXPECT_NE(nullptr, multiGraphicsAllocation.getGraphicsAllocation(i));
+    }
+
+    memoryManager->unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size);
+    memoryManager->freeGraphicsMemory(physicalAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDeviceBitfieldWithHolesAndPrimeHandleToFdFailsWhenMappingPhysicalHostMemoryThenMappingFails) {
+    mock->failOnPrimeHandleToFd = true;
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    rootDeviceIndices.pushUnique(1);
+    rootDeviceIndices.pushUnique(2);
+    MultiGraphicsAllocation multiGraphicsAllocation{static_cast<uint32_t>(rootDeviceIndices.size())};
+    EXPECT_FALSE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(rootDeviceIndices.size()); i++) {
+        EXPECT_EQ(nullptr, multiGraphicsAllocation.getGraphicsAllocation(i));
+    }
+
+    memoryManager->freeGraphicsMemory(physicalAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDeviceBitfieldWithHolesAndPrimeFdToHandleFailsWhenMappingPhysicalHostMemoryThenMappingFails) {
+    mock->failOnPrimeFdToHandle = true;
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    rootDeviceIndices.pushUnique(1);
+    rootDeviceIndices.pushUnique(2);
+    MultiGraphicsAllocation multiGraphicsAllocation{static_cast<uint32_t>(rootDeviceIndices.size())};
+    EXPECT_FALSE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(rootDeviceIndices.size()); i++) {
+        EXPECT_EQ(nullptr, multiGraphicsAllocation.getGraphicsAllocation(i));
+    }
+
+    memoryManager->freeGraphicsMemory(physicalAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenDeviceBitfieldWithHolesAndSecondPrimeFdToHandleFailsWhenMappingPhysicalHostMemoryThenMappingFails) {
+    mock->failOnSecondPrimeFdToHandle = true;
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(0);
+    rootDeviceIndices.pushUnique(1);
+    rootDeviceIndices.pushUnique(2);
+    MultiGraphicsAllocation multiGraphicsAllocation{static_cast<uint32_t>(rootDeviceIndices.size())};
+    EXPECT_FALSE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+
+    for (uint32_t i = 0; i < static_cast<uint32_t>(rootDeviceIndices.size()); i++) {
+        EXPECT_EQ(nullptr, multiGraphicsAllocation.getGraphicsAllocation(i));
+    }
+
+    memoryManager->freeGraphicsMemory(physicalAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenSingleRootDeviceWhenMappingPhysicalHostMemoryThenMappingIsSuccessful) {
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(rootDeviceIndex);
+    MultiGraphicsAllocation multiGraphicsAllocation{1u};
+    EXPECT_TRUE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getDefaultGraphicsAllocation());
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex));
+
+    memoryManager->unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size);
+    memoryManager->freeGraphicsMemory(physicalAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenSingleRootDeviceWhenMappingLockedPhysicalHostMemoryThenMappingIsSuccessful) {
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+    physicalAllocation->lock(addrToPtr(gpuAddress));
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(rootDeviceIndex);
+    MultiGraphicsAllocation multiGraphicsAllocation{1u};
+    EXPECT_TRUE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getDefaultGraphicsAllocation());
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex));
+    multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex)->lock(addrToPtr(gpuAddress));
+
+    memoryManager->unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size);
+    memoryManager->freeGraphicsMemory(physicalAllocation);
+}
+
+TEST_F(DrmMemoryManagerWithExplicitExpectationsTest, givenSingleRootDeviceAndPrimeHandleToFdFailsWhenMappingPhysicalHostMemoryThenMappingIsSuccessful) {
+    mock->failOnPrimeHandleToFd = true;
+
+    MemoryManager::AllocationStatus status = MemoryManager::AllocationStatus::Error;
+    AllocationData allocData;
+    allocData.allFlags = 0;
+    allocData.size = MemoryConstants::pageSize;
+    allocData.flags.allocateMemory = true;
+    allocData.flags.isUSMHostAllocation = true;
+    allocData.type = AllocationType::bufferHostMemory;
+    allocData.storageInfo.multiStorage = false;
+    allocData.rootDeviceIndex = rootDeviceIndex;
+    uint64_t gpuAddress = 0x1234;
+
+    auto physicalAllocation = static_cast<DrmAllocation *>(memoryManager->allocatePhysicalHostMemory(allocData, status));
+    EXPECT_NE(nullptr, physicalAllocation);
+
+    RootDeviceIndicesContainer rootDeviceIndices;
+    rootDeviceIndices.pushUnique(rootDeviceIndex);
+    MultiGraphicsAllocation multiGraphicsAllocation{1u};
+    EXPECT_TRUE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size));
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getDefaultGraphicsAllocation());
+    EXPECT_NE(nullptr, multiGraphicsAllocation.getGraphicsAllocation(rootDeviceIndex));
+
+    memoryManager->unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocation, physicalAllocation, gpuAddress, allocData.size);
+    memoryManager->freeGraphicsMemory(physicalAllocation);
 }
 
 struct DrmMemoryManagerLocalMemoryAlignmentTest : DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest {
@@ -8161,4 +8484,47 @@ TEST_F(DrmMemoryManagerTest, givenVmAdviseAtomicAttributeNotPresentWhenCreateSha
     EXPECT_NE(nullptr, sharedUSM);
 
     memoryManager->freeGraphicsMemory(sharedUSM);
+}
+
+TEST_F(DrmMemoryManagerTest, givenGfxPartitionWhenReleasedAndReinitializedThenNewGfxPartitionIsCorrect) {
+
+    auto gfxPartition = memoryManager->getGfxPartition(0);
+
+    auto heapExternal = gfxPartition->getHeapBase(HeapIndex::heapExternal);
+    auto heapStandard = gfxPartition->getHeapBase(HeapIndex::heapStandard);
+    auto heapStandard64KB = gfxPartition->getHeapBase(HeapIndex::heapStandard64KB);
+    auto heapSvm = gfxPartition->getHeapBase(HeapIndex::heapSvm);
+    auto heapExtended = gfxPartition->getHeapBase(HeapIndex::heapExtended);
+    auto heapExternalFrontWindow = gfxPartition->getHeapBase(HeapIndex::heapExternalFrontWindow);
+    auto heapExternalDeviceFrontWindow = gfxPartition->getHeapBase(HeapIndex::heapExternalDeviceFrontWindow);
+    auto heapInternalFrontWindow = gfxPartition->getHeapBase(HeapIndex::heapInternalFrontWindow);
+    auto heapInternalDeviceFrontWindow = gfxPartition->getHeapBase(HeapIndex::heapInternalDeviceFrontWindow);
+
+    memoryManager->releaseDeviceSpecificGfxPartition(0);
+    EXPECT_EQ(nullptr, memoryManager->getGfxPartition(0));
+    memoryManager->reInitDeviceSpecificGfxPartition(0);
+
+    EXPECT_NE(nullptr, memoryManager->getGfxPartition(0));
+
+    gfxPartition = memoryManager->getGfxPartition(0);
+
+    auto heapExternal2 = gfxPartition->getHeapBase(HeapIndex::heapExternal);
+    auto heapStandard2 = gfxPartition->getHeapBase(HeapIndex::heapStandard);
+    auto heapStandard64KB2 = gfxPartition->getHeapBase(HeapIndex::heapStandard64KB);
+    auto heapSvm2 = gfxPartition->getHeapBase(HeapIndex::heapSvm);
+    auto heapExtended2 = gfxPartition->getHeapBase(HeapIndex::heapExtended);
+    auto heapExternalFrontWindow2 = gfxPartition->getHeapBase(HeapIndex::heapExternalFrontWindow);
+    auto heapExternalDeviceFrontWindow2 = gfxPartition->getHeapBase(HeapIndex::heapExternalDeviceFrontWindow);
+    auto heapInternalFrontWindow2 = gfxPartition->getHeapBase(HeapIndex::heapInternalFrontWindow);
+    auto heapInternalDeviceFrontWindow2 = gfxPartition->getHeapBase(HeapIndex::heapInternalDeviceFrontWindow);
+
+    EXPECT_EQ(heapExternal, heapExternal2);
+    EXPECT_EQ(heapStandard, heapStandard2);
+    EXPECT_EQ(heapStandard64KB, heapStandard64KB2);
+    EXPECT_EQ(heapSvm, heapSvm2);
+    EXPECT_EQ(heapExtended, heapExtended2);
+    EXPECT_EQ(heapExternalFrontWindow, heapExternalFrontWindow2);
+    EXPECT_EQ(heapExternalDeviceFrontWindow, heapExternalDeviceFrontWindow2);
+    EXPECT_EQ(heapInternalFrontWindow, heapInternalFrontWindow2);
+    EXPECT_EQ(heapInternalDeviceFrontWindow, heapInternalDeviceFrontWindow2);
 }

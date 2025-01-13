@@ -334,7 +334,6 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect2
 }
 
 HWCMDTEST_F(IGFX_GEN12LP_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect2DThenInterfaceDescriptorDataIsCorrect) {
-    typedef typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -459,7 +458,6 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect3
 }
 
 HWCMDTEST_F(IGFX_GEN12LP_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect3DThenInterfaceDescriptorDataIsCorrect) {
-    typedef typename FamilyType::MEDIA_INTERFACE_DESCRIPTOR_LOAD MEDIA_INTERFACE_DESCRIPTOR_LOAD;
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
     typedef typename FamilyType::INTERFACE_DESCRIPTOR_DATA INTERFACE_DESCRIPTOR_DATA;
 
@@ -537,7 +535,7 @@ struct EnqueueCopyBufferRectHw : public ::testing::Test {
 
 using EnqueueCopyBufferRectStateless = EnqueueCopyBufferRectHw;
 
-HWTEST2_F(EnqueueCopyBufferRectStateless, GivenValidParametersWhenCopyingBufferRectStatelessThenSuccessIsReturned, IsStatelessBufferPreferredForProduct) {
+HWTEST_F(EnqueueCopyBufferRectStateless, GivenValidParametersWhenCopyingBufferRectStatelessThenSuccessIsReturned) {
 
     std::unique_ptr<CommandQueueHw<FamilyType>> cmdQ(new CommandQueueStateless<FamilyType>(context.get(), device.get()));
     srcBuffer.size = static_cast<size_t>(bigSize);
@@ -547,7 +545,7 @@ HWTEST2_F(EnqueueCopyBufferRectStateless, GivenValidParametersWhenCopyingBufferR
 
 using EnqueueCopyBufferRectStateful = EnqueueCopyBufferRectHw;
 
-HWTEST2_F(EnqueueCopyBufferRectStateful, GivenValidParametersWhenCopyingBufferRectStatefulThenSuccessIsReturned, IsStatefulBufferPreferredForProduct) {
+HWTEST_F(EnqueueCopyBufferRectStateful, GivenValidParametersWhenCopyingBufferRectStatefulThenSuccessIsReturned) {
 
     std::unique_ptr<CommandQueueHw<FamilyType>> cmdQ(new CommandQueueStateful<FamilyType>(context.get(), device.get()));
     if (cmdQ->getHeaplessModeEnabled()) {

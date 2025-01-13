@@ -11,6 +11,7 @@
 #include "shared/source/os_interface/linux/drm_debug.h"
 #include "shared/source/os_interface/linux/engine_info.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
+#include "shared/source/os_interface/linux/xe/eudebug/eudebug_interface.h"
 
 #include <bitset>
 #include <mutex>
@@ -27,16 +28,16 @@ struct drm_xe_query_config;          // NOLINT(readability-identifier-naming)
 enum class EngineClass : uint16_t;
 
 struct BindInfo {
-    uint32_t handle;
     uint64_t userptr;
     uint64_t addr;
-    uint64_t size;
 };
 
 class IoctlHelperXe : public IoctlHelper {
   public:
     using IoctlHelper::IoctlHelper;
     static std::unique_ptr<IoctlHelperXe> create(Drm &drmArg);
+    static bool queryDeviceIdAndRevision(const Drm &drm);
+
     IoctlHelperXe(Drm &drmArg);
     ~IoctlHelperXe() override;
     int ioctl(DrmIoctl request, void *arg) override;
@@ -47,7 +48,7 @@ class IoctlHelperXe : public IoctlHelper {
     bool isVmBindAvailable() override;
     int createGemExt(const MemRegionsVec &memClassInstances, size_t allocSize, uint32_t &handle, uint64_t patIndex, std::optional<uint32_t> vmId, int32_t pairHandle, bool isChunked, uint32_t numOfChunks, std::optional<uint32_t> memPolicyMode, std::optional<std::vector<unsigned long>> memPolicyNodemask, std::optional<bool> isCoherent) override;
     uint32_t createGem(uint64_t size, uint32_t memoryBanks, std::optional<bool> isCoherent) override;
-    CacheRegion closAlloc() override;
+    CacheRegion closAlloc(CacheLevel cacheLevel) override;
     uint16_t closAllocWays(CacheRegion closIndex, uint16_t cacheLevel, uint16_t numWays) override;
     CacheRegion closFree(CacheRegion closIndex) override;
     int waitUserFence(uint32_t ctxId, uint64_t address,
@@ -63,7 +64,7 @@ class IoctlHelperXe : public IoctlHelper {
     bool setGemTiling(void *setTiling) override;
     bool getGemTiling(void *setTiling) override;
     uint32_t getDirectSubmissionFlag() override;
-    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles) override;
+    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) override;
     uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLock, bool readOnlyResource) override;
     virtual std::string xeGetBindFlagNames(int bindFlags);
     int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) override;
@@ -116,7 +117,6 @@ class IoctlHelperXe : public IoctlHelper {
     void setupIpVersion() override;
 
     bool setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) override;
-    void fillBindInfoForIpcHandle(uint32_t handle, size_t size) override;
     bool getFdFromVmExport(uint32_t vmId, uint32_t flags, int32_t *fd) override;
     bool isImmediateVmBindRequired() const override;
     void fillExecObject(ExecObject &execObject, uint32_t handle, uint64_t gpuAddress, uint32_t drmContextId, bool bindInfo, bool isMarkedForCapture) override;
@@ -132,7 +132,7 @@ class IoctlHelperXe : public IoctlHelper {
     void registerBOBindHandle(Drm *drm, DrmAllocation *drmAllocation) override;
     bool resourceRegistrationEnabled() override { return true; }
     bool isPreemptionSupported() override { return true; }
-    virtual bool isEuPerDssTopologyType(uint16_t topologyType) const;
+    bool isTimestampsRefreshEnabled() override { return true; }
 
   protected:
     static constexpr uint32_t maxContextSetProperties = 4;
@@ -147,7 +147,7 @@ class IoctlHelperXe : public IoctlHelper {
     void setupXeWaitUserFenceStruct(void *arg, uint32_t ctxId, uint16_t op, uint64_t addr, uint64_t value, int64_t timeout);
     int xeVmBind(const VmBindParams &vmBindParams, bool bindOp);
     void xeShowBindTable();
-    void updateBindInfo(uint32_t handle, uint64_t userPtr, uint64_t size);
+    void updateBindInfo(uint64_t userPtr);
     int debuggerOpenIoctl(DrmIoctl request, void *arg);
     int debuggerMetadataCreateIoctl(DrmIoctl request, void *arg);
     int debuggerMetadataDestroyIoctl(DrmIoctl request, void *arg);
@@ -222,6 +222,7 @@ class IoctlHelperXe : public IoctlHelper {
     static_assert(sizeof(SupportedFeatures::flags) == sizeof(SupportedFeatures::allFlags), "");
 
     void querySupportedFeatures();
+    std::unique_ptr<EuDebugInterface> euDebugInterface;
 };
 
 template <typename... XeLogArgs>

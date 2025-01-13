@@ -7,9 +7,14 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_container/command_encoder.inl"
+#include "shared/source/command_container/command_encoder_from_gen12lp_to_xe2_hpg.inl"
+#include "shared/source/command_container/command_encoder_from_xe_hpg_core_to_xe2_hpg.inl"
+#include "shared/source/command_container/command_encoder_from_xe_hpg_core_to_xe3_core.inl"
+#include "shared/source/command_container/command_encoder_gen12lp_and_xe_hpg.inl"
 #include "shared/source/command_container/command_encoder_pre_xe2_hpg_core.inl"
+#include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
+#include "shared/source/command_container/command_encoder_xe_hpg_core_and_xe_hpc.inl"
 #include "shared/source/command_container/command_encoder_xehp_and_later.inl"
-#include "shared/source/command_container/encode_compute_mode_tgllp_and_later.inl"
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/cache_flush_xehp_and_later.inl"
 #include "shared/source/os_interface/product_helper.h"
@@ -20,10 +25,6 @@
 using Family = NEO::XeHpgCoreFamily;
 
 #include "shared/source/command_container/command_encoder_heap_addressing.inl"
-#include "shared/source/command_container/command_encoder_tgllp_and_later.inl"
-#include "shared/source/command_container/command_encoder_xe_hpg_core_and_later.inl"
-#include "shared/source/command_container/image_surface_state/compression_params_tgllp_and_later.inl"
-#include "shared/source/command_container/image_surface_state/compression_params_xehp_and_later.inl"
 
 namespace NEO {
 
@@ -67,7 +68,6 @@ void EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(WalkerType &wa
 template <>
 void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, StateComputeModeProperties &properties, const RootDeviceEnvironment &rootDeviceEnvironment) {
     using STATE_COMPUTE_MODE = typename Family::STATE_COMPUTE_MODE;
-    using FORCE_NON_COHERENT = typename STATE_COMPUTE_MODE::FORCE_NON_COHERENT;
     using PIXEL_ASYNC_COMPUTE_THREAD_LIMIT = typename STATE_COMPUTE_MODE::PIXEL_ASYNC_COMPUTE_THREAD_LIMIT;
     using Z_PASS_ASYNC_COMPUTE_THREAD_LIMIT = typename STATE_COMPUTE_MODE::Z_PASS_ASYNC_COMPUTE_THREAD_LIMIT;
 
@@ -125,9 +125,9 @@ void EncodeDispatchKernel<Family>::adjustWalkOrder(WalkerType &walkerCmd, uint32
     auto &productHelper = rootDeviceEnvironment.template getHelper<ProductHelper>();
     if (productHelper.isAdjustWalkOrderAvailable(rootDeviceEnvironment.getReleaseHelper())) {
         if (HwWalkOrderHelper::compatibleDimensionOrders[requiredWorkGroupOrder] == HwWalkOrderHelper::linearWalk) {
-            walkerCmd.setDispatchWalkOrder(WalkerType::DISPATCH_WALK_ORDER::LINERAR_WALKER);
+            walkerCmd.setDispatchWalkOrder(WalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_LINEAR_WALK);
         } else if (HwWalkOrderHelper::compatibleDimensionOrders[requiredWorkGroupOrder] == HwWalkOrderHelper::yOrderWalk) {
-            walkerCmd.setDispatchWalkOrder(WalkerType::DISPATCH_WALK_ORDER::Y_ORDER_WALKER);
+            walkerCmd.setDispatchWalkOrder(WalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_Y_ORDER_WALK);
         }
     }
 }
@@ -145,8 +145,6 @@ uint32_t EncodeDispatchKernel<Family>::alignSlmSize(uint32_t slmSize) {
 
 template <>
 uint32_t EncodeDispatchKernel<Family>::computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize) {
-    using SHARED_LOCAL_MEMORY_SIZE = typename Family::INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE;
-
     auto slmValue = std::max(slmSize, 1024u);
     slmValue = Math::nextPowerOfTwo(slmValue);
     slmValue = Math::getMinLsbSet(slmValue);
@@ -175,9 +173,10 @@ size_t EncodeMiFlushDW<Family>::getWaSize(const EncodeDummyBlitWaArgs &waArgs) {
     return sizeof(typename Family::MI_FLUSH_DW) + BlitCommandsHelper<Family>::getDummyBlitSize(waArgs);
 }
 
-template <>
-void EncodeBatchBufferStartOrEnd<Family>::appendBatchBufferStart(MI_BATCH_BUFFER_START &cmd, bool indirect, bool predicate) {
-    cmd.setPredicationEnable(predicate);
+template <typename Family>
+void EncodeMiFlushDW<Family>::adjust(MI_FLUSH_DW *miFlushDwCmd, const ProductHelper &productHelper) {
+    miFlushDwCmd->setFlushCcs(1);
+    miFlushDwCmd->setFlushLlc(1);
 }
 
 } // namespace NEO

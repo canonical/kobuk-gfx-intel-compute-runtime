@@ -17,7 +17,7 @@ void executeKernelAndValidate(ze_context_handle_t &context, ze_device_handle_t &
     ze_command_list_handle_t cmdList1;
     ze_command_list_handle_t cmdList2;
 
-    cmdQueueDesc.ordinal = LevelZeroBlackBoxTests::getCommandQueueOrdinal(device);
+    cmdQueueDesc.ordinal = LevelZeroBlackBoxTests::getCommandQueueOrdinal(device, false);
     cmdQueueDesc.index = 0;
     cmdQueueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
 
@@ -91,7 +91,7 @@ void executeKernelAndValidate(ze_context_handle_t &context, ze_device_handle_t &
     uint32_t numEvents = 2;
     std::vector<ze_event_handle_t> events(numEvents);
     LevelZeroBlackBoxTests::createEventPoolAndEvents(context, device, eventPool,
-                                                     ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP, false, 0,
+                                                     ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP, false, nullptr, nullptr,
                                                      numEvents, events.data(),
                                                      ZE_EVENT_SCOPE_FLAG_DEVICE,
                                                      0);

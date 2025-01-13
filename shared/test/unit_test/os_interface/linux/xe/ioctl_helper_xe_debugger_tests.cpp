@@ -21,14 +21,14 @@
 #include "shared/test/common/mocks/linux/mock_os_time_linux.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
+#include "shared/test/common/os_interface/linux/xe/xe_config_fixture.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
 
-#include "debug_xe_includes.h"
-
 using namespace NEO;
 
-TEST(IoctlHelperXeTest, whenCallingDebuggerOpenIoctlThenProperValueIsReturned) {
+using IoctlHelperXeTest = Test<XeConfigFixture>;
+TEST_F(IoctlHelperXeTest, whenCallingDebuggerOpenIoctlThenProperValueIsReturned) {
     int ret;
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -36,16 +36,16 @@ TEST(IoctlHelperXeTest, whenCallingDebuggerOpenIoctlThenProperValueIsReturned) {
     auto mockXeIoctlHelper = drm->ioctlHelper.get();
 
     drm->reset();
-    drm_xe_eudebug_connect test = {};
+    EuDebugConnect test = {};
 
     ret = mockXeIoctlHelper->ioctl(DrmIoctl::debuggerOpen, &test);
     EXPECT_EQ(ret, drm->debuggerOpenRetval);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetIoctForDebuggerThenCorrectValueReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetIoctForDebuggerThenCorrectValueReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
-    auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
+    auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = drm->getIoctlHelper();
     auto verifyIoctlRequestValue = [&xeIoctlHelper](auto value, DrmIoctl drmIoctl) {
         EXPECT_EQ(xeIoctlHelper->getIoctlRequestValue(drmIoctl), static_cast<unsigned int>(value));
     };
@@ -55,15 +55,15 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetIoctForDebuggerThenCorre
 
     verifyIoctlString(DrmIoctl::debuggerOpen, "DRM_IOCTL_XE_EUDEBUG_CONNECT");
 
-    verifyIoctlRequestValue(DRM_IOCTL_XE_EUDEBUG_CONNECT, DrmIoctl::debuggerOpen);
+    verifyIoctlRequestValue(EuDebugParam::connect, DrmIoctl::debuggerOpen);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetEudebugExtPropertyThenCorrectValueReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetEudebugExtPropertyThenCorrectValueReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->setDebuggingMode(DebuggingMode::offline);
     auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
-    EXPECT_EQ(xeIoctlHelper->getEudebugExtProperty(), DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG);
+    EXPECT_EQ(xeIoctlHelper->getEudebugExtProperty(), static_cast<int>(EuDebugParam::execQueueSetPropertyEuDebug));
 }
 
 using IoctlHelperXeTestFixture = ::testing::Test;
@@ -86,7 +86,7 @@ HWTEST_F(IoctlHelperXeTestFixture, GivenDebuggingDisabledWhenCreateDrmContextThe
     xeIoctlHelper->createDrmContext(*drm, osContext, 0, deviceIndex, false);
 
     auto ext = drm->receivedContextCreateSetParam;
-    EXPECT_NE(ext.property, static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG));
+    EXPECT_NE(ext.property, static_cast<uint32_t>(EuDebugParam::execQueueSetPropertyEuDebug));
 }
 
 HWTEST_F(IoctlHelperXeTestFixture, givenDeviceIndexWhenCreatingContextThenSetCorrectGtId) {
@@ -138,7 +138,7 @@ HWTEST_F(IoctlHelperXeTestFixture, GivenDebuggingEnabledWhenCreateDrmContextThen
     auto ext = drm->receivedContextCreateSetParam;
     EXPECT_EQ(ext.base.name, static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY));
     EXPECT_EQ(ext.base.next_extension, 0ULL);
-    EXPECT_EQ(ext.property, static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG));
+    EXPECT_EQ(ext.property, static_cast<uint32_t>(EuDebugParam::execQueueSetPropertyEuDebug));
     EXPECT_EQ(ext.value, 1ULL);
 }
 
@@ -161,52 +161,54 @@ HWTEST_F(IoctlHelperXeTestFixture, GivenContextCreatedForCopyEngineWhenCreateDrm
     xeIoctlHelper->createDrmContext(*drm, osContext, 0, 0, false);
 
     auto ext = drm->receivedContextCreateSetParam;
-    EXPECT_NE(ext.property, static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG));
+    EXPECT_NE(ext.property, static_cast<uint32_t>(EuDebugParam::execQueueSetPropertyEuDebug));
 }
 
-TEST(IoctlHelperXeTest, GivenXeDriverThenDebugAttachReturnsTrue) {
+TEST_F(IoctlHelperXeTest, GivenXeDriverThenDebugAttachReturnsTrue) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
     EXPECT_TRUE(xeIoctlHelper->isDebugAttachAvailable());
 }
 
-TEST(IoctlHelperXeTest, givenXeEnableEuDebugThenReturnCorrectValue) {
+TEST_F(IoctlHelperXeTest, givenEuDebugSysFsContentWhenItIsZeroThenEuDebugInterfaceIsNotCreated) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
 
-    VariableBackup<size_t> mockFreadReturnBackup(&IoFunctions::mockFreadReturn, 1);
-    std::unique_ptr<char[]> buffer = std::make_unique<char[]>(IoFunctions::mockFreadReturn);
-    VariableBackup<char *> mockFreadBufferBackup(&IoFunctions::mockFreadBuffer, buffer.get());
+    VariableBackup<char> euDebugAvailabilityBackup(&MockEuDebugInterface::sysFsContent);
 
+    MockEuDebugInterface::sysFsContent = '1';
+    auto euDebugInterface = EuDebugInterface::create(drm->getSysFsPciPath());
+    EXPECT_NE(nullptr, euDebugInterface);
+
+    MockEuDebugInterface::sysFsContent = '0';
+    euDebugInterface = EuDebugInterface::create(drm->getSysFsPciPath());
+    EXPECT_EQ(nullptr, euDebugInterface);
+}
+
+TEST_F(IoctlHelperXeTest, givenInvalidPathWhenCreateEuDebugInterfaceThenReturnNullptr) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    VariableBackup<size_t> mockFreadReturnBackup(&IoFunctions::mockFreadReturn, 0);
+    VariableBackup<const char *> eudebugSysFsEntryBackup(&eudebugSysfsEntry[static_cast<uint32_t>(MockEuDebugInterface::euDebugInterfaceType)], "invalidEntry");
+
+    auto euDebugInterface = EuDebugInterface::create(drm->getSysFsPciPath());
+    EXPECT_EQ(nullptr, euDebugInterface);
+}
+
+TEST_F(IoctlHelperXeTest, whenEuDebugInterfaceIsCreatedThenEuDebugIsAvailable) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
 
-    buffer[0] = '1';
-    int enableEuDebug = xeIoctlHelper->getEuDebugSysFsEnable();
-    EXPECT_EQ(1, enableEuDebug);
-
-    buffer[0] = '0';
-    enableEuDebug = xeIoctlHelper->getEuDebugSysFsEnable();
-    EXPECT_EQ(0, enableEuDebug);
+    xeIoctlHelper->euDebugInterface.reset();
+    EXPECT_EQ(0, xeIoctlHelper->getEuDebugSysFsEnable());
+    xeIoctlHelper->euDebugInterface = std::make_unique<MockEuDebugInterface>();
+    EXPECT_EQ(1, xeIoctlHelper->getEuDebugSysFsEnable());
 }
 
-TEST(IoctlHelperXeTest, givenXeEnableEuDebugWithInvalidPathThenReturnCorrectValue) {
-    VariableBackup<size_t> mockFreadReturnBackup(&IoFunctions::mockFreadReturn, 1);
-    std::unique_ptr<char[]> buffer = std::make_unique<char[]>(IoFunctions::mockFreadReturn);
-    VariableBackup<char *> mockFreadBufferBackup(&IoFunctions::mockFreadBuffer, buffer.get());
-
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
-
-    buffer[0] = '1';
-    VariableBackup<FILE *> mockFopenReturnBackup(&IoFunctions::mockFopenReturned, nullptr);
-    int enableEuDebug = xeIoctlHelper->getEuDebugSysFsEnable();
-
-    EXPECT_EQ(0, enableEuDebug);
-}
-
-TEST(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
+TEST_F(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
@@ -217,7 +219,7 @@ TEST(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
     EXPECT_EQ(drm->metadataID, id);
     EXPECT_EQ(drm->metadataAddr, buffer);
     EXPECT_EQ(drm->metadataSize, bufferSize);
-    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(DRM_XE_DEBUG_METADATA_ELF_BINARY));
+    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(EuDebugParam::metadataElfBinary));
 
     drm->metadataID = 0;
     drm->metadataAddr = nullptr;
@@ -226,7 +228,7 @@ TEST(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
     EXPECT_EQ(drm->metadataID, id);
     EXPECT_EQ(drm->metadataAddr, buffer);
     EXPECT_EQ(drm->metadataSize, bufferSize);
-    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(DRM_XE_DEBUG_METADATA_PROGRAM_MODULE));
+    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(EuDebugParam::metadataProgramModule));
 
     drm->metadataID = 0;
     drm->metadataAddr = nullptr;
@@ -235,7 +237,7 @@ TEST(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
     EXPECT_EQ(drm->metadataID, id);
     EXPECT_EQ(drm->metadataAddr, buffer);
     EXPECT_EQ(drm->metadataSize, bufferSize);
-    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(WORK_IN_PROGRESS_DRM_XE_DEBUG_METADATA_SIP_AREA));
+    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(EuDebugParam::metadataSipArea));
 
     drm->metadataID = 0;
     drm->metadataAddr = nullptr;
@@ -244,7 +246,7 @@ TEST(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
     EXPECT_EQ(drm->metadataID, id);
     EXPECT_EQ(drm->metadataAddr, buffer);
     EXPECT_EQ(drm->metadataSize, bufferSize);
-    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(WORK_IN_PROGRESS_DRM_XE_DEBUG_METADATA_SBA_AREA));
+    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(EuDebugParam::metadataSbaArea));
 
     drm->metadataID = 0;
     drm->metadataAddr = nullptr;
@@ -253,10 +255,10 @@ TEST(IoctlHelperXeTest, givenXeRegisterResourceThenCorrectIoctlCalled) {
     EXPECT_EQ(drm->metadataID, id);
     EXPECT_EQ(drm->metadataAddr, buffer);
     EXPECT_EQ(drm->metadataSize, bufferSize);
-    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(WORK_IN_PROGRESS_DRM_XE_DEBUG_METADATA_MODULE_AREA));
+    EXPECT_EQ(drm->metadataType, static_cast<uint64_t>(EuDebugParam::metadataModuleArea));
 }
 
-TEST(IoctlHelperXeTest, givenXeunregisterResourceThenCorrectIoctlCalled) {
+TEST_F(IoctlHelperXeTest, givenXeunregisterResourceThenCorrectIoctlCalled) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
@@ -264,7 +266,7 @@ TEST(IoctlHelperXeTest, givenXeunregisterResourceThenCorrectIoctlCalled) {
     EXPECT_EQ(drm->metadataID, 0x1234u);
 }
 
-TEST(IoctlHelperXeTest, whenGettingVmBindExtFromHandlesThenProperStructsAreReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingVmBindExtFromHandlesThenProperStructsAreReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeDebug::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXeDebug *>(drm->ioctlHelper.get());
@@ -273,20 +275,21 @@ TEST(IoctlHelperXeTest, whenGettingVmBindExtFromHandlesThenProperStructsAreRetur
     bindExtHandles.push_back(1u);
     bindExtHandles.push_back(2u);
     bindExtHandles.push_back(3u);
-    auto retVal = xeIoctlHelper->prepareVmBindExt(bindExtHandles);
-    auto vmBindExt = reinterpret_cast<drm_xe_vm_bind_op_ext_attach_debug *>(retVal.get());
+    auto retVal = xeIoctlHelper->prepareVmBindExt(bindExtHandles, 1);
+    auto vmBindExt = reinterpret_cast<VmBindOpExtAttachDebug *>(retVal.get());
 
     for (size_t i = 0; i < bindExtHandles.size(); i++) {
 
-        EXPECT_EQ(bindExtHandles[i], vmBindExt[i].metadata_id);
-        EXPECT_EQ(static_cast<uint32_t>(XE_VM_BIND_OP_EXTENSIONS_ATTACH_DEBUG), vmBindExt[i].base.name);
+        EXPECT_EQ(bindExtHandles[i], vmBindExt[i].metadataId);
+        EXPECT_EQ(static_cast<uint32_t>(EuDebugParam::vmBindOpExtensionsAttachDebug), vmBindExt[i].base.name);
+        EXPECT_EQ(1u, vmBindExt[i].cookie);
     }
 
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(&vmBindExt[1]), vmBindExt[0].base.next_extension);
-    EXPECT_EQ(reinterpret_cast<uintptr_t>(&vmBindExt[2]), vmBindExt[1].base.next_extension);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(&vmBindExt[1]), vmBindExt[0].base.nextExtension);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(&vmBindExt[2]), vmBindExt[1].base.nextExtension);
 }
 
-TEST(IoctlHelperXeTest, givenResourceRegistrationEnabledWhenAllocationTypeShouldBeRegisteredThenBoHasBindExtHandleAdded) {
+TEST_F(IoctlHelperXeTest, givenResourceRegistrationEnabledWhenAllocationTypeShouldBeRegisteredThenBoHasBindExtHandleAdded) {
     const uint32_t rootDeviceIndex = 0u;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMockResources drm(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
@@ -335,7 +338,7 @@ TEST(IoctlHelperXeTest, givenResourceRegistrationEnabledWhenAllocationTypeShould
     }
 }
 
-TEST(IoctlHelperXeTest, givenResourceRegistrationEnabledWhenAllocationTypeShouldNotBeRegisteredThenNoBindHandleCreated) {
+TEST_F(IoctlHelperXeTest, givenResourceRegistrationEnabledWhenAllocationTypeShouldNotBeRegisteredThenNoBindHandleCreated) {
     const uint32_t rootDeviceIndex = 0u;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMockResources drm(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
@@ -355,7 +358,7 @@ TEST(IoctlHelperXeTest, givenResourceRegistrationEnabledWhenAllocationTypeShould
     EXPECT_EQ(DrmResourceClass::maxSize, drm.registeredClass);
 }
 
-TEST(IoctlHelperXeTest, givenDebuggingEnabledWhenCallingVmBindThenWaitUserFenceIsCalledWithCorrectTimeout) {
+TEST_F(IoctlHelperXeTest, givenDebuggingEnabledWhenCallingVmBindThenWaitUserFenceIsCalledWithCorrectTimeout) {
 
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -368,15 +371,13 @@ TEST(IoctlHelperXeTest, givenDebuggingEnabledWhenCallingVmBindThenWaitUserFenceI
     uint64_t fenceAddress = 0x4321;
     uint64_t fenceValue = 0x789;
 
-    BindInfo mockBindInfo{};
-    mockBindInfo.handle = 0x1234;
-    xeIoctlHelper->bindInfo.push_back(mockBindInfo);
+    auto handle = 0x1234u;
 
     VmBindExtUserFenceT vmBindExtUserFence{};
     xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
 
     VmBindParams vmBindParams{};
-    vmBindParams.handle = mockBindInfo.handle;
+    vmBindParams.handle = handle;
     xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
 
     EXPECT_EQ(0, xeIoctlHelper->vmBind(vmBindParams));

@@ -78,7 +78,12 @@ include(GNUInstallDirs)
 if(USE_SANITIZE_UB AND WIN32)
   add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Xlinker /NODEFAULTLIB:clang_rt.ubsan_standalone_cxx-x86_64.lib")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Xlinker /NODEFAULTLIB:clang_rt.ubsan_standalone_cxx-x86_64.lib")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Xlinker /NODEFAULTLIB:clang_rt.ubsan_standalone_cxx-x86_64.lib")
+endif()
+
+if(WIN32 AND NOT MSVC)
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Xlinker onecore.lib")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Xlinker onecore.lib")
 endif()
 
 if(NOT DEFINED NEO_USE_CL_CACHE)
@@ -417,7 +422,7 @@ if(NOT DEFINED AOT_CONFIG_HEADERS_DIR)
 endif()
 
 # Intel Graphics Compiler detection
-include(cmake/find_igc.cmake)
+include(cmake${BRANCH_DIR_SUFFIX}/find_igc.cmake)
 
 # GmmLib detection
 include(cmake/find_gmmlib.cmake)
@@ -564,7 +569,7 @@ if(WIN32 OR NOT DISABLE_WDDM_LINUX)
 endif()
 
 if(UNIX)
-  # prelim headers detection
+  # i915 prelim detection
   if(NOT ("${BRANCH_TYPE}" STREQUAL ""))
     set(NEO_ENABLE_I915_PRELIM_DETECTION TRUE)
   elseif(NOT DEFINED NEO_ENABLE_I915_PRELIM_DETECTION)
@@ -572,6 +577,7 @@ if(UNIX)
   endif()
   message(STATUS "i915 prelim headers detection: ${NEO_ENABLE_I915_PRELIM_DETECTION}")
 
+  # xe prelim detection
   if(NOT ("${BRANCH_TYPE}" STREQUAL ""))
     set(NEO_ENABLE_XE_PRELIM_DETECTION TRUE)
   elseif(NOT DEFINED NEO_ENABLE_XE_PRELIM_DETECTION)
@@ -579,7 +585,7 @@ if(UNIX)
   endif()
   message(STATUS "xe prelim headers detection: ${NEO_ENABLE_XE_PRELIM_DETECTION}")
 
-  # drm-xe support
+  # xe eudebug support
   if(NOT ("${BRANCH_TYPE}" STREQUAL ""))
     set(NEO_ENABLE_XE_EU_DEBUG_SUPPORT TRUE)
   elseif(NOT DEFINED NEO_ENABLE_XE_EU_DEBUG_SUPPORT)
@@ -587,13 +593,16 @@ if(UNIX)
   endif()
   message(STATUS "Xe EU Debug support: ${NEO_ENABLE_XE_EU_DEBUG_SUPPORT}")
 
-  if((NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM OR NOT NEO_ENABLE_XE_PRELIM_DETECTION) AND ("${BRANCH_TYPE}" STREQUAL ""))
-    get_filename_component(XE_DEBUG_INCLUDE_DIR "${NEO_SOURCE_DIR}/shared/source/debugger/linux/" ABSOLUTE)
-  else()
-    get_filename_component(XE_DEBUG_INCLUDE_DIR "${NEO_SOURCE_DIR}/shared/source/debugger/linux/prelim" ABSOLUTE)
+  if(NEO_ENABLE_XE_EU_DEBUG_SUPPORT)
+    # xe eudebug exp upstream support
+    if(NOT ("${BRANCH_TYPE}" STREQUAL ""))
+      set(NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM TRUE)
+    elseif(NOT DEFINED NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM)
+      set(NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM FALSE)
+    endif()
+    message(STATUS "Xe EU Debug support for upstream: ${NEO_USE_XE_EU_DEBUG_EXP_UPSTREAM}")
+    message(STATUS "Xe EU Debug support for prelim: ${NEO_ENABLE_XE_PRELIM_DETECTION}")
   endif()
-
-  include_directories(BEFORE ${XE_DEBUG_INCLUDE_DIR})
 endif()
 
 include(cmake${BRANCH_DIR_SUFFIX}/find_drm.cmake)
@@ -824,38 +833,23 @@ endif()
 
 # Compiler warning flags
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wempty-body")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wignored-qualifiers")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wtype-limits")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wuninitialized")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wno-unused-parameter -Wno-missing-field-initializers")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Winvalid-pch")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat -Wformat-security")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wvla")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas") # needed for pragmas in case of MSVC
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter") # needed for unused function arguments
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers") # needed for dependencies, e.g. gmmlib
 
   if("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
     # clang only
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshorten-64-to-32 -Wno-extern-c-compat -Wno-instantiation-after-specialization")
     if(NOT (CMAKE_C_COMPILER_VERSION VERSION_LESS 3.6))
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs -DSANITIZER_BUILD")
-    endif()
-    if(NOT (CMAKE_C_COMPILER_VERSION VERSION_LESS 4.0))
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-register") # Added for htons()
-    endif()
-    if(CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 10.0)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-copy")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DSANITIZER_BUILD")
     endif()
   else()
     # gcc only
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-local-typedefs -Wno-unused-but-set-variable")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wclobbered")
-    if(CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0)
-    else()
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wimplicit-fallthrough=4")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-noexcept-type") # Added for gtest
-    endif()
   endif()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Werror=vla")
 
   if(USE_SANITIZE_UB)
     check_cxx_compiler_flag(-fsanitize=undefined COMPILER_SUPPORTS_UNDEFINED_BEHAVIOR_SANITIZER)
@@ -885,17 +879,10 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL "Release")
       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -D_FORTIFY_SOURCE=2")
     endif()
 
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-strong")
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-strong")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat -Wformat-security")
     else()
       # gcc, g++ only
-      if(CMAKE_C_COMPILER_VERSION VERSION_LESS 4.9)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector")
-      else()
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-strong")
-      endif()
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wformat -Wformat-security")
       set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,-z,noexecstack")
       set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,-z,relro")
       set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,-z,now")

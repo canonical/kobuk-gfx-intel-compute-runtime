@@ -27,8 +27,6 @@ using CommandEncodeDG2Test = ::testing::Test;
 
 DG2TEST_F(CommandEncodeDG2Test, whenProgrammingStateComputeModeThenProperFieldsAreSet) {
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
-    using PIXEL_ASYNC_COMPUTE_THREAD_LIMIT = typename STATE_COMPUTE_MODE::PIXEL_ASYNC_COMPUTE_THREAD_LIMIT;
-    using Z_PASS_ASYNC_COMPUTE_THREAD_LIMIT = typename STATE_COMPUTE_MODE::Z_PASS_ASYNC_COMPUTE_THREAD_LIMIT;
     uint8_t buffer[64]{};
     MockExecutionEnvironment executionEnvironment{};
     auto &rootDeviceEnvironment = *executionEnvironment.rootDeviceEnvironments[0];
@@ -60,7 +58,6 @@ DG2TEST_F(CommandEncodeDG2Test, whenProgrammingStateComputeModeThenProperFieldsA
 }
 
 DG2TEST_F(CommandEncodeDG2Test, whenProgramComputeWalkerThenSetL3PrefetchDefaultValue) {
-    using COMPUTE_WALKER = typename FamilyType::COMPUTE_WALKER;
     auto walkerCmd = FamilyType::cmdInitGpgpuWalker;
     auto idd = FamilyType::cmdInitInterfaceDescriptorData;
 
@@ -76,11 +73,11 @@ DG2TEST_F(Dg2SbaTest, givenSpecificProductFamilyWhenAppendingSbaThenProgramCorre
     args.setGeneralStateBaseAddress = true;
 
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WB, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_CONTROL_WB, sbaCmd.getL1CacheControlCachePolicy());
 
     args.isDebuggerActive = true;
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_CONTROL_WBP, sbaCmd.getL1CacheControlCachePolicy());
 }
 
 DG2TEST_F(Dg2SbaTest, givenL1CachingOverrideWhenStateBaseAddressIsProgrammedThenItMatchesTheOverrideValue) {
@@ -94,19 +91,19 @@ DG2TEST_F(Dg2SbaTest, givenL1CachingOverrideWhenStateBaseAddressIsProgrammedThen
 
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(0u, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(0u, sbaCmd.getL1CacheControlCachePolicy());
 
     debugManager.flags.ForceStatelessL1CachingPolicy.set(2u);
     updateSbaHelperArgsL1CachePolicy<FamilyType>(args, productHelper);
 
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(2u, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(2u, sbaCmd.getL1CacheControlCachePolicy());
 
     debugManager.flags.ForceAllResourcesUncached.set(true);
     updateSbaHelperArgsL1CachePolicy<FamilyType>(args, productHelper);
 
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(1u, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(1u, sbaCmd.getL1CacheControlCachePolicy());
 }

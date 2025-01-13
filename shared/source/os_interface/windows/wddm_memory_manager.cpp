@@ -40,6 +40,7 @@
 #include "shared/source/os_interface/windows/wddm_allocation.h"
 #include "shared/source/os_interface/windows/wddm_residency_allocations_container.h"
 #include "shared/source/os_interface/windows/wddm_residency_controller.h"
+#include "shared/source/utilities/heap_allocator.h"
 #include "shared/source/utilities/logger_neo_only.h"
 
 #include <algorithm>
@@ -94,7 +95,7 @@ GfxMemoryAllocationMethod WddmMemoryManager::getPreferredAllocationMethod(const 
     return preferredAllocationMethod;
 }
 
-void WddmMemoryManager::unMapPhysicalToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) {
+void WddmMemoryManager::unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) {
     const auto wddm = static_cast<OsContextWin *>(osContext)->getWddm();
     wddm->freeGpuVirtualAddress(gpuRange, bufferSize);
     auto gfxPartition = getGfxPartition(rootDeviceIndex);
@@ -107,13 +108,20 @@ void WddmMemoryManager::unMapPhysicalToVirtualMemory(GraphicsAllocation *physica
     wddmAllocation->setMappedPhysicalMemoryReservation(false);
 }
 
-bool WddmMemoryManager::mapPhysicalToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
+void WddmMemoryManager::unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
+}
+
+bool WddmMemoryManager::mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
     WddmAllocation *wddmAllocation = reinterpret_cast<WddmAllocation *>(physicalAllocation);
     auto decanonizedAddress = getGmmHelper(physicalAllocation->getRootDeviceIndex())->decanonize(gpuRange);
     wddmAllocation->setMappedPhysicalMemoryReservation(mapGpuVirtualAddress(wddmAllocation, reinterpret_cast<void *>(decanonizedAddress)));
     physicalAllocation->setCpuPtrAndGpuAddress(nullptr, gpuRange);
     physicalAllocation->setReservedAddressRange(reinterpret_cast<void *>(gpuRange), bufferSize);
     return wddmAllocation->isMappedPhysicalMemoryReservation();
+}
+
+bool WddmMemoryManager::mapPhysicalHostMemoryToVirtualMemory(RootDeviceIndicesContainer &rootDeviceIndices, MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
+    return false;
 }
 
 GraphicsAllocation *WddmMemoryManager::allocatePhysicalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) {
@@ -192,7 +200,7 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemory64kb(const Allocati
 }
 
 GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryUsingKmdAndMapItToCpuVA(const AllocationData &allocationData, bool allowLargePages) {
-    if (allocationData.alignment != MemoryConstants::pageSize64k) {
+    if (allocationData.alignment < MemoryConstants::pageSize64k) {
         allowLargePages = false;
     }
 
@@ -264,7 +272,7 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryUsingKmdAndMapItToC
 
         if (alignGpuAddressTo64KB) {
             void *tempCPUPtr = cpuPtr;
-            cpuPtr = alignUp(cpuPtr, MemoryConstants::pageSize64k);
+            cpuPtr = alignUp(cpuPtr, std::max(allocationData.alignment, MemoryConstants::pageSize64k));
             wddmAllocation->setGpuAddress(wddmAllocation->getGpuAddress() + ptrDiff(cpuPtr, tempCPUPtr));
         }
     }
@@ -580,10 +588,8 @@ GraphicsAllocation *WddmMemoryManager::allocate32BitGraphicsMemoryImpl(const All
         freeSystemMemory(pSysMem);
         return nullptr;
     }
-    auto baseAddress = getGfxPartition(allocationData.rootDeviceIndex)->getHeapBase(heapAssigners[allocationData.rootDeviceIndex]->get32BitHeapIndex(allocationData.type, false, *hwInfo, allocationData.flags.use32BitFrontWindow));
-    UNRECOVERABLE_IF(gmmHelper->canonize(baseAddress) != wddmAllocation->getGpuBaseAddress());
-
-    wddmAllocation->setGpuBaseAddress(gmmHelper->canonize(baseAddress));
+    [[maybe_unused]] auto baseAddress = getGfxPartition(allocationData.rootDeviceIndex)->getHeapBase(heapAssigners[allocationData.rootDeviceIndex]->get32BitHeapIndex(allocationData.type, false, *hwInfo, allocationData.flags.use32BitFrontWindow));
+    DEBUG_BREAK_IF(gmmHelper->canonize(baseAddress) != wddmAllocation->getGpuBaseAddress());
 
     if (storageInfo.isLockable) {
         auto lockedPtr = lockResource(wddmAllocation.get());
@@ -635,7 +641,7 @@ GraphicsAllocation *WddmMemoryManager::createGraphicsAllocationFromSharedHandle(
         }
         status = mapGpuVirtualAddress(allocation.get(), allocation->getReservedAddressPtr());
     } else {
-        status = mapPhysicalToVirtualMemory(allocation.get(), reinterpret_cast<uint64_t>(mapPointer), size);
+        status = mapPhysicalDeviceMemoryToVirtualMemory(allocation.get(), reinterpret_cast<uint64_t>(mapPointer), size);
     }
     DEBUG_BREAK_IF(!status);
     if (!status) {
@@ -717,6 +723,10 @@ void WddmMemoryManager::closeInternalHandle(uint64_t &handle, uint32_t handleId,
 void WddmMemoryManager::freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation) {
     WddmAllocation *input = static_cast<WddmAllocation *>(gfxAllocation);
     DEBUG_BREAK_IF(!validateAllocation(input));
+
+    if (gfxAllocation->isExplicitlyMadeResident()) {
+        freeAssociatedResourceImpl(*gfxAllocation);
+    }
 
     auto &registeredEngines = getRegisteredEngines(gfxAllocation->getRootDeviceIndex());
     for (auto &engine : registeredEngines) {
@@ -812,8 +822,8 @@ void WddmMemoryManager::handleFenceCompletion(GraphicsAllocation *allocation) {
 
 bool WddmMemoryManager::tryDeferDeletions(const D3DKMT_HANDLE *handles, uint32_t allocationCount, D3DKMT_HANDLE resourceHandle, uint32_t rootDeviceIndex, AllocationType type) {
     bool status = true;
-    if (deferredDeleter && type != AllocationType::externalHostPtr) {
-        deferredDeleter->deferDeletion(DeferrableDeletion::create(&getWddm(rootDeviceIndex), handles, allocationCount, resourceHandle));
+    if (deferredDeleter) {
+        deferredDeleter->deferDeletion(DeferrableDeletion::create(&getWddm(rootDeviceIndex), handles, allocationCount, resourceHandle, type));
     } else {
         status = getWddm(rootDeviceIndex).destroyAllocations(handles, allocationCount, resourceHandle);
     }
@@ -983,11 +993,11 @@ size_t WddmMemoryManager::selectAlignmentAndHeap(size_t size, HeapIndex *heap) {
     return alignment.alignment;
 }
 
-AddressRange WddmMemoryManager::reserveGpuAddress(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex) {
+AddressRange WddmMemoryManager::reserveGpuAddress(const uint64_t requiredStartAddress, size_t size, const RootDeviceIndicesContainer &rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex) {
     return reserveGpuAddressOnHeap(requiredStartAddress, size, rootDeviceIndices, reservedOnRootDeviceIndex, HeapIndex::heapStandard64KB, MemoryConstants::pageSize64k);
 }
 
-AddressRange WddmMemoryManager::reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) {
+AddressRange WddmMemoryManager::reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, const RootDeviceIndicesContainer &rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) {
     uint64_t gpuVa = 0u;
     *reservedOnRootDeviceIndex = 0;
     size_t reservedSize = 0;
@@ -1034,9 +1044,16 @@ bool WddmMemoryManager::mapGpuVaForOneHandleAllocation(WddmAllocation *allocatio
     if (allocation->getReservedGpuVirtualAddress()) {
         addressToMap = allocation->getReservedGpuVirtualAddress();
     }
+
+    auto customHeapAllocatorCfg = getCustomHeapAllocatorConfig(allocation->getAllocationType(), allocation->isAllocInFrontWindowPool());
+
     auto gfxPartition = getGfxPartition(allocation->getRootDeviceIndex());
-    if (allocation->isAllocInFrontWindowPool()) {
-        auto alignedSize = allocation->getAlignedSize();
+    auto alignedSize = allocation->getAlignedSize();
+
+    if (customHeapAllocatorCfg.has_value()) {
+        auto &customRange = customHeapAllocatorCfg.value().get();
+        addressToMap = customRange.allocator->allocateWithCustomAlignment(alignedSize, MemoryConstants::pageSize64k);
+    } else if (allocation->isAllocInFrontWindowPool()) {
         addressToMap = gfxPartition->heapAllocate(heapIndex, alignedSize);
     }
 
@@ -1045,7 +1062,7 @@ bool WddmMemoryManager::mapGpuVaForOneHandleAllocation(WddmAllocation *allocatio
     auto status = getWddm(allocation->getRootDeviceIndex()).mapGpuVirtualAddress(allocation->getDefaultGmm(), allocation->getDefaultHandle(), minimumAddress, maximumAddress, addressToMap, allocation->getGpuAddressToModify(), allocation->getAllocationType());
 
     if (!status && deferredDeleter) {
-        deferredDeleter->drain(true);
+        deferredDeleter->drain(true, false);
         status = getWddm(allocation->getRootDeviceIndex()).mapGpuVirtualAddress(allocation->getDefaultGmm(), allocation->getDefaultHandle(), minimumAddress, maximumAddress, addressToMap, allocation->getGpuAddressToModify(), allocation->getAllocationType());
     }
     if (!status) {
@@ -1056,7 +1073,10 @@ bool WddmMemoryManager::mapGpuVaForOneHandleAllocation(WddmAllocation *allocatio
         return false;
     }
 
-    if (GfxPartition::isAnyHeap32(heapIndex)) {
+    if (auto config = customHeapAllocatorCfg; config.has_value() && config->get().gpuVaBase != std::numeric_limits<uint64_t>::max()) {
+        auto gmmHelper = getGmmHelper(allocation->getRootDeviceIndex());
+        allocation->setGpuBaseAddress(gmmHelper->canonize(config->get().gpuVaBase));
+    } else if (GfxPartition::isAnyHeap32(heapIndex)) {
         auto gmmHelper = getGmmHelper(allocation->getRootDeviceIndex());
         allocation->setGpuBaseAddress(gmmHelper->canonize(gfxPartition->getHeapBase(heapIndex)));
     }
@@ -1091,7 +1111,7 @@ bool WddmMemoryManager::mapMultiHandleAllocationWithRetry(WddmAllocation *alloca
                                                 gfxPartition->getHeapMinimalAddress(heapIndex), gfxPartition->getHeapLimit(heapIndex), addressToMap, gpuAddress, allocation->getAllocationType());
 
         if (!status && deferredDeleter) {
-            deferredDeleter->drain(true);
+            deferredDeleter->drain(true, false);
             status = wddm.mapGpuVirtualAddress(allocation->getGmm(currentHandle), allocation->getHandles()[currentHandle],
                                                gfxPartition->getHeapMinimalAddress(heapIndex), gfxPartition->getHeapLimit(heapIndex), addressToMap, gpuAddress, allocation->getAllocationType());
         }
@@ -1114,7 +1134,7 @@ bool WddmMemoryManager::createGpuAllocationsWithRetry(WddmAllocation *allocation
         auto gmm = allocation->getGmm(handleId);
         auto status = getWddm(allocation->getRootDeviceIndex()).createAllocation(gmm->gmmResourceInfo->getSystemMemPointer(), gmm, allocation->getHandleToModify(handleId), allocation->getResourceHandleToModify(), allocation->getSharedHandleToModify());
         if (status == STATUS_GRAPHICS_NO_VIDEO_MEMORY && deferredDeleter) {
-            deferredDeleter->drain(true);
+            deferredDeleter->drain(true, false);
             status = getWddm(allocation->getRootDeviceIndex()).createAllocation(gmm->gmmResourceInfo->getSystemMemPointer(), gmm, allocation->getHandleToModify(handleId), allocation->getResourceHandleToModify(), allocation->getSharedHandleToModify());
         }
         if (status != STATUS_SUCCESS) {
@@ -1230,6 +1250,7 @@ bool WddmMemoryManager::copyMemoryToAllocationBanks(GraphicsAllocation *graphics
         memcpy_s(ptrOffset(ptr, destinationOffset), graphicsAllocation->getUnderlyingBufferSize() - destinationOffset, memoryToCopy, sizeToCopy);
         wddm.unlockResource(wddmAllocation->getHandles()[handleId]);
     }
+    wddmAllocation->setExplicitlyMadeResident(wddmAllocation->needsMakeResidentBeforeLock());
     return true;
 }
 
@@ -1383,6 +1404,10 @@ GraphicsAllocation *WddmMemoryManager::allocatePhysicalLocalDeviceMemory(const A
 
     status = AllocationStatus::Success;
     return wddmAllocation.release();
+}
+
+GraphicsAllocation *WddmMemoryManager::allocatePhysicalHostMemory(const AllocationData &allocationData, AllocationStatus &status) {
+    return nullptr;
 }
 
 GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) {

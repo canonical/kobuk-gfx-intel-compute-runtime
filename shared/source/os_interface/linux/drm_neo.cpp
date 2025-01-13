@@ -39,6 +39,7 @@
 #include "shared/source/os_interface/linux/pci_path.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
 #include "shared/source/os_interface/linux/system_info.h"
+#include "shared/source/os_interface/linux/xe/ioctl_helper_xe.h"
 #include "shared/source/os_interface/os_environment.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/product_helper.h"
@@ -97,7 +98,7 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
         auto printIoctl = debugManager.flags.PrintIoctlEntries.get();
 
         if (printIoctl) {
-            printf("IOCTL %s called\n", getIoctlString(request, ioctlHelper.get()).c_str());
+            printf("IOCTL %s called\n", ioctlHelper->getIoctlString(request).c_str());
         }
 
         if (measureTime) {
@@ -130,10 +131,10 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
         if (printIoctl) {
             if (ret == 0) {
                 printf("IOCTL %s returns %d\n",
-                       getIoctlString(request, ioctlHelper.get()).c_str(), ret);
+                       ioctlHelper->getIoctlString(request).c_str(), ret);
             } else {
                 printf("IOCTL %s returns %d, errno %d(%s)\n",
-                       getIoctlString(request, ioctlHelper.get()).c_str(), ret, returnedErrno, strerror(returnedErrno));
+                       ioctlHelper->getIoctlString(request).c_str(), ret, returnedErrno, strerror(returnedErrno));
             }
         }
 
@@ -144,36 +145,17 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
 
 int Drm::getParamIoctl(DrmParam param, int *dstValue) {
     GetParam getParam{};
-    getParam.param = getDrmParamValue(param, ioctlHelper.get());
+    getParam.param = ioctlHelper->getDrmParamValue(param);
     getParam.value = dstValue;
 
-    int retVal = ioctlHelper ? ioctlHelper->ioctl(DrmIoctl::getparam, &getParam) : ioctl(DrmIoctl::getparam, &getParam);
+    int retVal = ioctlHelper->ioctl(DrmIoctl::getparam, &getParam);
     if (debugManager.flags.PrintIoctlEntries.get()) {
         printf("DRM_IOCTL_I915_GETPARAM: param: %s, output value: %d, retCode:% d\n",
-               getDrmParamString(param, ioctlHelper.get()).c_str(),
+               ioctlHelper->getDrmParamString(param).c_str(),
                *getParam.value,
                retVal);
     }
     return retVal;
-}
-
-bool Drm::queryI915DeviceIdAndRevision() {
-    HardwareInfo *hwInfo = rootDeviceEnvironment.getMutableHardwareInfo();
-    int deviceId = hwInfo->platform.usDeviceID;
-    int revisionId = hwInfo->platform.usRevId;
-    auto ret = getParamIoctl(DrmParam::paramChipsetId, &deviceId);
-    if (ret != 0) {
-        printDebugString(debugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query device ID parameter!\n");
-        return false;
-    }
-    ret = getParamIoctl(DrmParam::paramRevision, &revisionId);
-    if (ret != 0) {
-        printDebugString(debugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: Cannot query device Rev ID parameter!\n");
-        return false;
-    }
-    hwInfo->platform.usDeviceID = deviceId;
-    hwInfo->platform.usRevId = revisionId;
-    return true;
 }
 
 int Drm::enableTurboBoost() {
@@ -495,11 +477,6 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
         systemInfo->checkSysInfoMismatch(hwInfo);
         setupSystemInfo(hwInfo, systemInfo.get());
 
-        auto numRtStacks = systemInfo->getSyncNumRtStacksPerDss();
-        if (numRtStacks > 0) {
-            hwInfo->capabilityTable.syncNumRTStacksPerDSS = numRtStacks;
-        }
-
         auto numRegions = systemInfo->getNumRegions();
         if (numRegions > 0) {
             hwInfo->featureTable.regionCount = numRegions;
@@ -775,7 +752,7 @@ void Drm::printIoctlStatistics() {
     printf("%41s %15s %10s %20s %20s %20s", "Request", "Total time(ns)", "Count", "Avg time per ioctl", "Min", "Max\n");
     for (const auto &ioctlData : this->ioctlStatistics) {
         printf("%41s %15llu %10lu %20f %20lld %20lld\n",
-               getIoctlString(ioctlData.first, ioctlHelper.get()).c_str(),
+               ioctlHelper->getIoctlString(ioctlData.first).c_str(),
                ioctlData.second.totalTime,
                static_cast<unsigned long>(ioctlData.second.count),
                ioctlData.second.totalTime / static_cast<double>(ioctlData.second.count),
@@ -1022,21 +999,23 @@ void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
     auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
 
     if (debugManager.flags.ClosEnabled.get() == 0 || productHelper.getNumCacheRegions() == 0) {
-        this->cacheInfo.reset(new CacheInfo{*ioctlHelper, 0, 0, 0});
+        this->l3CacheInfo.reset(new CacheInfo{*ioctlHelper, 0, 0, 0});
         return;
     }
 
-    const GT_SYSTEM_INFO *gtSysInfo = &hwInfo.gtSystemInfo;
+    auto allocateL3CacheInfo{[&productHelper, &hwInfo, &ioctlHelper = *(this->ioctlHelper)]() {
+        constexpr uint16_t maxNumWays = 32;
+        constexpr uint16_t globalReservationLimit = 16;
+        constexpr uint16_t clientReservationLimit = 8;
+        constexpr uint16_t maxReservationNumWays = std::min(globalReservationLimit, clientReservationLimit);
+        const size_t totalCacheSize = hwInfo.gtSystemInfo.L3CacheSizeInKb * MemoryConstants::kiloByte;
+        const size_t maxReservationCacheSize = (totalCacheSize * maxReservationNumWays) / maxNumWays;
+        const uint32_t maxReservationNumCacheRegions = productHelper.getNumCacheRegions() - 1;
 
-    constexpr uint16_t maxNumWays = 32;
-    constexpr uint16_t globalReservationLimit = 16;
-    constexpr uint16_t clientReservationLimit = 8;
-    constexpr uint16_t maxReservationNumWays = std::min(globalReservationLimit, clientReservationLimit);
-    const size_t totalCacheSize = gtSysInfo->L3CacheSizeInKb * MemoryConstants::kiloByte;
-    const size_t maxReservationCacheSize = (totalCacheSize * maxReservationNumWays) / maxNumWays;
-    const uint32_t maxReservationNumCacheRegions = productHelper.getNumCacheRegions() - 1;
+        return new CacheInfo(ioctlHelper, maxReservationCacheSize, maxReservationNumCacheRegions, maxReservationNumWays);
+    }};
 
-    this->cacheInfo.reset(new CacheInfo(*ioctlHelper, maxReservationCacheSize, maxReservationNumCacheRegions, maxReservationNumWays));
+    this->l3CacheInfo.reset(allocateL3CacheInfo());
 }
 
 void Drm::getPrelimVersion(std::string &prelimVersion) {
@@ -1112,9 +1091,17 @@ bool Drm::completionFenceSupport() {
 
 void Drm::setupIoctlHelper(const PRODUCT_FAMILY productFamily) {
     if (!this->ioctlHelper) {
-        std::string prelimVersion = "";
-        getPrelimVersion(prelimVersion);
-        this->ioctlHelper = IoctlHelper::getI915Helper(productFamily, prelimVersion, *this);
+        auto drmVersion = Drm::getDrmVersion(getFileDescriptor());
+        auto productSpecificIoctlHelperCreator = ioctlHelperFactory[productFamily];
+        if (productSpecificIoctlHelperCreator && !debugManager.flags.IgnoreProductSpecificIoctlHelper.get()) {
+            this->ioctlHelper = productSpecificIoctlHelperCreator.value()(*this);
+        } else if ("xe" == drmVersion) {
+            this->ioctlHelper = IoctlHelperXe::create(*this);
+        } else {
+            std::string prelimVersion = "";
+            getPrelimVersion(prelimVersion);
+            this->ioctlHelper = IoctlHelper::getI915Helper(productFamily, prelimVersion, *this);
+        }
         this->ioctlHelper->initialize();
     }
 }
@@ -1430,7 +1417,7 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
     if (bind) {
         bool allowUUIDsForDebug = !osContext->isInternalEngine() && !EngineHelpers::isBcs(osContext->getEngineType());
         if (bo->getBindExtHandles().size() > 0 && allowUUIDsForDebug) {
-            extensions = ioctlHelper->prepareVmBindExt(bo->getBindExtHandles());
+            extensions = ioctlHelper->prepareVmBindExt(bo->getBindExtHandles(), vmHandleId);
         }
         bool bindCapture = bo->isMarkedForCapture();
         bool bindImmediate = bo->isImmediateBindingRequired();
@@ -1732,6 +1719,20 @@ uint64_t Drm::alignUpGttSize(uint64_t inputGttSize) {
         return gttSize48bit;
     }
     return inputGttSize;
+}
+
+bool Drm::isDrmSupported(int fileDescriptor) {
+    auto drmVersion = Drm::getDrmVersion(fileDescriptor);
+    return "i915" == drmVersion || "xe" == drmVersion;
+}
+
+bool Drm::queryDeviceIdAndRevision() {
+    auto drmVersion = Drm::getDrmVersion(getFileDescriptor());
+    if ("xe" == drmVersion) {
+        this->setPerContextVMRequired(false);
+        return IoctlHelperXe::queryDeviceIdAndRevision(*this);
+    }
+    return IoctlHelperI915::queryDeviceIdAndRevision(*this);
 }
 
 template std::vector<uint16_t> Drm::query<uint16_t>(uint32_t queryId, uint32_t queryItemFlags);

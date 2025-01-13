@@ -493,6 +493,9 @@ std::vector<std::unique_ptr<HwDeviceId>> Wddm::discoverDevices(ExecutionEnvironm
 }
 
 bool Wddm::evict(const D3DKMT_HANDLE *handleList, uint32_t numOfHandles, uint64_t &sizeToTrim, bool evictNeeded) {
+    if (numOfHandles == 0) {
+        return true;
+    }
     NTSTATUS status = STATUS_SUCCESS;
     D3DKMT_EVICT evict = {};
     evict.AllocationList = handleList;
@@ -502,6 +505,7 @@ bool Wddm::evict(const D3DKMT_HANDLE *handleList, uint32_t numOfHandles, uint64_
     evict.Flags.EvictOnlyIfNecessary = adjustEvictNeededParameter(evictNeeded) ? 0 : 1;
 
     status = getGdi()->evict(&evict);
+    DEBUG_BREAK_IF(status != STATUS_SUCCESS);
 
     sizeToTrim = evict.NumBytesToTrim;
 
@@ -1179,9 +1183,12 @@ bool Wddm::waitFromCpu(uint64_t lastFenceValue, const MonitoredFence &monitoredF
 
     if (!skipResourceCleanup() && lastFenceValue > *monitoredFence.cpuAddress) {
         if (lastFenceValue > monitoredFence.lastSubmittedFence) {
-            this->forEachContextWithinWddm([](const EngineControl &engine) {
-                auto lock = engine.commandStreamReceiver->obtainUniqueOwnership();
-                engine.commandStreamReceiver->flushMonitorFence();
+            this->forEachContextWithinWddm([&monitoredFence](const EngineControl &engine) {
+                auto &contextMonitoredFence = static_cast<OsContextWin *>(engine.osContext)->getResidencyController().getMonitoredFence();
+                if (contextMonitoredFence.cpuAddress == monitoredFence.cpuAddress) {
+                    auto lock = engine.commandStreamReceiver->obtainUniqueOwnership();
+                    engine.commandStreamReceiver->flushMonitorFence();
+                }
             });
         }
 

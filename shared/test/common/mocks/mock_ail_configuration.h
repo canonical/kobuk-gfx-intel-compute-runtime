@@ -33,6 +33,11 @@ class MockAILConfiguration : public AILConfiguration {
         return isBufferPoolEnabledReturn;
     }
 
+    bool isRunAloneContextRequiredReturn = false;
+    bool isRunAloneContextRequired() override {
+        return isRunAloneContextRequiredReturn;
+    }
+
     bool limitAmountOfDeviceMemoryForRecyclingReturn = false;
     bool limitAmountOfDeviceMemoryForRecycling() override {
         return limitAmountOfDeviceMemoryForRecyclingReturn;
@@ -62,6 +67,26 @@ class MockAILConfiguration : public AILConfiguration {
         disableBindlessAddressingValue = val;
     }
     bool disableBindlessAddressingValue = false;
+
+    bool drainHostptrs() override {
+        return true;
+    }
+
+    bool isFallbackToPatchtokensRequired() override {
+        return false;
+    }
+
+    bool isAdjustMicrosecondResolutionRequired() override {
+        return adjustMicrosecondResolution;
+    }
+    bool adjustMicrosecondResolution = false;
+
+    uint32_t getMicrosecondResolution() override {
+        getMicrosecondResolutionCalledTimes++;
+        return mockMicrosecondResolution;
+    }
+    uint32_t getMicrosecondResolutionCalledTimes = 0u;
+    uint32_t mockMicrosecondResolution = 1000u;
 
   protected:
     void applyExt(RuntimeCapabilityTable &runtimeCapabilityTable) override {}

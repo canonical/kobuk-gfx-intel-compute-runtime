@@ -246,17 +246,20 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     }
 
     containsCooperativeKernelsFlag |= launchParams.isCooperative;
-    if (kernel->usesSyncBuffer()) {
-        auto retVal = (launchParams.isCooperative
-                           ? programSyncBuffer(*kernel, *neoDevice, threadGroupDimensions)
-                           : ZE_RESULT_ERROR_INVALID_ARGUMENT);
-        if (retVal) {
-            return retVal;
-        }
-    }
 
-    if (kernel->usesRegionGroupBarrier()) {
-        programRegionGroupBarrier(*kernel, threadGroupDimensions, launchParams.additionalSizeParam);
+    if (!launchParams.makeKernelCommandView) {
+        if (kernel->usesSyncBuffer()) {
+            auto retVal = (launchParams.isCooperative
+                               ? programSyncBuffer(*kernel, *neoDevice, threadGroupDimensions, launchParams.syncBufferPatchIndex)
+                               : ZE_RESULT_ERROR_INVALID_ARGUMENT);
+            if (retVal) {
+                return retVal;
+            }
+        }
+
+        if (kernel->usesRegionGroupBarrier()) {
+            programRegionGroupBarrier(*kernel, threadGroupDimensions, launchParams.localRegionSize, launchParams.regionBarrierPatchIndex);
+        }
     }
 
     bool uncachedMocsKernel = isKernelUncachedMocsRequired(kernelImp->getKernelRequiresUncachedMocs());
@@ -281,7 +284,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     std::list<void *> additionalCommands;
 
-    if (compactEvent) {
+    if (compactEvent && (!compactEvent->isCounterBased() || !this->isImmediateType())) {
         appendEventForProfilingAllWalkers(compactEvent, nullptr, launchParams.outListCommands, true, true, launchParams.omitAddingEventResidency, false);
     }
 
@@ -296,16 +299,26 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         inOrderNonWalkerSignalling = isInOrderNonWalkerSignalingRequired(eventForInOrderExec);
 
         if (inOrderExecSignalRequired) {
-            if (inOrderNonWalkerSignalling) {
-                if (!eventForInOrderExec->getAllocation(this->device) && Event::standaloneInOrderTimestampAllocationEnabled()) {
-                    eventForInOrderExec->resetInOrderTimestampNode(device->getInOrderTimestampAllocator()->getTag());
-                }
-                dispatchEventPostSyncOperation(eventForInOrderExec, nullptr, launchParams.outListCommands, Event::STATE_CLEARED, false, false, false, false, false);
-            } else {
-                inOrderCounterValue = this->inOrderExecInfo->getCounterValue() + getInOrderIncrementValue();
-                inOrderExecInfo = this->inOrderExecInfo.get();
-                if (eventForInOrderExec && eventForInOrderExec->isCounterBased() && !isTimestampEvent) {
-                    eventAddress = 0;
+            if (!compactEvent || !this->isImmediateType() || !compactEvent->isCounterBased() || compactEvent->isUsingContextEndOffset()) {
+                if (inOrderNonWalkerSignalling) {
+                    if (!eventForInOrderExec->getAllocation(this->device) && Event::standaloneInOrderTimestampAllocationEnabled()) {
+                        eventForInOrderExec->resetInOrderTimestampNode(device->getInOrderTimestampAllocator()->getTag());
+                    }
+                    if (!compactEvent || !this->isImmediateType() || !compactEvent->isCounterBased()) {
+                        dispatchEventPostSyncOperation(eventForInOrderExec, nullptr, launchParams.outListCommands, Event::STATE_CLEARED, false, false, false, false, false);
+                    } else {
+                        eventAddress = eventForInOrderExec->getPacketAddress(this->device);
+                        isTimestampEvent = true;
+                        if (!launchParams.omitAddingEventResidency) {
+                            commandContainer.addToResidencyContainer(eventForInOrderExec->getAllocation(this->device));
+                        }
+                    }
+                } else {
+                    inOrderCounterValue = this->inOrderExecInfo->getCounterValue() + getInOrderIncrementValue();
+                    inOrderExecInfo = this->inOrderExecInfo.get();
+                    if (eventForInOrderExec && eventForInOrderExec->isCounterBased() && !isTimestampEvent) {
+                        eventAddress = 0;
+                    }
                 }
             }
         }
@@ -331,7 +344,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         kernelPreemptionMode,                                   // preemptionMode
         launchParams.requiredPartitionDim,                      // requiredPartitionDim
         launchParams.requiredDispatchWalkOrder,                 // requiredDispatchWalkOrder
-        launchParams.additionalSizeParam,                       // additionalSizeParam
+        launchParams.localRegionSize,                           // localRegionSize
         this->partitionCount,                                   // partitionCount
         launchParams.reserveExtraPayloadSpace,                  // reserveExtraPayloadSpace
         maxWgCountPerTile,                                      // maxWgCountPerTile
@@ -379,7 +392,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     }
 
     if (!launchParams.makeKernelCommandView) {
-        if (compactEvent) {
+        if ((compactEvent && (!compactEvent->isCounterBased() || !this->isImmediateType()))) {
             void **syncCmdBuffer = nullptr;
             if (launchParams.outSyncCommand != nullptr) {
                 launchParams.outSyncCommand->type = CommandToPatch::SignalEventPostSyncPipeControl;
@@ -403,13 +416,20 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     if (inOrderExecSignalRequired) {
         if (inOrderNonWalkerSignalling) {
             if (!launchParams.skipInOrderNonWalkerSignaling) {
-                appendWaitOnSingleEvent(eventForInOrderExec, launchParams.outListCommands, false, false, CommandToPatch::CbEventTimestampPostSyncSemaphoreWait);
-                appendSignalInOrderDependencyCounter(eventForInOrderExec, false);
+                if ((compactEvent && (compactEvent->isCounterBased() && this->isImmediateType()))) {
+                    appendSignalInOrderDependencyCounter(eventForInOrderExec, false, true);
+                } else {
+                    appendWaitOnSingleEvent(eventForInOrderExec, launchParams.outListCommands, false, false, CommandToPatch::CbEventTimestampPostSyncSemaphoreWait);
+                    appendSignalInOrderDependencyCounter(eventForInOrderExec, false, false);
+                }
             }
         } else {
+            launchParams.skipInOrderNonWalkerSignaling = false;
             UNRECOVERABLE_IF(!dispatchKernelArgs.outWalkerPtr);
             addCmdForPatching(nullptr, dispatchKernelArgs.outWalkerPtr, nullptr, inOrderCounterValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::walker);
         }
+    } else {
+        launchParams.skipInOrderNonWalkerSignaling = false;
     }
 
     if (neoDevice->getDebugger() && !this->immediateCmdListHeapSharing && !neoDevice->getBindlessHeapsHelper() && this->cmdListHeapAddressModel == NEO::HeapAddressModel::privateHeaps) {

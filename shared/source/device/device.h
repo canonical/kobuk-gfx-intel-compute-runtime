@@ -181,7 +181,7 @@ class Device : public ReferenceTrackedObject<Device> {
     void initializeRayTracing(uint32_t maxBvhLevels);
     void allocateRTDispatchGlobals(uint32_t maxBvhLevels);
 
-    uint64_t getGlobalMemorySize(uint32_t deviceBitfield) const;
+    MOCKABLE_VIRTUAL uint64_t getGlobalMemorySize(uint32_t deviceBitfield) const;
     const std::vector<SubDevice *> &getSubDevices() const { return subdevices; }
     bool getUuid(std::array<uint8_t, ProductHelper::uuidSize> &uuid);
     void generateUuid(std::array<uint8_t, ProductHelper::uuidSize> &uuid);
@@ -215,6 +215,44 @@ class Device : public ReferenceTrackedObject<Device> {
     const CsrContainer &getSecondaryCsrs() const { return secondaryCsrs; }
 
     std::atomic<uint32_t> debugExecutionCounter = 0;
+
+    void stopDirectSubmissionForCopyEngine();
+
+    std::unique_lock<std::mutex> obtainAllocationsReuseLock() const {
+        return std::unique_lock<std::mutex>(allocationsReuseMtx);
+    }
+
+    void recordAllocationSaveForReuse(size_t size) {
+        allocationsSavedForReuseSize += size;
+    }
+
+    void recordAllocationGetFromReuse(size_t size) {
+        allocationsSavedForReuseSize -= size;
+    }
+
+    size_t getAllocationsSavedForReuseSize() const {
+        return allocationsSavedForReuseSize;
+    }
+    uint32_t getMicrosecondResolution() const {
+        return microsecondResolution;
+    }
+
+    void updateMaxPoolCount(uint32_t maxPoolCount) {
+        maxBufferPoolCount = maxPoolCount;
+    }
+
+    bool requestPoolCreate(uint32_t count) {
+        if (maxBufferPoolCount >= count + bufferPoolCount.fetch_add(count)) {
+            return true;
+        } else {
+            bufferPoolCount -= count;
+            return false;
+        }
+    }
+
+    void recordPoolsFreed(uint32_t size) {
+        bufferPoolCount -= size;
+    }
 
   protected:
     Device() = delete;
@@ -291,6 +329,12 @@ class Device : public ReferenceTrackedObject<Device> {
 
     ISAPoolAllocator isaPoolAllocator;
     std::unique_ptr<UsmMemAllocPoolsManager> deviceUsmMemAllocPoolsManager;
+
+    size_t allocationsSavedForReuseSize = 0u;
+    std::atomic_uint32_t bufferPoolCount = 0u;
+    uint32_t maxBufferPoolCount = 0u;
+    mutable std::mutex allocationsReuseMtx;
+    uint32_t microsecondResolution = 1000u;
 
     struct {
         bool isValid = false;

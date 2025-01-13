@@ -51,16 +51,13 @@ extern Environment *gEnvironment;
 namespace NEO {
 
 void MultiCommandTests::createFileWithArgs(const std::vector<std::string> &singleArgs, int numOfBuild) {
-    std::ofstream myfile(nameOfFileWithArgs);
-    if (myfile.is_open()) {
-        for (int i = 0; i < numOfBuild; i++) {
-            for (auto singleArg : singleArgs)
-                myfile << singleArg + " ";
-            myfile << std::endl;
+
+    for (int i = 0; i < numOfBuild; i++) {
+        for (auto singleArg : singleArgs) {
+            filesMap[nameOfFileWithArgs.c_str()] += std::string(singleArg + " ");
         }
-        myfile.close();
-    } else
-        ASSERT_TRUE(false) << "Unable to open file\n";
+        filesMap[nameOfFileWithArgs.c_str()] += std::string("\n");
+    }
 }
 
 void MultiCommandTests::deleteFileWithArgs() {
@@ -1673,6 +1670,8 @@ TEST_F(OfflineCompilerTests, givenValidArgumentsAndIgcInitFailureWhenInitIsPerfo
         gEnvironment->devicePrefix.c_str()};
 
     MockOfflineCompiler mockOfflineCompiler{};
+    std::string libName = "invalidigc.so";
+    auto igcNameGuard = NEO::pushIgcDllName(libName.c_str());
     mockOfflineCompiler.mockIgcFacade->shouldFailLoadingOfIgcLib = true;
     testing::internal::CaptureStdout();
     const auto initResult = mockOfflineCompiler.initialize(argv.size(), argv);
@@ -1684,7 +1683,7 @@ TEST_F(OfflineCompilerTests, givenValidArgumentsAndIgcInitFailureWhenInitIsPerfo
     output = testing::internal::GetCapturedStdout();
 
     std::stringstream expectedErrorMessage;
-    expectedErrorMessage << "Error! Loading of IGC library has failed! Filename: " << Os::igcDllName << "\n"
+    expectedErrorMessage << "Error! Loading of IGC library has failed! Filename: " << libName << "\n"
                          << "Error! IGC initialization failure. Error code = -6\n";
 
     EXPECT_EQ(OCLOC_OUT_OF_HOST_MEMORY, buildResult);
@@ -1771,28 +1770,6 @@ TEST_F(OfflineCompilerTests, givenExcludeIrArgumentWhenGeneratingElfBinaryFromPa
     ASSERT_TRUE(errorReason.empty());
     ASSERT_TRUE(warning.empty());
     EXPECT_FALSE(hasIR);
-}
-
-TEST_F(OfflineCompilerTests, givenLackOfExcludeIrArgumentWhenCompilingKernelThenIrShouldBeIncluded) {
-    std::vector<std::string> argv = {
-        "ocloc",
-        "-file",
-        clFiles + "copybuffer.cl",
-        "-device",
-        gEnvironment->devicePrefix.c_str()};
-
-    MockOfflineCompiler mockOfflineCompiler{};
-    mockOfflineCompiler.initialize(argv.size(), argv);
-
-    const auto buildResult{mockOfflineCompiler.build()};
-    ASSERT_EQ(OCLOC_SUCCESS, buildResult);
-
-    std::string errorReason{};
-    std::string warning{};
-    auto hasIR = containsAnyIRSection(mockOfflineCompiler.elfBinary, errorReason, warning);
-    ASSERT_TRUE(errorReason.empty());
-    ASSERT_TRUE(warning.empty());
-    EXPECT_TRUE(hasIR);
 }
 
 TEST_F(OfflineCompilerTests, givenZeroSizeInputFileWhenInitializationIsPerformedThenInvalidFileIsReturned) {

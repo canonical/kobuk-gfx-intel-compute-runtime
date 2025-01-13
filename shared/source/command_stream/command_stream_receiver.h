@@ -118,7 +118,9 @@ class CommandStreamReceiver {
 
     virtual bool flushBatchedSubmissions() = 0;
     MOCKABLE_VIRTUAL SubmissionStatus submitBatchBuffer(BatchBuffer &batchBuffer, ResidencyContainer &allocationsForResidency);
-    virtual void pollForCompletion() {}
+    void pollForCompletion() { pollForCompletion(false); }
+    virtual void pollForAubCompletion(){};
+    virtual void pollForCompletion(bool skipTaskCountCheck) {}
     virtual void programHardwareContext(LinearStream &cmdStream) = 0;
     virtual size_t getCmdsSizeForHardwareContext() const = 0;
 
@@ -286,7 +288,7 @@ class CommandStreamReceiver {
     TagAllocatorBase *getEventTsAllocator();
     TagAllocatorBase *getEventPerfCountAllocator(const uint32_t tagSize);
     virtual TagAllocatorBase *getTimestampPacketAllocator() = 0;
-    virtual std::unique_ptr<TagAllocatorBase> createMultiRootDeviceTimestampPacketAllocator(const RootDeviceIndicesContainer rootDeviceIndices) = 0;
+    virtual std::unique_ptr<TagAllocatorBase> createMultiRootDeviceTimestampPacketAllocator(const RootDeviceIndicesContainer &rootDeviceIndices) = 0;
 
     virtual bool expectMemory(const void *gfxAddress, const void *srcAddress, size_t length, uint32_t compareOperation);
     MOCKABLE_VIRTUAL bool writeMemory(GraphicsAllocation &gfxAllocation) { return writeMemory(gfxAllocation, false, 0, 0); }
@@ -374,6 +376,8 @@ class CommandStreamReceiver {
     virtual bool directSubmissionRelaxedOrderingEnabled() const {
         return false;
     }
+
+    virtual uint32_t getDirectSubmissionRelaxedOrderingQueueDepth() const { return 0; }
 
     virtual bool isKmdWaitOnTaskCountAllowed() const {
         return false;
@@ -517,6 +521,7 @@ class CommandStreamReceiver {
 
     bool isRecyclingTagForHeapStorageRequired() const { return heapStorageRequiresRecyclingTag; }
 
+    virtual bool waitUserFenceSupported() { return false; }
     virtual bool waitUserFence(TaskCountType waitValue, uint64_t hostAddress, int64_t timeout, bool userInterrupt, uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) { return false; }
     void setPrimaryCsr(CommandStreamReceiver *primaryCsr) {
         this->primaryCsr = primaryCsr;
@@ -561,6 +566,7 @@ class CommandStreamReceiver {
     bool enqueueWaitForPagingFence(uint64_t pagingFenceValue);
     virtual void unblockPagingFenceSemaphore(uint64_t pagingFenceValue) {}
     MOCKABLE_VIRTUAL void drainPagingFenceQueue();
+    bool isLatestFlushIsTaskCountUpdateOnly() const { return latestFlushIsTaskCountUpdateOnly; }
 
   protected:
     void cleanupResources();
@@ -702,6 +708,7 @@ class CommandStreamReceiver {
     bool heaplessModeEnabled = false;
     bool use4GbHeaps = true;
     bool csrSurfaceProgrammingDone = false;
+    bool latestFlushIsTaskCountUpdateOnly = false;
 };
 
 typedef CommandStreamReceiver *(*CommandStreamReceiverCreateFunc)(bool withAubDump,

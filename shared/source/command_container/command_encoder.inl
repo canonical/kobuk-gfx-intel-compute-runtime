@@ -21,6 +21,7 @@
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/helpers/local_id_gen.h"
+#include "shared/source/helpers/pipeline_select_args.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/helpers/simd_helper.h"
@@ -485,8 +486,6 @@ size_t EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(IndirectHeap
                                                                     const void *srcKernelSsh, size_t srcKernelSshSize,
                                                                     size_t numberOfBindingTableStates, size_t offsetOfBindingTable) {
     using BINDING_TABLE_STATE = typename Family::BINDING_TABLE_STATE;
-    using INTERFACE_DESCRIPTOR_DATA = typename Family::INTERFACE_DESCRIPTOR_DATA;
-    using RENDER_SURFACE_STATE = typename Family::RENDER_SURFACE_STATE;
 
     size_t sshSize = srcKernelSshSize;
     DEBUG_BREAK_IF(srcKernelSsh == nullptr);
@@ -511,7 +510,7 @@ size_t EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(IndirectHeap
 
     // march over BTIs and offset the pointers based on surface state base address
     auto *dstBtiTableBase = reinterpret_cast<BINDING_TABLE_STATE *>(ptrOffset(dstSurfaceState, offsetOfBindingTable));
-    DEBUG_BREAK_IF(reinterpret_cast<uintptr_t>(dstBtiTableBase) % INTERFACE_DESCRIPTOR_DATA::BINDINGTABLEPOINTER_ALIGN_SIZE != 0);
+    DEBUG_BREAK_IF(reinterpret_cast<uintptr_t>(dstBtiTableBase) % Family::INTERFACE_DESCRIPTOR_DATA::BINDINGTABLEPOINTER_ALIGN_SIZE != 0);
     auto *srcBtiTableBase = reinterpret_cast<const BINDING_TABLE_STATE *>(ptrOffset(srcSurfaceState, offsetOfBindingTable));
     BINDING_TABLE_STATE bti = Family::cmdInitBindingTableState;
     for (uint32_t i = 0, e = static_cast<uint32_t>(numberOfBindingTableStates); i != e; ++i) {
@@ -523,34 +522,6 @@ size_t EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(IndirectHeap
     }
 
     return ptrDiff(dstBtiTableBase, dstHeap.getCpuBase());
-}
-
-template <typename Family>
-inline void EncodeSurfaceState<Family>::encodeExtraCacheSettings(R_SURFACE_STATE *surfaceState, const EncodeSurfaceStateArgs &args) {}
-
-template <typename Family>
-void EncodeSurfaceState<Family>::setImageAuxParamsForCCS(R_SURFACE_STATE *surfaceState, Gmm *gmm) {
-    using AUXILIARY_SURFACE_MODE = typename Family::RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
-    // Its expected to not program pitch/qpitch/baseAddress for Aux surface in CCS scenarios
-    surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
-    setFlagsForMediaCompression(surfaceState, gmm);
-
-    setClearColorParams(surfaceState, gmm);
-    setUnifiedAuxBaseAddress<Family>(surfaceState, gmm);
-}
-
-template <typename Family>
-void EncodeSurfaceState<Family>::setBufferAuxParamsForCCS(R_SURFACE_STATE *surfaceState) {
-    using AUXILIARY_SURFACE_MODE = typename R_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
-
-    surfaceState->setAuxiliarySurfaceMode(AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
-}
-
-template <typename Family>
-bool EncodeSurfaceState<Family>::isAuxModeEnabled(R_SURFACE_STATE *surfaceState, Gmm *gmm) {
-    using AUXILIARY_SURFACE_MODE = typename R_SURFACE_STATE::AUXILIARY_SURFACE_MODE;
-
-    return (surfaceState->getAuxiliarySurfaceMode() == AUXILIARY_SURFACE_MODE::AUXILIARY_SURFACE_MODE_AUX_CCS_E);
 }
 
 template <typename Family>
@@ -598,19 +569,6 @@ bool EncodeDispatchKernel<Family>::inlineDataProgrammingRequired(const KernelDes
     }
     return false;
 }
-
-template <typename Family>
-template <typename InterfaceDescriptorType>
-void EncodeDispatchKernel<Family>::encodeEuSchedulingPolicy(InterfaceDescriptorType *pInterfaceDescriptor, const KernelDescriptor &kernelDesc, int32_t defaultPipelinedThreadArbitrationPolicy) {
-}
-
-template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::adjustTimestampPacket(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
-
-template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::setWalkerRegionSettings(WalkerType &walkerCmd, const HardwareInfo &hwInfo, uint32_t partitionCount, uint32_t workgroupSize, uint32_t maxWgCountPerTile, bool requiredWalkOrder) {}
 
 template <typename Family>
 void EncodeIndirectParams<Family>::encode(CommandContainer &container, uint64_t crossThreadDataGpuVa, DispatchKernelEncoderI *dispatchInterface, uint64_t implicitArgsGpuPtr) {
@@ -739,16 +697,6 @@ bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
 }
 
 template <typename Family>
-void EncodeSurfaceState<Family>::setPitchForScratch(R_SURFACE_STATE *surfaceState, uint32_t pitch, const ProductHelper &productHelper) {
-    surfaceState->setSurfacePitch(pitch);
-}
-
-template <typename Family>
-uint32_t EncodeSurfaceState<Family>::getPitchForScratchInBytes(R_SURFACE_STATE *surfaceState, const ProductHelper &productHelper) {
-    return surfaceState->getSurfacePitch();
-}
-
-template <typename Family>
 void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
     auto enablePrefetch = EncodeSurfaceState<Family>::doBindingTablePrefetch();
 
@@ -803,16 +751,6 @@ size_t EncodeDispatchKernel<Family>::getDefaultDshAlignment() {
     return Family::cacheLineSize;
 }
 
-template <typename GfxFamily>
-size_t EncodeDispatchKernel<GfxFamily>::getScratchPtrOffsetOfImplicitArgs() {
-    return 0;
-}
-
-template <typename Family>
-template <bool isHeapless>
-void EncodeDispatchKernel<Family>::setScratchAddress(uint64_t &scratchAddress, uint32_t requiredScratchSlot0Size, uint32_t requiredScratchSlot1Size, IndirectHeap *ssh, CommandStreamReceiver &submissionCsr) {
-}
-
 template <typename Family>
 void EncodeIndirectParams<Family>::setGlobalWorkSizeIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress, const uint32_t *lws) {
     for (int i = 0; i < 3; ++i) {
@@ -838,12 +776,6 @@ inline size_t EncodeIndirectParams<Family>::getCmdsSizeForSetWorkDimIndirect(con
 }
 
 template <typename Family>
-void EncodeSemaphore<Family>::appendSemaphoreCommand(MI_SEMAPHORE_WAIT &cmd, uint64_t compareData, bool indirect, bool useQwordData, bool switchOnUnsuccessful) {
-    constexpr uint64_t upper32b = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) << 32;
-    UNRECOVERABLE_IF(useQwordData || (compareData & upper32b));
-}
-
-template <typename Family>
 void EncodeSemaphore<Family>::addMiSemaphoreWaitCommand(LinearStream &commandStream,
                                                         uint64_t compareAddress,
                                                         uint64_t compareData,
@@ -863,12 +795,6 @@ template <typename Family>
 void EncodeSemaphore<Family>::applyMiSemaphoreWaitCommand(LinearStream &commandStream, std::list<void *> &commandsList) {
     MI_SEMAPHORE_WAIT *semaphoreCommand = commandStream.getSpaceForCmd<MI_SEMAPHORE_WAIT>();
     commandsList.push_back(semaphoreCommand);
-}
-
-template <typename Family>
-inline void EncodeAtomic<Family>::setMiAtomicAddress(MI_ATOMIC &atomic, uint64_t writeAddress) {
-    atomic.setMemoryAddress(static_cast<uint32_t>(writeAddress & 0x0000FFFFFFFFULL));
-    atomic.setMemoryAddressHigh(static_cast<uint32_t>(writeAddress >> 32));
 }
 
 template <typename Family>
@@ -1072,12 +998,6 @@ size_t EncodeMiFlushDW<Family>::getCommandSizeWithWa(const EncodeDummyBlitWaArgs
 }
 
 template <typename Family>
-inline void EncodeMemoryPrefetch<Family>::programMemoryPrefetch(LinearStream &commandStream, const GraphicsAllocation &graphicsAllocation, uint32_t size, size_t offset, const RootDeviceEnvironment &rootDeviceEnvironment) {}
-
-template <typename Family>
-inline size_t EncodeMemoryPrefetch<Family>::getSizeForMemoryPrefetch(size_t size, const RootDeviceEnvironment &rootDeviceEnvironment) { return 0u; }
-
-template <typename Family>
 void EncodeMiArbCheck<Family>::program(LinearStream &commandStream, std::optional<bool> preParserDisable) {
     MI_ARB_CHECK cmd = Family::cmdInitArbCheck;
 
@@ -1129,21 +1049,6 @@ inline void EncodeStoreMemory<Family>::programStoreDataImm(LinearStream &command
                                                    workloadPartitionOffset);
 }
 
-template <typename GfxFamily>
-void EncodeEnableRayTracing<GfxFamily>::append3dStateBtd(void *ptr3dStateBtd) {}
-
-template <typename GfxFamily>
-inline void EncodeWA<GfxFamily>::setAdditionalPipeControlFlagsForNonPipelineStateCommand(PipeControlArgs &args) {}
-
-template <typename Family>
-size_t EncodeMemoryFence<Family>::getSystemMemoryFenceSize() {
-    return 0;
-}
-
-template <typename Family>
-void EncodeMemoryFence<Family>::encodeSystemMemoryFence(LinearStream &commandStream, const GraphicsAllocation *globalFenceAllocation) {
-}
-
 template <typename Family>
 void EncodeMiPredicate<Family>::encode(LinearStream &cmdStream, [[maybe_unused]] MiPredicateType predicateType) {
     if constexpr (Family::isUsingMiSetPredicate) {
@@ -1160,6 +1065,23 @@ void EncodeMiPredicate<Family>::encode(LinearStream &cmdStream, [[maybe_unused]]
 template <typename Family>
 void EnodeUserInterrupt<Family>::encode(LinearStream &commandStream) {
     *commandStream.getSpaceForCmd<typename Family::MI_USER_INTERRUPT>() = Family::cmdInitUserInterrupt;
+}
+
+template <typename Family>
+bool EncodeSurfaceState<Family>::isBindingTablePrefetchPreferred() {
+    return false;
+}
+
+template <typename Family>
+void EncodeComputeMode<Family>::adjustPipelineSelect(CommandContainer &container, const NEO::KernelDescriptor &kernelDescriptor) {
+
+    PipelineSelectArgs pipelineSelectArgs;
+    pipelineSelectArgs.systolicPipelineSelectMode = kernelDescriptor.kernelAttributes.flags.usesSystolicPipelineSelectMode;
+    pipelineSelectArgs.systolicPipelineSelectSupport = container.systolicModeSupportRef();
+
+    PreambleHelper<Family>::programPipelineSelect(container.getCommandStream(),
+                                                  pipelineSelectArgs,
+                                                  container.getDevice()->getRootDeviceEnvironment());
 }
 
 } // namespace NEO

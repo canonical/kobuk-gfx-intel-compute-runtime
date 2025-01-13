@@ -63,7 +63,7 @@ struct EncodeDispatchKernelArgs {
     PreemptionMode preemptionMode = PreemptionMode::Initial;
     NEO::RequiredPartitionDim requiredPartitionDim = NEO::RequiredPartitionDim::none;
     NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder = NEO::RequiredDispatchWalkOrder::none;
-    uint32_t additionalSizeParam = NEO::additionalKernelLaunchSizeParamNotSet;
+    uint32_t localRegionSize = NEO::localRegionSizeParamNotSet;
     uint32_t partitionCount = 0u;
     uint32_t reserveExtraPayloadSpace = 0;
     uint32_t maxWgCountPerTile = 0;
@@ -106,16 +106,28 @@ enum class CompareOperation : uint32_t {
 struct EncodeWalkerArgs {
     EncodeWalkerArgs() = delete;
 
+    EncodeWalkerArgs(const KernelDescriptor &kernelDescriptor, KernelExecutionType kernelExecutionType, NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder,
+                     uint32_t localRegionSize, uint32_t maxFrontEndThreads, bool requiredSystemFence)
+        : kernelDescriptor(kernelDescriptor),
+          kernelExecutionType(kernelExecutionType),
+          requiredDispatchWalkOrder(requiredDispatchWalkOrder),
+          localRegionSize(localRegionSize),
+          maxFrontEndThreads(maxFrontEndThreads),
+          requiredSystemFence(requiredSystemFence) {}
+
     const KernelDescriptor &kernelDescriptor;
     KernelExecutionType kernelExecutionType = KernelExecutionType::defaultType;
     NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder = NEO::RequiredDispatchWalkOrder::none;
-    uint32_t additionalSizeParam = NEO::additionalKernelLaunchSizeParamNotSet;
+    uint32_t localRegionSize = NEO::localRegionSizeParamNotSet;
     uint32_t maxFrontEndThreads = 0;
     bool requiredSystemFence = false;
 };
 
 template <typename GfxFamily>
 struct EncodeDispatchKernel {
+    static constexpr size_t timestampDestinationAddressAlignment = 16;
+    static constexpr size_t immWriteDestinationAddressAlignment = 8;
+
     using DefaultWalkerType = typename GfxFamily::DefaultWalkerType;
     using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
     using BINDING_TABLE_STATE = typename GfxFamily::BINDING_TABLE_STATE;
@@ -185,7 +197,7 @@ struct EncodeDispatchKernel {
     static void setupPostSyncForRegularEvent(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
 
     template <typename WalkerType>
-    static void setWalkerRegionSettings(WalkerType &walkerCmd, const HardwareInfo &hwInfo, uint32_t partitionCount, uint32_t workgroupSize, uint32_t maxWgCountPerTile, bool requiredWalkOrder);
+    static void setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder);
 
     template <typename WalkerType>
     static void setupPostSyncForInOrderExec(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
@@ -616,6 +628,7 @@ template <typename GfxFamily>
 struct EncodeEnableRayTracing {
     static void programEnableRayTracing(LinearStream &commandStream, uint64_t backBuffer);
     static void append3dStateBtd(void *ptr3dStateBtd);
+    static bool is48bResourceNeededForRayTracing();
 };
 
 template <typename GfxFamily>

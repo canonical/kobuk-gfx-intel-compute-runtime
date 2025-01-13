@@ -34,11 +34,19 @@ const std::set<std::string_view> applicationsContextSyncFlag = {};
 
 const std::set<std::string_view> applicationsBufferPoolDisabled = {};
 
-const std::set<std::string_view> applicationsBufferPoolDisabledDg2 = {};
+const std::set<std::string_view> applicationsBufferPoolDisabledXe = {};
 
 const std::set<std::string_view> applicationsOverfetchDisabled = {};
 
+const std::set<std::string_view> applicationsDrainHostptrsDisabled = {};
+
 const std::set<std::string_view> applicationsDeviceUSMRecyclingLimited = {};
+
+const std::set<std::string_view> applicationsFallbackToPatchtokensRequiredDg2 = {};
+
+const std::set<std::string_view> applicationsMicrosecontResolutionAdjustment = {};
+
+const uint32_t microsecondAdjustment = 1000;
 
 AILConfigurationCreateFunctionType ailConfigurationFactory[IGFX_MAX_PRODUCT];
 

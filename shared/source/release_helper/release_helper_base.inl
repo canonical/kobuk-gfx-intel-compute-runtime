@@ -60,11 +60,6 @@ bool ReleaseHelperHw<releaseType>::isResolvingSubDeviceIDNeeded() const {
 }
 
 template <ReleaseType releaseType>
-bool ReleaseHelperHw<releaseType>::shouldAdjustDepth() const {
-    return false;
-}
-
-template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isDirectSubmissionSupported() const {
     return false;
 }
@@ -100,7 +95,7 @@ uint64_t ReleaseHelperHw<releaseType>::getTotalMemBankSize() const {
 }
 
 template <ReleaseType releaseType>
-const ThreadsPerEUConfigs ReleaseHelperHw<releaseType>::getThreadsPerEUConfigs() const {
+const ThreadsPerEUConfigs ReleaseHelperHw<releaseType>::getThreadsPerEUConfigs(uint32_t numThreadsPerEu) const {
     return {4, 8};
 }
 
@@ -120,16 +115,6 @@ const std::string ReleaseHelperHw<releaseType>::getDeviceConfigString(uint32_t t
 template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isRayTracingSupported() const {
     return true;
-}
-
-template <ReleaseType releaseType>
-uint32_t ReleaseHelperHw<releaseType>::getL3BankCount() const {
-    return 0;
-}
-
-template <ReleaseType releaseType>
-uint64_t ReleaseHelperHw<releaseType>::getL3CacheBankSizeInKb() const {
-    return 0;
 }
 
 template <ReleaseType releaseType>
@@ -158,9 +143,23 @@ bool ReleaseHelperHw<releaseType>::isDisablingMsaaRequired() const {
 }
 
 template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::isDummyBlitWaRequired() const {
+    return false;
+}
+
+template <ReleaseType releaseType>
 const SizeToPreferredSlmValueArray &ReleaseHelperHw<releaseType>::getSizeToPreferredSlmValue(bool isHeapless) const {
     static const SizeToPreferredSlmValueArray sizeToPreferredSlmValue = {};
     return sizeToPreferredSlmValue;
 }
 
+template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::isNumRtStacksPerDssFixedValue() const {
+    return true;
+}
+
+template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::getFtrXe2Compression() const {
+    return true;
+}
 } // namespace NEO

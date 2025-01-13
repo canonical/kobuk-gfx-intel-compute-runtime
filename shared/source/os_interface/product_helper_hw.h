@@ -124,7 +124,6 @@ class ProductHelperHw : public ProductHelper {
     bool useLocalPreferredForCacheableBuffers() const override;
     bool useGemCreateExtInAllocateMemoryByKMD() const override;
     bool isTlbFlushRequired() const override;
-    bool isDummyBlitWaRequired() const override;
     bool isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t precompiledKernelIndirectDetectionVersion) const override;
     uint32_t getRequiredDetectIndirectVersion() const override;
     uint32_t getRequiredDetectIndirectVersionVC() const override;
@@ -180,6 +179,8 @@ class ProductHelperHw : public ProductHelper {
     bool deferMOCSToPatIndex() const override;
     bool supportReadOnlyAllocations() const override;
     const std::vector<uint32_t> getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const override;
+    uint32_t getMaxLocalRegionSize(const HardwareInfo &hwInfo) const override;
+    bool localDispatchSizeQuerySupported() const override;
     bool isDeviceToHostCopySignalingFenceRequired() const override;
     size_t getMaxFillPaternSizeForCopyEngine() const override;
     bool isAvailableExtendedScratch() const override;

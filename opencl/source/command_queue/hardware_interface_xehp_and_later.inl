@@ -95,7 +95,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
     }
 
     auto isCcsUsed = EngineHelpers::isCcs(commandQueue.getGpgpuEngine().osContext->getEngineType());
-    const auto &hwInfo = device.getHardwareInfo();
+
     constexpr bool heaplessModeEnabled = GfxFamily::template isHeaplessMode<WalkerType>();
 
     if constexpr (heaplessModeEnabled == false) {
@@ -146,12 +146,12 @@ inline void HardwareInterface<GfxFamily>::programWalker(
     auto maxFrontEndThreads = device.getDeviceInfo().maxFrontEndThreads;
 
     EncodeWalkerArgs encodeWalkerArgs{
-        kernelInfo.kernelDescriptor,     // kernelDescriptor
-        kernel.getExecutionType(),       // kernelExecutionType
-        kernelAttributes.walkOrder,      // requiredDispatchWalkOrder
-        kernelAttributes.additionalSize, // additionalSizeParam
-        maxFrontEndThreads,              // maxFrontEndThreads
-        requiredSystemFence};            // requiredSystemFence
+        kernelInfo.kernelDescriptor,        // kernelDescriptor
+        kernel.getExecutionType(),          // kernelExecutionType
+        kernelAttributes.dispatchWalkOrder, // requiredDispatchWalkOrder
+        kernelAttributes.localRegionSize,   // localRegionSize
+        maxFrontEndThreads,                 // maxFrontEndThreads
+        requiredSystemFence};               // requiredSystemFence
 
     EncodeDispatchKernel<GfxFamily>::template encodeAdditionalWalkerFields<WalkerType>(rootDeviceEnvironment, walkerCmd, encodeWalkerArgs);
     EncodeDispatchKernel<GfxFamily>::template encodeWalkerPostSyncFields<WalkerType>(walkerCmd, encodeWalkerArgs);
@@ -181,7 +181,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
 
         ImplicitScalingDispatchCommandArgs implicitScalingArgs{
             workPartitionAllocationGpuVa,        // workPartitionAllocationGpuVa
-            &hwInfo,                             // hwInfo
+            &device,                             // device
             nullptr,                             // outWalkerPtr
             requiredPartitionDim,                // requiredPartitionDim
             partitionCount,                      // partitionCount
@@ -192,7 +192,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
             queueCsr.getDcFlushSupport(),        // dcFlush
             kernel.isSingleSubdevicePreferred(), // forceExecutionOnSingleTile
             false,                               // blockDispatchToCommandBuffer
-            requiredWalkOrder != 0};             // isRequiredWorkGroupOrder
+            requiredWalkOrder != 0};             // isRequiredDispatchWorkGroupOrder
 
         ImplicitScalingDispatch<GfxFamily>::template dispatchCommands<WalkerType>(commandStream,
                                                                                   walkerCmd,
@@ -207,7 +207,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
             timestampPacketNode->setPacketsUsed(implicitScalingArgs.partitionCount);
         }
     } else {
-        EncodeDispatchKernel<GfxFamily>::setWalkerRegionSettings(walkerCmd, hwInfo, 1, workgroupSize, maxWgCountPerTile, requiredWalkOrder != 0);
+        EncodeDispatchKernel<GfxFamily>::setWalkerRegionSettings(walkerCmd, device, 1, workgroupSize, maxWgCountPerTile, requiredWalkOrder != 0);
         auto computeWalkerOnStream = commandStream.getSpaceForCmd<WalkerType>();
         *computeWalkerOnStream = walkerCmd;
     }

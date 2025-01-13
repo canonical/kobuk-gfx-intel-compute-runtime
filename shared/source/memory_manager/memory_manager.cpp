@@ -7,6 +7,7 @@
 
 #include "shared/source/memory_manager/memory_manager.h"
 
+#include "shared/source/ail/ail_configuration.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/device.h"
@@ -199,7 +200,7 @@ void *MemoryManager::allocateSystemMemory(size_t size, size_t alignment) {
 
 GraphicsAllocation *MemoryManager::allocateGraphicsMemoryWithHostPtr(const AllocationData &allocationData) {
     if (deferredDeleter) {
-        deferredDeleter->drain(true);
+        deferredDeleter->drain(true, false);
     }
     GraphicsAllocation *graphicsAllocation = nullptr;
     auto osStorage = hostPtrManager->prepareOsStorageForAllocation(*this, allocationData.size, allocationData.hostPtr, allocationData.rootDeviceIndex);
@@ -316,7 +317,7 @@ void MemoryManager::checkGpuUsageAndDestroyGraphicsAllocations(GraphicsAllocatio
     if (gfxAllocation->isUsed()) {
         if (gfxAllocation->isUsedByManyOsContexts()) {
             multiContextResourceDestructor->deferDeletion(new DeferrableAllocationDeletion{*this, *gfxAllocation});
-            multiContextResourceDestructor->drain(false);
+            multiContextResourceDestructor->drain(false, false);
             return;
         }
         for (auto &engine : getRegisteredEngines(gfxAllocation->getRootDeviceIndex())) {
@@ -346,7 +347,7 @@ bool MemoryManager::isLimitedRange(uint32_t rootDeviceIndex) {
 
 void MemoryManager::waitForDeletions() {
     if (deferredDeleter) {
-        deferredDeleter->drain(false);
+        deferredDeleter->drain(false, false);
     }
     deferredDeleter.reset(nullptr);
 }
@@ -654,14 +655,24 @@ GraphicsAllocation *MemoryManager::allocatePhysicalGraphicsMemory(const Allocati
     getAllocationData(allocationData, properties, nullptr, createStorageInfoFromProperties(properties));
 
     AllocationStatus status = AllocationStatus::Error;
-    if (this->localMemorySupported[allocationData.rootDeviceIndex]) {
-        allocation = allocatePhysicalLocalDeviceMemory(allocationData, status);
-        if (allocation) {
-            getLocalMemoryUsageBankSelector(properties.allocationType, properties.rootDeviceIndex)->reserveOnBanks(allocationData.storageInfo.getMemoryBanks(), allocation->getUnderlyingBufferSize());
-            status = this->registerLocalMemAlloc(allocation, properties.rootDeviceIndex);
+    if (allocationData.flags.isUSMDeviceMemory) {
+        if (this->localMemorySupported[allocationData.rootDeviceIndex]) {
+            allocation = allocatePhysicalLocalDeviceMemory(allocationData, status);
+            if (allocation) {
+                getLocalMemoryUsageBankSelector(properties.allocationType, properties.rootDeviceIndex)->reserveOnBanks(allocationData.storageInfo.getMemoryBanks(), allocation->getUnderlyingBufferSize());
+                status = this->registerLocalMemAlloc(allocation, properties.rootDeviceIndex);
+            }
+        } else {
+            allocation = allocatePhysicalDeviceMemory(allocationData, status);
+            if (allocation) {
+                status = this->registerSysMemAlloc(allocation);
+            }
         }
     } else {
-        allocation = allocatePhysicalDeviceMemory(allocationData, status);
+        allocation = allocatePhysicalHostMemory(allocationData, status);
+        if (allocation) {
+            status = this->registerSysMemAlloc(allocation);
+        }
     }
     if (allocation && status != AllocationStatus::Success) {
         freeGraphicsMemory(allocation);
@@ -744,6 +755,15 @@ bool MemoryManager::mapAuxGpuVA(GraphicsAllocation *graphicsAllocation) {
 }
 
 GraphicsAllocation *MemoryManager::allocateGraphicsMemory(const AllocationData &allocationData) {
+    auto ail = executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getAILConfigurationHelper();
+
+    if (allocationData.type == AllocationType::externalHostPtr &&
+        allocationData.hostPtr &&
+        this->getDeferredDeleter() &&
+        (!ail || ail->drainHostptrs())) {
+        this->getDeferredDeleter()->drain(true, true);
+    }
+
     if (allocationData.type == AllocationType::image || allocationData.type == AllocationType::sharedResourceCopy) {
         UNRECOVERABLE_IF(allocationData.imgInfo == nullptr);
         return allocateGraphicsMemoryForImage(allocationData);
@@ -1198,6 +1218,22 @@ bool MemoryManager::usmCompressionSupported(Device *device) {
     auto &hwInfo = device->getHardwareInfo();
     auto &gfxCoreHelper = device->getGfxCoreHelper();
     return gfxCoreHelper.usmCompressionSupported(hwInfo);
+}
+
+void MemoryManager::addCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool, const CustomHeapAllocatorConfig &config) {
+    customHeapAllocators[{allocationType, isFrontWindowPool}] = config;
+}
+
+std::optional<std::reference_wrapper<CustomHeapAllocatorConfig>> MemoryManager::getCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool) {
+    auto it = customHeapAllocators.find({allocationType, isFrontWindowPool});
+    if (it != customHeapAllocators.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+void MemoryManager::removeCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool) {
+    customHeapAllocators.erase({allocationType, isFrontWindowPool});
 }
 
 } // namespace NEO

@@ -10,6 +10,16 @@
 namespace NEO {
 
 template <PRODUCT_FAMILY gfxProduct>
+const std::vector<uint32_t> ProductHelperHw<gfxProduct>::getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const {
+    return {};
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+uint32_t ProductHelperHw<gfxProduct>::getMaxLocalRegionSize(const HardwareInfo &hwInfo) const {
+    return 0;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
 uint64_t ProductHelperHw<gfxProduct>::getHostMemCapabilitiesValue() const {
     return (UnifiedSharedMemoryFlags::access);
 }

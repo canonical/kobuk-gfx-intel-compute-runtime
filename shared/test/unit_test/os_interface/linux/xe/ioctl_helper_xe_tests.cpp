@@ -16,17 +16,20 @@
 #include "shared/test/common/mocks/linux/mock_os_time_linux.h"
 #include "shared/test/common/os_interface/linux/xe/mock_drm_xe.h"
 #include "shared/test/common/os_interface/linux/xe/mock_ioctl_helper_xe.h"
+#include "shared/test/common/os_interface/linux/xe/xe_config_fixture.h"
 #include "shared/test/common/test_macros/test.h"
 using namespace NEO;
 
-TEST(IoctlHelperXeTest, givenXeDrmVersionsWhenGettingIoctlHelperThenValidIoctlHelperIsReturned) {
+using IoctlHelperXeTest = Test<XeConfigFixture>;
+
+TEST_F(IoctlHelperXeTest, givenXeDrmVersionsWhenGettingIoctlHelperThenValidIoctlHelperIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
     EXPECT_NE(nullptr, xeIoctlHelper);
 }
 
-TEST(IoctlHelperXeTest, whenGettingIfImmediateVmBindIsRequiredThenTrueIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingIfImmediateVmBindIsRequiredThenTrueIsReturned) {
     MockExecutionEnvironment executionEnvironment{};
     std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
     IoctlHelperXe ioctlHelper{*drm};
@@ -34,7 +37,7 @@ TEST(IoctlHelperXeTest, whenGettingIfImmediateVmBindIsRequiredThenTrueIsReturned
     EXPECT_TRUE(ioctlHelper.isImmediateVmBindRequired());
 }
 
-TEST(IoctlHelperXeTest, givenXeDrmWhenGetPciBarrierMmapThenReturnsNullptr) {
+TEST_F(IoctlHelperXeTest, givenXeDrmWhenGetPciBarrierMmapThenReturnsNullptr) {
     MockExecutionEnvironment executionEnvironment{};
     std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
     IoctlHelperXe ioctlHelper{*drm};
@@ -43,7 +46,7 @@ TEST(IoctlHelperXeTest, givenXeDrmWhenGetPciBarrierMmapThenReturnsNullptr) {
     EXPECT_EQ(ptr, nullptr);
 }
 
-TEST(IoctlHelperXeTest, whenChangingBufferBindingThenWaitIsNeededAlways) {
+TEST_F(IoctlHelperXeTest, whenChangingBufferBindingThenWaitIsNeededAlways) {
     MockExecutionEnvironment executionEnvironment{};
     std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
 
@@ -86,7 +89,7 @@ TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExt
 
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, allocSize, handle, patIndex, std::nullopt, pairHandle, isChunked, numOfChunks, std::nullopt, std::nullopt, isCoherent));
-    EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
+    EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
 }
 
@@ -96,7 +99,7 @@ TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExt
     GemVmControl test = {};
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     EXPECT_NE(0, xeIoctlHelper->createGemExt(memRegions, allocSize, handle, patIndex, test.vmId, pairHandle, isChunked, numOfChunks, std::nullopt, std::nullopt, isCoherent));
-    EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
+    EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
 }
 
@@ -116,7 +119,7 @@ TEST_F(IoctlHelperXeGemCreateExtTests, givenIoctlHelperXeWhenCallingGemCreateExt
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WB, drm->createParamsCpuCaching);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndNoLocalMemoryThenProperValuesSet) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndNoLocalMemoryThenProperValuesSet) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(0);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -134,7 +137,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndNoLocalMemoryThenP
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     uint32_t handle = xeIoctlHelper->createGem(size, memoryBanks, false);
     EXPECT_EQ(1, drm->ioctlCnt.gemCreate);
-    EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
+    EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
 
     EXPECT_EQ(size, drm->createParamsSize);
     EXPECT_EQ(0u, drm->createParamsFlags);
@@ -146,7 +149,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndNoLocalMemoryThenP
     EXPECT_EQ(handle, testValueGemCreate);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateWhenMemoryBanksZeroThenProperValuesSet) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateWhenMemoryBanksZeroThenProperValuesSet) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(0);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -164,7 +167,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateWhenMemoryBanksZeroTh
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     uint32_t handle = xeIoctlHelper->createGem(size, memoryBanks, false);
     EXPECT_EQ(1, drm->ioctlCnt.gemCreate);
-    EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
+    EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
 
     EXPECT_EQ(size, drm->createParamsSize);
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
@@ -176,7 +179,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateWhenMemoryBanksZeroTh
     EXPECT_EQ(handle, testValueGemCreate);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndLocalMemoryThenProperValuesSet) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndLocalMemoryThenProperValuesSet) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -194,7 +197,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndLocalMemoryThenPro
     EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
     uint32_t handle = xeIoctlHelper->createGem(size, memoryBanks, false);
     EXPECT_EQ(1, drm->ioctlCnt.gemCreate);
-    EXPECT_FALSE(xeIoctlHelper->bindInfo.empty());
+    EXPECT_TRUE(xeIoctlHelper->bindInfo.empty());
 
     EXPECT_EQ(size, drm->createParamsSize);
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
@@ -206,7 +209,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGemCreateAndLocalMemoryThenPro
     EXPECT_EQ(handle, testValueGemCreate);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithRegionsAndCoherencyThenUncachedCPUCachingIsUsed) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithRegionsAndCoherencyThenUncachedCPUCachingIsUsed) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -225,7 +228,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithRegionsAndCohe
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WC, drm->createParamsCpuCaching);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithOnlySystemRegionAndCoherencyThenWriteBackCPUCachingIsUsed) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithOnlySystemRegionAndCoherencyThenWriteBackCPUCachingIsUsed) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(0);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -244,7 +247,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGemCreateWithOnlySystemRegi
     EXPECT_EQ(DRM_XE_GEM_CPU_CACHING_WB, drm->createParamsCpuCaching);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallSetGemTilingThenAlwaysTrue) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallSetGemTilingThenAlwaysTrue) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -257,7 +260,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallSetGemTilingThenAlwaysTrue) {
     EXPECT_FALSE(drm->ioctlCalled);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGetGemTilingThenAlwaysTrue) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGetGemTilingThenAlwaysTrue) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -270,14 +273,14 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallGetGemTilingThenAlwaysTrue) {
     EXPECT_FALSE(drm->ioctlCalled);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeisVmBindPatIndexExtSupportedReturnsFalse) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeisVmBindPatIndexExtSupportedReturnsFalse) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
     ASSERT_EQ(false, xeIoctlHelper->isVmBindPatIndexExtSupported());
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIsReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
@@ -304,7 +307,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIsRe
 
     EXPECT_FALSE(xeIoctlHelper->isSetPairAvailable());
 
-    EXPECT_EQ(CacheRegion::none, xeIoctlHelper->closAlloc());
+    EXPECT_EQ(CacheRegion::none, xeIoctlHelper->closAlloc(NEO::CacheLevel::level3));
 
     EXPECT_EQ(0u, xeIoctlHelper->closAllocWays(CacheRegion::none, 0u, 0u));
 
@@ -355,11 +358,6 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIsRe
     EXPECT_NO_THROW(xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, 0, 0, 0));
 
     EXPECT_EQ(std::nullopt, xeIoctlHelper->getVmAdviseAtomicAttribute());
-
-    VmBindParams vmBindParams{};
-    EXPECT_EQ(-1, xeIoctlHelper->vmBind(vmBindParams));
-
-    EXPECT_EQ(-1, xeIoctlHelper->vmUnbind(vmBindParams));
 
     EXPECT_EQ(0u, xeIoctlHelper->getEuStallFdParameter());
 
@@ -453,7 +451,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIsRe
     EXPECT_FALSE(xeIoctlHelper->getFabricLatency(fabricId, latency, bandwidth));
 }
 
-TEST(IoctlHelperXeTest, whenGettingFlagsForVmCreateThenPropertValueIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingFlagsForVmCreateThenPropertValueIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
@@ -468,7 +466,7 @@ TEST(IoctlHelperXeTest, whenGettingFlagsForVmCreateThenPropertValueIsReturned) {
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_VM_CREATE_FLAG_LR_MODE), xeIoctlHelper->getFlagsForVmCreate(false, false, false));
 }
 
-TEST(IoctlHelperXeTest, whenGettingFlagsForVmBindThenPropertValueIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingFlagsForVmBindThenPropertValueIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
@@ -477,7 +475,7 @@ TEST(IoctlHelperXeTest, whenGettingFlagsForVmBindThenPropertValueIsReturned) {
     EXPECT_EQ(static_cast<uint64_t>(0), xeIoctlHelper->getFlagsForVmBind(false, false, false, false, false));
 }
 
-TEST(IoctlHelperXeTest, whenGettingIoctlRequestValueThenPropertValueIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingIoctlRequestValueThenPropertValueIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
@@ -502,7 +500,7 @@ TEST(IoctlHelperXeTest, whenGettingIoctlRequestValueThenPropertValueIsReturned) 
     verifyIoctlRequestValue(DRM_IOCTL_PRIME_HANDLE_TO_FD, DrmIoctl::primeHandleToFd);
 }
 
-TEST(IoctlHelperXeTest, verifyPublicFunctions) {
+TEST_F(IoctlHelperXeTest, verifyPublicFunctions) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
@@ -576,7 +574,7 @@ TEST(IoctlHelperXeTest, verifyPublicFunctions) {
     EXPECT_EQ(0, queryItem.length);
 }
 
-TEST(IoctlHelperXeTest, whenGettingFileNamesForFrequencyThenProperStringIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingFileNamesForFrequencyThenProperStringIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = std::make_unique<IoctlHelperXe>(*drm);
@@ -586,7 +584,7 @@ TEST(IoctlHelperXeTest, whenGettingFileNamesForFrequencyThenProperStringIsReturn
     EXPECT_STREQ("/device/tile1/gt2/freq0/rp0_freq", ioctlHelper->getFileForMaxMemoryFrequencyOfSubDevice(1).c_str());
 }
 
-TEST(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
+TEST_F(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
     int ret;
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -608,7 +606,6 @@ TEST(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
         EXPECT_EQ(0, ret);
 
         EXPECT_EQ(test.userPtr, mockXeIoctlHelper->bindInfo[0].userptr);
-        EXPECT_EQ(0u, mockXeIoctlHelper->bindInfo[0].handle);
         GemClose cl = {};
         cl.userptr = test.userPtr;
         ret = mockXeIoctlHelper->ioctl(DrmIoctl::gemClose, &cl);
@@ -726,12 +723,6 @@ TEST(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
         test.value = &dstvalue;
         ret = mockXeIoctlHelper->ioctl(DrmIoctl::getparam, &test);
         EXPECT_EQ(-1, ret);
-        test.param = static_cast<int>(DrmParam::paramChipsetId);
-        ret = mockXeIoctlHelper->ioctl(DrmIoctl::getparam, &test);
-        EXPECT_EQ(-1, ret);
-        test.param = static_cast<int>(DrmParam::paramRevision);
-        ret = mockXeIoctlHelper->ioctl(DrmIoctl::getparam, &test);
-        EXPECT_EQ(-1, ret);
         test.param = static_cast<int>(DrmParam::paramHasPageFault);
         ret = mockXeIoctlHelper->ioctl(DrmIoctl::getparam, &test);
         EXPECT_EQ(-1, ret);
@@ -744,58 +735,7 @@ TEST(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
     drm->reset();
 }
 
-TEST(IoctlHelperXeTest, givenGeomDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
-
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    auto &hwInfo = *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo();
-
-    xeIoctlHelper->initialize();
-
-    uint16_t tileId = 0;
-    for (auto gtId = 0u; gtId < 4u; gtId++) {
-        drm->addMockedQueryTopologyData(gtId, DRM_XE_TOPO_DSS_GEOMETRY, 8, {0b11'1111, 0, 0, 0, 0, 0, 0, 0});
-        drm->addMockedQueryTopologyData(gtId, DRM_XE_TOPO_DSS_COMPUTE, 8, {0, 0, 0, 0, 0, 0, 0, 0});
-        drm->addMockedQueryTopologyData(gtId, DRM_XE_TOPO_EU_PER_DSS, 8, {0b1111'1111, 0b1111'1111, 0, 0, 0, 0, 0, 0});
-    }
-    DrmQueryTopologyData topologyData{};
-    TopologyMap topologyMap{};
-
-    hwInfo.gtSystemInfo.MaxSlicesSupported = 1;
-    hwInfo.gtSystemInfo.MaxSubSlicesSupported = 6;
-    auto result = xeIoctlHelper->getTopologyDataAndMap(hwInfo, topologyData, topologyMap);
-    ASSERT_TRUE(result);
-
-    // verify topology data
-    EXPECT_EQ(1, topologyData.sliceCount);
-    EXPECT_EQ(1, topologyData.maxSlices);
-
-    EXPECT_EQ(6, topologyData.subSliceCount);
-    EXPECT_EQ(6, topologyData.maxSubSlicesPerSlice);
-
-    EXPECT_EQ(96, topologyData.euCount);
-    EXPECT_EQ(16, topologyData.maxEusPerSubSlice);
-
-    // verify topology map
-    std::vector<int> expectedSliceIndices{0};
-    ASSERT_EQ(expectedSliceIndices.size(), topologyMap[tileId].sliceIndices.size());
-    ASSERT_TRUE(topologyMap[tileId].sliceIndices.size() > 0);
-
-    for (auto i = 0u; i < expectedSliceIndices.size(); i++) {
-        EXPECT_EQ(expectedSliceIndices[i], topologyMap[tileId].sliceIndices[i]);
-    }
-
-    std::vector<int> expectedSubSliceIndices{0, 1, 2, 3, 4, 5};
-    ASSERT_EQ(expectedSubSliceIndices.size(), topologyMap[tileId].subsliceIndices.size());
-    ASSERT_TRUE(topologyMap[tileId].subsliceIndices.size() > 0);
-
-    for (auto i = 0u; i < expectedSubSliceIndices.size(); i++) {
-        EXPECT_EQ(expectedSubSliceIndices[i], topologyMap[tileId].subsliceIndices[i]);
-    }
-}
-
-TEST(IoctlHelperXeTest, givenUnknownTopologyTypeWhenGetTopologyDataAndMapThenNotRecognizedTopologyIsIgnored) {
+TEST_F(IoctlHelperXeTest, givenUnknownTopologyTypeWhenGetTopologyDataAndMapThenNotRecognizedTopologyIsIgnored) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -848,7 +788,7 @@ TEST(IoctlHelperXeTest, givenUnknownTopologyTypeWhenGetTopologyDataAndMapThenNot
     }
 }
 
-TEST(IoctlHelperXeTest, givenComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
+TEST_F(IoctlHelperXeTest, givenVariousDssConfigInputsWhenGetTopologyDataAndMapThenResultsAreCorrect) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -856,44 +796,50 @@ TEST(IoctlHelperXeTest, givenComputeDssWhenGetTopologyDataAndMapThenResultsAreCo
     auto &hwInfo = *executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo();
     xeIoctlHelper->initialize();
 
-    uint16_t tileId = 0;
-    for (auto gtId = 0u; gtId < 4u; gtId++) {
-        drm->addMockedQueryTopologyData(gtId, DRM_XE_TOPO_DSS_GEOMETRY, 8, {0, 0, 0, 0, 0, 0, 0, 0});
-        drm->addMockedQueryTopologyData(gtId, DRM_XE_TOPO_DSS_COMPUTE, 8, {0x0fu, 0xff, 0u, 0xff, 0u, 0u, 0xff, 0xff});
-        drm->addMockedQueryTopologyData(gtId, DRM_XE_TOPO_EU_PER_DSS, 8, {0b1111'1111, 0, 0, 0, 0, 0, 0, 0});
+    for (auto &dssConfigType : {DRM_XE_TOPO_DSS_GEOMETRY, DRM_XE_TOPO_DSS_COMPUTE}) {
+        for (auto &euPerDssConfigType : {DRM_XE_TOPO_EU_PER_DSS, DRM_XE_TOPO_SIMD16_EU_PER_DSS}) {
+
+            drm->queryTopology.clear();
+
+            uint16_t tileId = 0;
+            for (auto gtId = 0u; gtId < 4u; gtId++) {
+                drm->addMockedQueryTopologyData(gtId, dssConfigType, 8, {0x0fu, 0xff, 0u, 0xff, 0u, 0u, 0xff, 0xff});
+                drm->addMockedQueryTopologyData(gtId, euPerDssConfigType, 8, {0b1111'1111, 0, 0, 0, 0, 0, 0, 0});
+            }
+
+            DrmQueryTopologyData topologyData{};
+            TopologyMap topologyMap{};
+
+            hwInfo.gtSystemInfo.MaxSlicesSupported = 4u;
+            hwInfo.gtSystemInfo.MaxSubSlicesSupported = 32u;
+            auto result = xeIoctlHelper->getTopologyDataAndMap(hwInfo, topologyData, topologyMap);
+            ASSERT_TRUE(result);
+
+            // verify topology data
+            EXPECT_EQ(3, topologyData.sliceCount);
+            EXPECT_EQ(4, topologyData.maxSlices);
+
+            EXPECT_EQ(20, topologyData.subSliceCount);
+            EXPECT_EQ(8, topologyData.maxSubSlicesPerSlice);
+
+            EXPECT_EQ(160, topologyData.euCount);
+            EXPECT_EQ(8, topologyData.maxEusPerSubSlice);
+
+            // verify topology map
+            std::vector<int> expectedSliceIndices = {0, 1, 3};
+            ASSERT_EQ(expectedSliceIndices.size(), topologyMap[tileId].sliceIndices.size());
+            ASSERT_TRUE(topologyMap[tileId].sliceIndices.size() > 0);
+
+            for (auto i = 0u; i < expectedSliceIndices.size(); i++) {
+                EXPECT_EQ(expectedSliceIndices[i], topologyMap[tileId].sliceIndices[i]);
+            }
+
+            EXPECT_EQ(0u, topologyMap[tileId].subsliceIndices.size());
+        }
     }
-
-    DrmQueryTopologyData topologyData{};
-    TopologyMap topologyMap{};
-
-    hwInfo.gtSystemInfo.MaxSlicesSupported = 4u;
-    hwInfo.gtSystemInfo.MaxSubSlicesSupported = 32u;
-    auto result = xeIoctlHelper->getTopologyDataAndMap(hwInfo, topologyData, topologyMap);
-    ASSERT_TRUE(result);
-
-    // verify topology data
-    EXPECT_EQ(3, topologyData.sliceCount);
-    EXPECT_EQ(4, topologyData.maxSlices);
-
-    EXPECT_EQ(20, topologyData.subSliceCount);
-    EXPECT_EQ(8, topologyData.maxSubSlicesPerSlice);
-
-    EXPECT_EQ(160, topologyData.euCount);
-    EXPECT_EQ(8, topologyData.maxEusPerSubSlice);
-
-    // verify topology map
-    std::vector<int> expectedSliceIndices = {0, 1, 3};
-    ASSERT_EQ(expectedSliceIndices.size(), topologyMap[tileId].sliceIndices.size());
-    ASSERT_TRUE(topologyMap[tileId].sliceIndices.size() > 0);
-
-    for (auto i = 0u; i < expectedSliceIndices.size(); i++) {
-        EXPECT_EQ(expectedSliceIndices[i], topologyMap[tileId].sliceIndices[i]);
-    }
-
-    EXPECT_EQ(0u, topologyMap[tileId].subsliceIndices.size());
 }
 
-TEST(IoctlHelperXeTest, givenOnlyMediaTypeWhenGetTopologyDataAndMapThenSubsliceIndicesNotSet) {
+TEST_F(IoctlHelperXeTest, givenOnlyMediaTypeWhenGetTopologyDataAndMapThenSubsliceIndicesNotSet) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -941,7 +887,7 @@ TEST(IoctlHelperXeTest, givenOnlyMediaTypeWhenGetTopologyDataAndMapThenSubsliceI
     ASSERT_EQ(0u, topologyMap[tileId].subsliceIndices.size());
 }
 
-TEST(IoctlHelperXeTest, givenMainAndMediaTypesWhenGetTopologyDataAndMapThenResultsAreCorrect) {
+TEST_F(IoctlHelperXeTest, givenMainAndMediaTypesWhenGetTopologyDataAndMapThenResultsAreCorrect) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1020,7 +966,7 @@ TEST(IoctlHelperXeTest, givenMainAndMediaTypesWhenGetTopologyDataAndMapThenResul
     }
 }
 
-TEST(IoctlHelperXeTest, given2TileAndComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
+TEST_F(IoctlHelperXeTest, given2TileAndComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1078,7 +1024,7 @@ TEST(IoctlHelperXeTest, given2TileAndComputeDssWhenGetTopologyDataAndMapThenResu
     }
 }
 
-TEST(IoctlHelperXeTest, given2TileWithDisabledDssOn1TileAndComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
+TEST_F(IoctlHelperXeTest, given2TileWithDisabledDssOn1TileAndComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -1146,7 +1092,7 @@ TEST(IoctlHelperXeTest, given2TileWithDisabledDssOn1TileAndComputeDssWhenGetTopo
     }
 }
 
-TEST(IoctlHelperXeTest, given2TileWithDisabledEvenDssAndComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
+TEST_F(IoctlHelperXeTest, given2TileWithDisabledEvenDssAndComputeDssWhenGetTopologyDataAndMapThenResultsAreCorrect) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1209,7 +1155,7 @@ TEST(IoctlHelperXeTest, given2TileWithDisabledEvenDssAndComputeDssWhenGetTopolog
     }
 }
 
-TEST(IoctlHelperXeTest, givenMissingDssGeometryOrDssComputeInTopologyWhenGetTopologyDataAndMapThenReturnFalse) {
+TEST_F(IoctlHelperXeTest, givenMissingDssGeometryOrDssComputeInTopologyWhenGetTopologyDataAndMapThenReturnFalse) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1235,7 +1181,7 @@ TEST(IoctlHelperXeTest, givenMissingDssGeometryOrDssComputeInTopologyWhenGetTopo
     EXPECT_TRUE(result);
 }
 
-TEST(IoctlHelperXeTest, givenMissingEuPerDssInTopologyWhenGetTopologyDataAndMapThenSetupEuCountToZeroAndReturnTrue) {
+TEST_F(IoctlHelperXeTest, givenMissingEuPerDssInTopologyWhenGetTopologyDataAndMapThenSetupEuCountToZeroAndReturnTrue) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1272,7 +1218,7 @@ TEST(IoctlHelperXeTest, givenMissingEuPerDssInTopologyWhenGetTopologyDataAndMapT
     EXPECT_EQ(0, topologyData.maxEusPerSubSlice);
 }
 
-TEST(IoctlHelperXeTest, whenCreatingEngineInfoThenProperEnginesAreDiscovered) {
+TEST_F(IoctlHelperXeTest, whenCreatingEngineInfoThenProperEnginesAreDiscovered) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1394,7 +1340,7 @@ TEST(IoctlHelperXeTest, whenCreatingEngineInfoThenProperEnginesAreDiscovered) {
     }
 }
 
-TEST(IoctlHelperXeTest, whenCreatingMemoryInfoThenProperMemoryBanksAreDiscovered) {
+TEST_F(IoctlHelperXeTest, whenCreatingMemoryInfoThenProperMemoryBanksAreDiscovered) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -1435,7 +1381,7 @@ TEST(IoctlHelperXeTest, whenCreatingMemoryInfoThenProperMemoryBanksAreDiscovered
     EXPECT_EQ(2 * MemoryConstants::gigaByte - MemoryConstants::megaByte, memoryRegions[1].unallocatedSize);
 }
 
-TEST(IoctlHelperXeTest, givenXeDrmMemoryManagerWhenGetLocalMemorySizeIsCalledThenReturnMemoryRegionSizeCorrectly) {
+TEST_F(IoctlHelperXeTest, givenXeDrmMemoryManagerWhenGetLocalMemorySizeIsCalledThenReturnMemoryRegionSizeCorrectly) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
 
@@ -1474,7 +1420,7 @@ TEST(IoctlHelperXeTest, givenXeDrmMemoryManagerWhenGetLocalMemorySizeIsCalledThe
     EXPECT_EQ(memoryManager.getLocalMemorySize(0, tileMask), lmemSizes[1]);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlFailureWhenCreatingMemoryInfoThenNoMemoryBanksAreDiscovered) {
+TEST_F(IoctlHelperXeTest, givenIoctlFailureWhenCreatingMemoryInfoThenNoMemoryBanksAreDiscovered) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1486,7 +1432,7 @@ TEST(IoctlHelperXeTest, givenIoctlFailureWhenCreatingMemoryInfoThenNoMemoryBanks
     EXPECT_EQ(nullptr, memoryInfo);
 }
 
-TEST(IoctlHelperXeTest, givenNoMemoryRegionsWhenCreatingMemoryInfoThenMemoryInfoIsNotCreated) {
+TEST_F(IoctlHelperXeTest, givenNoMemoryRegionsWhenCreatingMemoryInfoThenMemoryInfoIsNotCreated) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1499,7 +1445,7 @@ TEST(IoctlHelperXeTest, givenNoMemoryRegionsWhenCreatingMemoryInfoThenMemoryInfo
     EXPECT_EQ(nullptr, memoryInfo);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlFailureWhenCreatingEngineInfoThenNoEnginesAreDiscovered) {
+TEST_F(IoctlHelperXeTest, givenIoctlFailureWhenCreatingEngineInfoThenNoEnginesAreDiscovered) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1511,7 +1457,7 @@ TEST(IoctlHelperXeTest, givenIoctlFailureWhenCreatingEngineInfoThenNoEnginesAreD
     EXPECT_EQ(nullptr, engineInfo);
 }
 
-TEST(IoctlHelperXeTest, givenEnabledFtrMultiTileArchWhenCreatingEngineInfoThenMultiTileArchInfoIsProperlySet) {
+TEST_F(IoctlHelperXeTest, givenEnabledFtrMultiTileArchWhenCreatingEngineInfoThenMultiTileArchInfoIsProperlySet) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
@@ -1532,7 +1478,7 @@ TEST(IoctlHelperXeTest, givenEnabledFtrMultiTileArchWhenCreatingEngineInfoThenMu
     }
 }
 
-TEST(IoctlHelperXeTest, givenDisabledFtrMultiTileArchWhenCreatingEngineInfoThenMultiTileArchInfoIsNotSet) {
+TEST_F(IoctlHelperXeTest, givenDisabledFtrMultiTileArchWhenCreatingEngineInfoThenMultiTileArchInfoIsNotSet) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
@@ -1564,16 +1510,12 @@ TEST_F(IoctlHelperXeFenceWaitTest, whenCallingVmBindThenWaitUserFenceIsCalled) {
     uint64_t fenceAddress = 0x4321;
     uint64_t fenceValue = 0x789;
 
-    BindInfo mockBindInfo{};
-    mockBindInfo.handle = 0x1234;
-    xeIoctlHelper->bindInfo.push_back(mockBindInfo);
-
     VmBindExtUserFenceT vmBindExtUserFence{};
 
     xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
 
     VmBindParams vmBindParams{};
-    vmBindParams.handle = mockBindInfo.handle;
+    vmBindParams.handle = 0x1234;
     xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
 
     drm->vmBindInputs.clear();
@@ -1634,7 +1576,7 @@ TEST_F(IoctlHelperXeFenceWaitTest, whenCallingVmBindThenWaitUserFenceIsCalled) {
     }
 }
 
-TEST(IoctlHelperXeTest, givenVmBindWaitUserFenceTimeoutWhenCallingVmBindThenWaitUserFenceIsCalledWithSpecificTimeout) {
+TEST_F(IoctlHelperXeTest, givenVmBindWaitUserFenceTimeoutWhenCallingVmBindThenWaitUserFenceIsCalledWithSpecificTimeout) {
     DebugManagerStateRestore restorer;
     debugManager.flags.VmBindWaitUserFenceTimeout.set(5000000000ll);
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
@@ -1645,16 +1587,12 @@ TEST(IoctlHelperXeTest, givenVmBindWaitUserFenceTimeoutWhenCallingVmBindThenWait
     uint64_t fenceAddress = 0x4321;
     uint64_t fenceValue = 0x789;
 
-    BindInfo mockBindInfo{};
-    mockBindInfo.handle = 0x1234;
-    xeIoctlHelper->bindInfo.push_back(mockBindInfo);
-
     VmBindExtUserFenceT vmBindExtUserFence{};
 
     xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
 
     VmBindParams vmBindParams{};
-    vmBindParams.handle = mockBindInfo.handle;
+    vmBindParams.handle = 0x1234;
     xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
 
     drm->vmBindInputs.clear();
@@ -1690,7 +1628,7 @@ TEST(IoctlHelperXeTest, givenVmBindWaitUserFenceTimeoutWhenCallingVmBindThenWait
     }
 }
 
-TEST(IoctlHelperXeTest, whenGemVmBindFailsThenErrorIsPropagated) {
+TEST_F(IoctlHelperXeTest, whenGemVmBindFailsThenErrorIsPropagated) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1699,16 +1637,12 @@ TEST(IoctlHelperXeTest, whenGemVmBindFailsThenErrorIsPropagated) {
     uint64_t fenceAddress = 0x4321;
     uint64_t fenceValue = 0x789;
 
-    BindInfo mockBindInfo{};
-    mockBindInfo.handle = 0x1234;
-    xeIoctlHelper->bindInfo.push_back(mockBindInfo);
-
     VmBindExtUserFenceT vmBindExtUserFence{};
 
     xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
 
     VmBindParams vmBindParams{};
-    vmBindParams.handle = mockBindInfo.handle;
+    vmBindParams.handle = 0x1234;
     xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
 
     drm->waitUserFenceInputs.clear();
@@ -1722,7 +1656,7 @@ TEST(IoctlHelperXeTest, whenGemVmBindFailsThenErrorIsPropagated) {
     EXPECT_EQ(0u, drm->waitUserFenceInputs.size());
 }
 
-TEST(IoctlHelperXeTest, whenUserFenceFailsThenErrorIsPropagated) {
+TEST_F(IoctlHelperXeTest, whenUserFenceFailsThenErrorIsPropagated) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1731,16 +1665,12 @@ TEST(IoctlHelperXeTest, whenUserFenceFailsThenErrorIsPropagated) {
     uint64_t fenceAddress = 0x4321;
     uint64_t fenceValue = 0x789;
 
-    BindInfo mockBindInfo{};
-    mockBindInfo.handle = 0x1234;
-    xeIoctlHelper->bindInfo.push_back(mockBindInfo);
-
     VmBindExtUserFenceT vmBindExtUserFence{};
 
     xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
 
     VmBindParams vmBindParams{};
-    vmBindParams.handle = mockBindInfo.handle;
+    vmBindParams.handle = 0x1234;
     xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
 
     drm->waitUserFenceInputs.clear();
@@ -1752,7 +1682,7 @@ TEST(IoctlHelperXeTest, whenUserFenceFailsThenErrorIsPropagated) {
     EXPECT_EQ(errorValue, xeIoctlHelper->vmUnbind(vmBindParams));
 }
 
-TEST(IoctlHelperXeTest, WhenSetupIpVersionIsCalledThenIpVersionIsCorrect) {
+TEST_F(IoctlHelperXeTest, WhenSetupIpVersionIsCalledThenIpVersionIsCorrect) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -1765,17 +1695,15 @@ TEST(IoctlHelperXeTest, WhenSetupIpVersionIsCalledThenIpVersionIsCorrect) {
     EXPECT_EQ(config, hwInfo.ipVersion.value);
 }
 
-TEST(IoctlHelperXeTest, whenXeShowBindTableIsCalledThenBindLogsArePrinted) {
+TEST_F(IoctlHelperXeTest, whenXeShowBindTableIsCalledThenBindLogsArePrinted) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
 
     BindInfo mockBindInfo{};
-    mockBindInfo.handle = 1u;
     mockBindInfo.userptr = 2u;
     mockBindInfo.addr = 3u;
-    mockBindInfo.size = 4u;
     xeIoctlHelper->bindInfo.push_back(mockBindInfo);
 
     ::testing::internal::CaptureStderr();
@@ -1785,26 +1713,14 @@ TEST(IoctlHelperXeTest, whenXeShowBindTableIsCalledThenBindLogsArePrinted) {
     debugManager.flags.PrintXeLogs.set(false);
 
     std::string output = testing::internal::GetCapturedStderr();
-    std::string expectedOutput1 = "show bind: (<index> <handle> <userptr> <addr> <size>)\n";
-    std::string expectedOutput2 = "0 x00000001 x0000000000000002 x0000000000000003 x0000000000000004";
+    std::string expectedOutput1 = "show bind: (<index> <userptr> <addr>)\n";
+    std::string expectedOutput2 = "0 x0000000000000002 x0000000000000003";
 
     EXPECT_NE(std::string::npos, output.find(expectedOutput1));
-    EXPECT_NE(std::string::npos, output.find(expectedOutput2, expectedOutput1.size()));
+    EXPECT_NE(std::string::npos, output.find(expectedOutput2, expectedOutput1.size())) << output;
 }
 
-TEST(IoctlHelperXeTest, whenFillBindInfoForIpcHandleIsCalledThenBindInfoIsCorrect) {
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    uint32_t handle = 100;
-    size_t size = 1024u;
-    xeIoctlHelper->fillBindInfoForIpcHandle(handle, size);
-    auto bindInfo = xeIoctlHelper->bindInfo[0];
-    EXPECT_EQ(bindInfo.handle, handle);
-    EXPECT_EQ(bindInfo.size, size);
-}
-
-TEST(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenFalseIsReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenFalseIsReturned) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
@@ -1822,7 +1738,7 @@ TEST(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenFalseIsRe
     EXPECT_EQ(false, ret);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenProperValuesAreSet) {
+TEST_F(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenProperValuesAreSet) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
@@ -1848,7 +1764,7 @@ TEST(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenProperVal
     EXPECT_EQ(pGpuCpuTime.cpuTimeinNS, expectedTimestamp);
 }
 
-TEST(IoctlHelperXeTest, whenDeviceTimestampWidthSetThenProperValuesAreSet) {
+TEST_F(IoctlHelperXeTest, whenDeviceTimestampWidthSetThenProperValuesAreSet) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
@@ -1877,7 +1793,7 @@ TEST(IoctlHelperXeTest, whenDeviceTimestampWidthSetThenProperValuesAreSet) {
     EXPECT_EQ(pGpuCpuTime.gpuTimeStamp, expectedCycles);
 }
 
-TEST(IoctlHelperXeTest, whenSetDefaultEngineIsCalledThenProperEngineIsSet) {
+TEST_F(IoctlHelperXeTest, whenSetDefaultEngineIsCalledThenProperEngineIsSet) {
     NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>(&hwInfo);
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1894,7 +1810,7 @@ TEST(IoctlHelperXeTest, whenSetDefaultEngineIsCalledThenProperEngineIsSet) {
     EXPECT_THROW(xeIoctlHelper->getDefaultEngineClass(aub_stream::EngineType::ENGINE_VECS), std::exception);
 }
 
-TEST(IoctlHelperXeTest, whenGettingPreemptionSupportThenTrueIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGettingPreemptionSupportThenTrueIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -1902,7 +1818,7 @@ TEST(IoctlHelperXeTest, whenGettingPreemptionSupportThenTrueIsReturned) {
     EXPECT_TRUE(xeIoctlHelper->isPreemptionSupported());
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenGetCpuCachingModeCalledThenCorrectValueIsReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenGetCpuCachingModeCalledThenCorrectValueIsReturned) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1924,7 +1840,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenGetCpuCachingModeCalledThenCorrect
     EXPECT_EQ(xeIoctlHelper->getCpuCachingMode(false, false), DRM_XE_GEM_CPU_CACHING_WB);
 }
 
-TEST(IoctlHelperXeTest, whenCallingVmBindThenPatIndexIsSet) {
+TEST_F(IoctlHelperXeTest, whenCallingVmBindThenPatIndexIsSet) {
     DebugManagerStateRestore restorer;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1934,16 +1850,12 @@ TEST(IoctlHelperXeTest, whenCallingVmBindThenPatIndexIsSet) {
     uint64_t fenceValue = 0x789;
     uint64_t expectedPatIndex = 0xba;
 
-    BindInfo mockBindInfo{};
-    mockBindInfo.handle = 0x1234;
-    xeIoctlHelper->bindInfo.push_back(mockBindInfo);
-
     VmBindExtUserFenceT vmBindExtUserFence{};
 
     xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
 
     VmBindParams vmBindParams{};
-    vmBindParams.handle = mockBindInfo.handle;
+    vmBindParams.handle = 0x1234;
     xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
     vmBindParams.patIndex = expectedPatIndex;
 
@@ -1956,7 +1868,7 @@ TEST(IoctlHelperXeTest, whenCallingVmBindThenPatIndexIsSet) {
     EXPECT_EQ(drm->vmBindInputs[0].bind.pat_index, expectedPatIndex);
 }
 
-TEST(IoctlHelperXeTest, whenBindingDrmContextWithoutVirtualEnginesThenProperEnginesAreSelected) {
+TEST_F(IoctlHelperXeTest, whenBindingDrmContextWithoutVirtualEnginesThenProperEnginesAreSelected) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -1980,7 +1892,7 @@ TEST(IoctlHelperXeTest, whenBindingDrmContextWithoutVirtualEnginesThenProperEngi
     EXPECT_EQ(expectedGtId, ioctlHelper->contextParamEngine[0].gt_id);
 }
 
-TEST(IoctlHelperXeTest, whenBindingDrmContextWithVirtualEnginesThenProperEnginesAreSelected) {
+TEST_F(IoctlHelperXeTest, whenBindingDrmContextWithVirtualEnginesThenProperEnginesAreSelected) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2014,7 +1926,7 @@ TEST(IoctlHelperXeTest, whenBindingDrmContextWithVirtualEnginesThenProperEngines
     }
 }
 
-TEST(IoctlHelperXeTest, whenCallingGetResetStatsThenSuccessIsReturned) {
+TEST_F(IoctlHelperXeTest, whenCallingGetResetStatsThenSuccessIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2029,7 +1941,7 @@ TEST(IoctlHelperXeTest, whenCallingGetResetStatsThenSuccessIsReturned) {
     EXPECT_EQ(0, xeIoctlHelper->getResetStats(resetStats, nullptr, nullptr));
 }
 
-TEST(IoctlHelperXeTest, whenCallingGetStatusAndFlagsForResetStatsThenZeroIsReturned) {
+TEST_F(IoctlHelperXeTest, whenCallingGetStatusAndFlagsForResetStatsThenZeroIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2040,27 +1952,24 @@ TEST(IoctlHelperXeTest, whenCallingGetStatusAndFlagsForResetStatsThenZeroIsRetur
     EXPECT_FALSE(ioctlHelper->validPageFault(0u));
 }
 
-TEST(IoctlHelperXeTest, whenInitializeThenProperHwInfoIsSet) {
+TEST_F(IoctlHelperXeTest, whenInitializeThenProperHwInfoIsSet) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
 
     auto hwInfo = executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo();
 
-    hwInfo->platform.usDeviceID = 0;
-    hwInfo->platform.usRevId = 0;
     hwInfo->capabilityTable.gpuAddressSpace = 0;
 
     ioctlHelper->initialize();
-    EXPECT_EQ(drm->revId, hwInfo->platform.usRevId);
-    EXPECT_EQ(drm->devId, hwInfo->platform.usDeviceID);
+
     EXPECT_EQ((1ull << 48) - 1, hwInfo->capabilityTable.gpuAddressSpace);
     EXPECT_EQ(static_cast<uint32_t>(DrmMockXe::mockDefaultCxlType), hwInfo->capabilityTable.cxlType);
 
     EXPECT_EQ(DrmMockXe::mockMaxExecQueuePriority, ioctlHelper->maxExecQueuePriority);
 }
 
-TEST(IoctlHelperXeTest, givenMultipleBindInfosWhenGemCloseIsCalledThenProperHandleIsTaken) {
+TEST_F(IoctlHelperXeTest, givenMultipleBindInfosWhenGemCloseIsCalledThenProperHandleIsTaken) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2068,12 +1977,6 @@ TEST(IoctlHelperXeTest, givenMultipleBindInfosWhenGemCloseIsCalledThenProperHand
     drm->gemCloseCalled = 0;
 
     BindInfo bindInfo{};
-
-    bindInfo.handle = 1;
-    ioctlHelper->bindInfo.push_back(bindInfo);
-    bindInfo.handle = 2;
-    ioctlHelper->bindInfo.push_back(bindInfo);
-
     bindInfo = {};
     bindInfo.userptr = 1;
     ioctlHelper->bindInfo.push_back(bindInfo);
@@ -2106,7 +2009,7 @@ TEST(IoctlHelperXeTest, givenMultipleBindInfosWhenGemCloseIsCalledThenProperHand
     EXPECT_EQ(0ul, ioctlHelper->bindInfo.size());
 }
 
-TEST(IoctlHelperXeTest, givenMultipleBindInfosWhenVmBindIsCalledThenProperHandleIsTaken) {
+TEST_F(IoctlHelperXeTest, givenMultipleBindInfosWhenVmBindIsCalledThenProperHandleIsTaken) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2114,13 +2017,6 @@ TEST(IoctlHelperXeTest, givenMultipleBindInfosWhenVmBindIsCalledThenProperHandle
     drm->vmBindInputs.clear();
 
     BindInfo bindInfo{};
-
-    bindInfo.handle = 1;
-    ioctlHelper->bindInfo.push_back(bindInfo);
-    bindInfo.handle = 2;
-    ioctlHelper->bindInfo.push_back(bindInfo);
-
-    bindInfo = {};
     bindInfo.userptr = 1;
     ioctlHelper->bindInfo.push_back(bindInfo);
     bindInfo.userptr = 2;
@@ -2169,14 +2065,14 @@ TEST(IoctlHelperXeTest, givenMultipleBindInfosWhenVmBindIsCalledThenProperHandle
 
     vmBindParams.handle = 0;
     vmBindParams.userptr = 0;
-    EXPECT_NE(0, ioctlHelper->vmBind(vmBindParams));
+    EXPECT_EQ(0, ioctlHelper->vmBind(vmBindParams));
 
-    EXPECT_EQ(0ul, drm->vmBindInputs.size());
+    EXPECT_EQ(1ul, drm->vmBindInputs.size());
 
     ioctlHelper->bindInfo.clear();
 }
 
-TEST(IoctlHelperXeTest, givenLowPriorityContextWhenSettingPropertiesThenCorrectIndexIsUsedAndReturend) {
+TEST_F(IoctlHelperXeTest, givenLowPriorityContextWhenSettingPropertiesThenCorrectIndexIsUsedAndReturend) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2191,7 +2087,7 @@ TEST(IoctlHelperXeTest, givenLowPriorityContextWhenSettingPropertiesThenCorrectI
     EXPECT_EQ(2u, extIndex);
 }
 
-TEST(IoctlHelperXeTest, givenLowPriorityContextWhenCreatingDrmContextThenExtPropertyIsSetCorrectly) {
+TEST_F(IoctlHelperXeTest, givenLowPriorityContextWhenCreatingDrmContextThenExtPropertyIsSetCorrectly) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
 
@@ -2207,7 +2103,7 @@ TEST(IoctlHelperXeTest, givenLowPriorityContextWhenCreatingDrmContextThenExtProp
     EXPECT_EQ(0u, drm->execQueueProperties[0].value);
 }
 
-TEST(IoctlHelperXeTest, whenInitializeThenGtListDataIsQueried) {
+TEST_F(IoctlHelperXeTest, whenInitializeThenGtListDataIsQueried) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2223,7 +2119,7 @@ TEST(IoctlHelperXeTest, whenInitializeThenGtListDataIsQueried) {
     EXPECT_EQ(drm->queryGtList.size(), ioctlHelper->queryGtListData.size());
 }
 
-TEST(IoctlHelperXeTest, givenNoGtListDataWhenInitializeThenInitializationFails) {
+TEST_F(IoctlHelperXeTest, givenNoGtListDataWhenInitializeThenInitializationFails) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto ioctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2233,7 +2129,7 @@ TEST(IoctlHelperXeTest, givenNoGtListDataWhenInitializeThenInitializationFails) 
     EXPECT_FALSE(ioctlHelper->initialize());
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetFlagsForVmBindThenExpectedValueIsReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetFlagsForVmBindThenExpectedValueIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(*drm);
@@ -2258,7 +2154,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingGetFlagsForVmBindThenExpect
     }
 }
 
-TEST(IoctlHelperXeTest, whenGetFdFromVmExportIsCalledThenFalseIsReturned) {
+TEST_F(IoctlHelperXeTest, whenGetFdFromVmExportIsCalledThenFalseIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2267,7 +2163,7 @@ TEST(IoctlHelperXeTest, whenGetFdFromVmExportIsCalledThenFalseIsReturned) {
     EXPECT_FALSE(xeIoctlHelper->getFdFromVmExport(vmId, flags, &fd));
 }
 
-TEST(IoctlHelperXeTest, whenCheckingGpuHangThenBanPropertyIsQueried) {
+TEST_F(IoctlHelperXeTest, whenCheckingGpuHangThenBanPropertyIsQueried) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
 
@@ -2282,7 +2178,7 @@ TEST(IoctlHelperXeTest, whenCheckingGpuHangThenBanPropertyIsQueried) {
     EXPECT_TRUE(osContext.isHangDetected());
 }
 
-TEST(IoctlHelperXeVmBindTest, givenImmediateAndReadOnlyBindFlagsSupportedWhenGettingFlagsForVmBindThenCorrectFlagsAreReturned) {
+TEST_F(IoctlHelperXeTest, givenImmediateAndReadOnlyBindFlagsSupportedWhenGettingFlagsForVmBindThenCorrectFlagsAreReturned) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -2351,7 +2247,7 @@ struct DrmMockXeVmBind : public DrmMockXe {
     DrmMockXeVmBind(RootDeviceEnvironment &rootDeviceEnvironment) : DrmMockXe(rootDeviceEnvironment) {}
 };
 
-TEST(IoctlHelperXeVmBindTest, whenInitializeIoctlHelperThenQueryPageFaultFlagsSupport) {
+TEST_F(IoctlHelperXeTest, whenInitializeIoctlHelperThenQueryPageFaultFlagsSupport) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeVmBind::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -2364,7 +2260,7 @@ TEST(IoctlHelperXeVmBindTest, whenInitializeIoctlHelperThenQueryPageFaultFlagsSu
     }
 }
 
-TEST(IoctlHelperXeVmBindTest, givenDeviceInFaultModeWhenInitializeIoctlHelperThenQueryFeaturesIsSuccessful) {
+TEST_F(IoctlHelperXeTest, givenDeviceInFaultModeWhenInitializeIoctlHelperThenQueryFeaturesIsSuccessful) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXeVmBind::create(*executionEnvironment->rootDeviceEnvironments[0]);
     drm->deviceIsInFaultMode = true;
@@ -2460,16 +2356,7 @@ TEST_F(IoctlHelperXeHwIpVersionTests, WhenSetupIpVersionIsCalledAndIoctlReturnsN
     EXPECT_EQ(config, hwInfo.ipVersion.value);
 }
 
-TEST(IoctlHelperXeTest, givenCorrectEuPerDssTypeWhenCheckingIfTopologyIsEuPerDssThenSuccessIsReturned) {
-    MockExecutionEnvironment executionEnvironment{};
-    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
-    IoctlHelperXe ioctlHelper{*drm};
-    EXPECT_TRUE(ioctlHelper.isEuPerDssTopologyType(DRM_XE_TOPO_EU_PER_DSS));
-    EXPECT_FALSE(ioctlHelper.isEuPerDssTopologyType(DRM_XE_TOPO_DSS_GEOMETRY));
-    EXPECT_FALSE(ioctlHelper.isEuPerDssTopologyType(DRM_XE_TOPO_DSS_COMPUTE));
-}
-
-TEST(IoctlHelperXeTest, givenIoctlHelperWhenSettingExtContextThenCallExternalIoctlFunction) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperWhenSettingExtContextThenCallExternalIoctlFunction) {
     MockExecutionEnvironment executionEnvironment{};
     std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
     IoctlHelperXe ioctlHelper{*drm};
@@ -2493,7 +2380,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperWhenSettingExtContextThenCallExternalIoc
     EXPECT_TRUE(ioctlHelper.ioctl(DrmIoctl::getResetStats, &resetStats));
     EXPECT_FALSE(ioctlCalled);
 }
-TEST(IoctlHelperXeTest, givenL3BankWhenGetTopologyDataAndMapThenResultsAreCorrect) {
+TEST_F(IoctlHelperXeTest, givenL3BankWhenGetTopologyDataAndMapThenResultsAreCorrect) {
 
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -2518,7 +2405,7 @@ TEST(IoctlHelperXeTest, givenL3BankWhenGetTopologyDataAndMapThenResultsAreCorrec
     EXPECT_EQ(12, topologyData.numL3Banks);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperWhenGettingFenceAddressThenReturnCorrectValue) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperWhenGettingFenceAddressThenReturnCorrectValue) {
     MockExecutionEnvironment executionEnvironment{};
     std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
     IoctlHelperXe ioctlHelper{*drm};
@@ -2531,7 +2418,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperWhenGettingFenceAddressThenReturnCorrect
     EXPECT_EQ(osContext.getFenceAddr(0), fenceAddr);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlWhenQueryDeviceParamsIsCalledThenFalseIsReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlWhenQueryDeviceParamsIsCalledThenFalseIsReturned) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
     auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
@@ -2541,7 +2428,7 @@ TEST(IoctlHelperXeTest, givenIoctlWhenQueryDeviceParamsIsCalledThenFalseIsReturn
     EXPECT_FALSE(xeIoctlHelper->queryDeviceParams(&moduleId, &serverType));
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchThenVmBindIsCalled) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchThenVmBindIsCalled) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
 
@@ -2569,7 +2456,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchThenVmBindIsCa
     EXPECT_EQ(drm->vmBindInputs[0].bind.prefetch_mem_region_instance, targetMemoryRegion.memoryInstance);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchOnSecondTileThenVmBindIsCalled) {
+TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchOnSecondTileThenVmBindIsCalled) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
 
@@ -2597,7 +2484,7 @@ TEST(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchOnSecondTileTh
     EXPECT_EQ(drm->vmBindInputs[0].bind.prefetch_mem_region_instance, targetMemoryRegion.memoryInstance);
 }
 
-TEST(IoctlHelperXeTest, givenIoctlFailureWhenCallingSetVmPrefetchThenFalseIsReturned) {
+TEST_F(IoctlHelperXeTest, givenIoctlFailureWhenCallingSetVmPrefetchThenFalseIsReturned) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
 
@@ -2613,4 +2500,93 @@ TEST(IoctlHelperXeTest, givenIoctlFailureWhenCallingSetVmPrefetchThenFalseIsRetu
 
     EXPECT_FALSE(xeIoctlHelper->setVmPrefetch(0u, 0u, 0u, 0u));
     EXPECT_EQ(0u, drm->vmBindInputs.size());
+}
+
+TEST_F(IoctlHelperXeTest, givenXeIoctlHelperWhenIsTimestampsRefreshEnabledCalledThenReturnTrue) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
+    auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
+    EXPECT_TRUE(xeIoctlHelper->isTimestampsRefreshEnabled());
+}
+
+TEST_F(IoctlHelperXeTest, whenIoctlFailsOnQueryConfigSizeThenQueryDeviceIdAndRevisionFails) {
+    MockExecutionEnvironment executionEnvironment{};
+    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
+
+    mockIoctl = [](int fileDescriptor, unsigned long int request, void *arg) -> int {
+        return -1;
+    };
+    EXPECT_FALSE(IoctlHelperXe::queryDeviceIdAndRevision(*drm));
+}
+
+TEST_F(IoctlHelperXeTest, givenZeroConfigSizeWhenQueryDeviceIdAndRevisionThenFail) {
+    MockExecutionEnvironment executionEnvironment{};
+    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
+
+    mockIoctl = [](int fileDescriptor, unsigned long int request, void *arg) -> int {
+        if (request == DRM_IOCTL_XE_DEVICE_QUERY) {
+            struct drm_xe_device_query *deviceQuery = static_cast<struct drm_xe_device_query *>(arg);
+            if (deviceQuery->query == DRM_XE_DEVICE_QUERY_CONFIG) {
+                deviceQuery->size = 0;
+                return 0;
+            }
+        }
+        return -1;
+    };
+    EXPECT_FALSE(IoctlHelperXe::queryDeviceIdAndRevision(*drm));
+}
+
+TEST_F(IoctlHelperXeTest, whenIoctlFailsOnQueryConfigThenQueryDeviceIdAndRevisionFails) {
+    MockExecutionEnvironment executionEnvironment{};
+    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
+
+    mockIoctl = [](int fileDescriptor, unsigned long int request, void *arg) -> int {
+        if (request == DRM_IOCTL_XE_DEVICE_QUERY) {
+            struct drm_xe_device_query *deviceQuery = static_cast<struct drm_xe_device_query *>(arg);
+            if (deviceQuery->query == DRM_XE_DEVICE_QUERY_CONFIG) {
+                if (deviceQuery->data) {
+                    return -1;
+                }
+                deviceQuery->size = 1;
+                return 0;
+            }
+        }
+        return -1;
+    };
+    EXPECT_FALSE(IoctlHelperXe::queryDeviceIdAndRevision(*drm));
+}
+
+TEST_F(IoctlHelperXeTest, whenQueryDeviceIdAndRevisionThenProperValuesAreSet) {
+    MockExecutionEnvironment executionEnvironment{};
+    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
+
+    auto hwInfo = drm->getRootDeviceEnvironment().getMutableHardwareInfo();
+
+    static constexpr uint16_t mockDeviceId = 0x1234;
+    static constexpr uint16_t mockRevisionId = 0xB;
+
+    hwInfo->platform.usDeviceID = 0;
+    hwInfo->platform.usRevId = 0;
+
+    mockIoctl = [](int fileDescriptor, unsigned long int request, void *arg) -> int {
+        if (request == DRM_IOCTL_XE_DEVICE_QUERY) {
+            struct drm_xe_device_query *deviceQuery = static_cast<struct drm_xe_device_query *>(arg);
+            if (deviceQuery->query == DRM_XE_DEVICE_QUERY_CONFIG) {
+                if (deviceQuery->data) {
+                    struct drm_xe_query_config *config = reinterpret_cast<struct drm_xe_query_config *>(deviceQuery->data);
+                    config->num_params = DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID + 1;
+                    config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] = (static_cast<uint32_t>(mockRevisionId) << 16) | mockDeviceId;
+                } else {
+                    deviceQuery->size = (DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID + 1) * sizeof(uint64_t);
+                }
+
+                return 0;
+            }
+        }
+        return -1;
+    };
+    EXPECT_TRUE(IoctlHelperXe::queryDeviceIdAndRevision(*drm));
+
+    EXPECT_EQ(mockDeviceId, hwInfo->platform.usDeviceID);
+    EXPECT_EQ(mockRevisionId, hwInfo->platform.usRevId);
 }

@@ -7,11 +7,12 @@
 
 #include "level_zero/core/source/driver/extension_function_address.h"
 
-#include "level_zero/api/driver_experimental/public/zex_api.h"
-#include "level_zero/api/driver_experimental/public/zex_context.h"
 #include "level_zero/api/extensions/public/ze_exp_ext.h"
-#include "level_zero/include/ze_intel_gpu.h"
-#include "level_zero/include/zet_intel_gpu_metric.h"
+#include "level_zero/driver_experimental/zex_api.h"
+#include "level_zero/driver_experimental/zex_cmdlist.h"
+#include "level_zero/driver_experimental/zex_context.h"
+#include "level_zero/ze_intel_gpu.h"
+#include "level_zero/zet_intel_gpu_metric.h"
 
 #include <cstring>
 
@@ -42,10 +43,13 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
     RETURN_FUNC_PTR_IF_EXIST(zexCounterBasedEventCreate);
     RETURN_FUNC_PTR_IF_EXIST(zexEventGetDeviceAddress);
 
+    RETURN_FUNC_PTR_IF_EXIST(zexCounterBasedEventCreate2);
+    RETURN_FUNC_PTR_IF_EXIST(zexCounterBasedEventGetIpcHandle);
+    RETURN_FUNC_PTR_IF_EXIST(zexCounterBasedEventOpenIpcHandle);
+    RETURN_FUNC_PTR_IF_EXIST(zexCounterBasedEventCloseIpcHandle);
+
     RETURN_FUNC_PTR_IF_EXIST(zeMemGetPitchFor2dImage);
     RETURN_FUNC_PTR_IF_EXIST(zeImageGetDeviceOffsetExp);
-    RETURN_FUNC_PTR_IF_EXIST(zetIntelDeviceGetConcurrentMetricGroupsExp);
-    RETURN_FUNC_PTR_IF_EXIST(zetIntelDeviceCreateMetricGroupsFromMetricsExp);
     RETURN_FUNC_PTR_IF_EXIST(zeIntelGetDriverVersionString);
 
     RETURN_FUNC_PTR_IF_EXIST(zeIntelMediaCommunicationCreate);
@@ -53,6 +57,12 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
 
     RETURN_FUNC_PTR_IF_EXIST(zexIntelAllocateNetworkInterrupt);
     RETURN_FUNC_PTR_IF_EXIST(zexIntelReleaseNetworkInterrupt);
+
+    RETURN_FUNC_PTR_IF_EXIST(zeIntelDeviceImportExternalSemaphoreExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeIntelCommandListAppendWaitExternalSemaphoresExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeIntelCommandListAppendSignalExternalSemaphoresExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeIntelDeviceReleaseExternalSemaphoreExp);
+
 #undef RETURN_FUNC_PTR_IF_EXIST
 
     return ExtensionFunctionAddressHelper::getAdditionalExtensionFunctionAddress(functionName);

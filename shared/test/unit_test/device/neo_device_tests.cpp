@@ -25,6 +25,7 @@
 #include "shared/test/common/helpers/raii_product_helper.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/helpers/variable_backup.h"
+#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_compiler_interface.h"
@@ -34,6 +35,7 @@
 #include "shared/test/common/mocks/mock_io_functions.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
 #include "shared/test/common/mocks/mock_product_helper.h"
+#include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
@@ -348,6 +350,24 @@ TEST_F(DeviceTest, GivenDeviceWhenGenerateUuidFromPciBusInfoThenValidValuesAreSe
     EXPECT_EQ(memcmp(&uuid, &expectedUuid, ProductHelper::uuidSize), 0);
 }
 
+TEST_F(DeviceTest, givenDeviceWhenUsingBufferPoolsTrackingThenCountIsUpdated) {
+    pDevice->updateMaxPoolCount(3u);
+    EXPECT_EQ(3u, pDevice->maxBufferPoolCount);
+    EXPECT_EQ(0u, pDevice->bufferPoolCount.load());
+
+    EXPECT_FALSE(pDevice->requestPoolCreate(4u));
+    EXPECT_EQ(0u, pDevice->bufferPoolCount.load());
+
+    EXPECT_TRUE(pDevice->requestPoolCreate(3u));
+    EXPECT_EQ(3u, pDevice->bufferPoolCount.load());
+
+    EXPECT_FALSE(pDevice->requestPoolCreate(1u));
+    EXPECT_EQ(3u, pDevice->bufferPoolCount.load());
+
+    pDevice->recordPoolsFreed(2u);
+    EXPECT_EQ(1u, pDevice->bufferPoolCount.load());
+}
+
 using DeviceGetCapsTest = Test<DeviceFixture>;
 
 TEST_F(DeviceGetCapsTest, givenMockCompilerInterfaceWhenInitializeCapsIsCalledThenMaxParameterSizeIsSetCorrectly) {
@@ -526,10 +546,10 @@ TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorMemoryMana
         };
         uint64_t getLocalMemorySize(uint32_t rootDeviceIndex, uint32_t deviceBitfield) override { return 0; };
         double getPercentOfGlobalMemoryAvailable(uint32_t rootDeviceIndex) override { return 0; }
-        AddressRange reserveGpuAddress(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex) override {
+        AddressRange reserveGpuAddress(const uint64_t requiredStartAddress, size_t size, const RootDeviceIndicesContainer &rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex) override {
             return {};
         }
-        AddressRange reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, RootDeviceIndicesContainer rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) override {
+        AddressRange reserveGpuAddressOnHeap(const uint64_t requiredStartAddress, size_t size, const RootDeviceIndicesContainer &rootDeviceIndices, uint32_t *reservedOnRootDeviceIndex, HeapIndex heap, size_t alignment) override {
             return {};
         }
         size_t selectAlignmentAndHeap(size_t size, HeapIndex *heap) override {
@@ -549,8 +569,11 @@ TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorMemoryMana
         GraphicsAllocation *allocateGraphicsMemoryWithGpuVa(const AllocationData &allocationData) override { return nullptr; };
         GraphicsAllocation *allocatePhysicalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
         GraphicsAllocation *allocatePhysicalLocalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
-        void unMapPhysicalToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) override { return; };
-        bool mapPhysicalToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
+        GraphicsAllocation *allocatePhysicalHostMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
+        void unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) override { return; };
+        void unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return; };
+        bool mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
+        bool mapPhysicalHostMemoryToVirtualMemory(RootDeviceIndicesContainer &rootDeviceIndices, MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
 
         GraphicsAllocation *allocateGraphicsMemoryForImageImpl(const AllocationData &allocationData, std::unique_ptr<Gmm> gmm) override { return nullptr; };
         GraphicsAllocation *allocateMemoryByKMD(const AllocationData &allocationData) override { return nullptr; };
@@ -1908,10 +1931,45 @@ TEST_F(DeviceTests, givenNewUsmPoolingEnabledWhenDeviceInitializedThenUsmMemAllo
 TEST(DeviceWithoutAILTest, givenNoAILWhenCreateDeviceThenDeviceIsCreated) {
     DebugManagerStateRestore dbgRestorer;
     debugManager.flags.EnableAIL.set(false);
-
+    MockReleaseHelper mockReleaseHelper;
     auto hwInfo = *defaultHwInfo;
-    setupDefaultFeatureTableAndWorkaroundTable(&hwInfo);
+    setupDefaultFeatureTableAndWorkaroundTable(&hwInfo, mockReleaseHelper);
     auto device = std::unique_ptr<Device>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hwInfo));
 
     EXPECT_NE(nullptr, device.get());
+}
+
+HWTEST_F(DeviceTests, givenCopyInternalEngineWhenStopDirectSubmissionForCopyEngineCalledThenStopDirectSubmission) {
+    DebugManagerStateRestore dbgRestorer;
+    VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    debugManager.flags.ForceBCSForInternalCopyEngine.set(0);
+    defaultHwInfo->capabilityTable.blitterOperationsSupported = true;
+    ultHwConfig.csrBaseCallBlitterDirectSubmissionAvailable = false;
+
+    UltDeviceFactory factory{1, 0};
+    factory.rootDevices[0]->createEngine({aub_stream::EngineType::ENGINE_BCS, EngineUsage::regular});
+
+    auto device = factory.rootDevices[0];
+    auto regularCsr = device->getEngine(aub_stream::EngineType::ENGINE_BCS, EngineUsage::regular).commandStreamReceiver;
+    auto regularUltCsr = reinterpret_cast<UltCommandStreamReceiver<FamilyType> *>(regularCsr);
+    regularUltCsr->callBaseStopDirectSubmission = false;
+
+    device->stopDirectSubmissionForCopyEngine();
+    EXPECT_FALSE(regularUltCsr->stopDirectSubmissionCalled);
+
+    factory.rootDevices[0]->createEngine({aub_stream::EngineType::ENGINE_BCS, EngineUsage::internal});
+    device->stopDirectSubmissionForCopyEngine();
+    EXPECT_FALSE(regularUltCsr->stopDirectSubmissionCalled);
+
+    regularUltCsr->blitterDirectSubmissionAvailable = true;
+    device->stopDirectSubmissionForCopyEngine();
+    EXPECT_TRUE(regularUltCsr->stopDirectSubmissionCalled);
+}
+
+TEST(Device, givenDeviceWhenGettingMicrosecondResolutionThenCorrectValueReturned) {
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    uint32_t expectedMicrosecondResolution = 123;
+    device->microsecondResolution = expectedMicrosecondResolution;
+    EXPECT_EQ(device->getMicrosecondResolution(), expectedMicrosecondResolution);
 }

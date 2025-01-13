@@ -27,6 +27,7 @@ class OaMetricProgrammableFixture : public DeviceFixture,
     MetricEnumeration *metricEnumeration = nullptr;
     MockIAdapterGroup1x13 mockAdapterGroup{};
     void disableProgrammableMetricsSupport();
+    DebugManagerStateRestore restorer;
 };
 
 void OaMetricProgrammableFixture::TearDown() {
@@ -37,8 +38,6 @@ void OaMetricProgrammableFixture::TearDown() {
 void OaMetricProgrammableFixture::SetUp() {
     DeviceFixture::setUp();
 
-    DebugManagerStateRestore restorer;
-    debugManager.flags.EnableProgrammableMetricsSupport.set(1);
     mockAdapterGroup.mockParams.Version.MajorNumber = 1;
     mockAdapterGroup.mockParams.Version.MinorNumber = 13;
     deviceContext = std::make_unique<MetricDeviceContext>(*device);
@@ -53,9 +52,7 @@ void OaMetricProgrammableFixture::SetUp() {
 void OaMetricProgrammableFixture::disableProgrammableMetricsSupport() {
 
     deviceContext.reset();
-
-    DebugManagerStateRestore restorer;
-    debugManager.flags.EnableProgrammableMetricsSupport.set(0);
+    debugManager.flags.DisableProgrammableMetricsSupport.set(1);
     mockAdapterGroup.mockParams.Version.MajorNumber = 1;
     mockAdapterGroup.mockParams.Version.MinorNumber = 13;
     deviceContext = std::make_unique<MetricDeviceContext>(*device);
@@ -86,7 +83,7 @@ TEST_F(OaMetricProgrammableTests, givenMetricProgrammableIsSupportedThenValidHan
     EXPECT_STREQ(properties.name, "SymbolName");
     EXPECT_EQ(properties.domain, 1u);
     EXPECT_EQ(properties.tierNumber, 1u);
-    EXPECT_EQ(properties.samplingType, ZET_INTEL_METRIC_SAMPLING_TYPE_EXP_FLAG_TIME_AND_EVENT_BASED);
+    EXPECT_EQ(properties.samplingType, METRICS_SAMPLING_TYPE_TIME_EVENT_BASED);
     metricEnumeration->cleanupExtendedMetricInformation();
 }
 
@@ -108,7 +105,7 @@ TEST_F(OaMetricProgrammableTests, givenEnableProgrammableMetricsSupportIsNotSetW
 
     uint32_t count = 0;
     DebugManagerStateRestore restorer;
-    debugManager.flags.EnableProgrammableMetricsSupport.set(0);
+    debugManager.flags.DisableProgrammableMetricsSupport.set(1);
     auto deviceContextTest = std::make_unique<MetricDeviceContext>(*device);
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, deviceContextTest->metricProgrammableGet(&count, nullptr));
 }
@@ -207,7 +204,7 @@ TEST_F(OaMetricProgrammableTests, givenMetricProgrammableIsSupportedWhenCacheing
         EXPECT_STREQ(properties.name, "SymbolName");
         EXPECT_EQ(properties.domain, 1u);
         EXPECT_EQ(properties.tierNumber, 1u);
-        EXPECT_EQ(properties.samplingType, ZET_INTEL_METRIC_SAMPLING_TYPE_EXP_FLAG_TIME_AND_EVENT_BASED);
+        EXPECT_EQ(properties.samplingType, METRICS_SAMPLING_TYPE_TIME_EVENT_BASED);
     }
     metricEnumeration->cleanupExtendedMetricInformation();
 }
@@ -218,7 +215,8 @@ TEST_F(OaMetricProgrammableTests, givenMetricsProgrammableSupportIsDisabledWhenm
     MetricsDiscovery::IConcurrentGroup_1_13 &concurrentGroup1x13 = mockConcurrentGroup;
     EXPECT_EQ(ZE_RESULT_SUCCESS, metricEnumeration->cacheExtendedMetricInformation(concurrentGroup1x13, 1));
     uint32_t count = 0;
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, L0::metricProgrammableGet(device, &count, nullptr));
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, deviceContext->metricProgrammableGet(&count, nullptr));
+    EXPECT_EQ(count, 0u);
     metricEnumeration->cleanupExtendedMetricInformation();
 }
 
@@ -255,7 +253,7 @@ TEST_F(OaMetricProgrammableTests, givenMetricProgrammableIsSupportedAndApiMaskIs
     EXPECT_EQ(ZE_RESULT_SUCCESS, deviceContext->metricProgrammableGet(&count, &programmable));
     zet_metric_programmable_exp_properties_t properties{};
     EXPECT_EQ(ZE_RESULT_SUCCESS, MetricProgrammable::fromHandle(programmable)->getProperties(&properties));
-    EXPECT_EQ(properties.samplingType, ZET_INTEL_METRIC_SAMPLING_TYPE_EXP_FLAG_TIME_BASED);
+    EXPECT_EQ(properties.samplingType, ZET_METRIC_GROUP_SAMPLING_TYPE_FLAG_TIME_BASED);
     metricEnumeration->cleanupExtendedMetricInformation();
 }
 
@@ -271,7 +269,7 @@ TEST_F(OaMetricProgrammableTests, givenMetricProgrammableIsSupportedAndApiMaskIs
     EXPECT_EQ(ZE_RESULT_SUCCESS, deviceContext->metricProgrammableGet(&count, &programmable));
     zet_metric_programmable_exp_properties_t properties{};
     EXPECT_EQ(ZE_RESULT_SUCCESS, MetricProgrammable::fromHandle(programmable)->getProperties(&properties));
-    EXPECT_EQ(properties.samplingType, ZET_INTEL_METRIC_SAMPLING_TYPE_EXP_FLAG_EVENT_BASED);
+    EXPECT_EQ(properties.samplingType, ZET_METRIC_GROUP_SAMPLING_TYPE_FLAG_EVENT_BASED);
     metricEnumeration->cleanupExtendedMetricInformation();
 }
 
@@ -310,7 +308,7 @@ TEST_F(OaMetricProgrammableTests, givenValidMetricProgrammableThenCorrectParamer
 
     EXPECT_EQ(parameterInfo[3].defaultValue.ui64, 0u);
     EXPECT_STREQ(parameterInfo[3].name, "mockParam4");
-    EXPECT_EQ(parameterInfo[3].type, static_cast<zet_metric_programmable_param_type_exp_t>(ZET_INTEL_METRIC_PROGRAMMABLE_PARAM_TYPE_NORMALIZATION_BYTE_EXP)); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
+    EXPECT_EQ(parameterInfo[3].type, ZET_METRIC_PROGRAMMABLE_PARAM_TYPE_EXP_NORMALIZATION_BYTES);
     EXPECT_EQ(parameterInfo[3].valueInfoCount, 1u);
     EXPECT_EQ(parameterInfo[3].valueInfoType, ZET_VALUE_INFO_TYPE_EXP_UINT64_RANGE);
 
@@ -437,39 +435,9 @@ TEST_F(OaMetricProgrammableTests, givenValidMetricProgrammableThenCorrectParamer
     EXPECT_EQ(ZE_RESULT_SUCCESS, MetricProgrammable::fromHandle(programmable)->getParamInfo(&parameterCount, parameterInfo.data()));
     uint32_t valueInfoCount = 2;
     zet_metric_programmable_param_value_info_exp_t valueInfo{};
-    zet_intel_metric_programmable_param_value_info_exp_desc_t paramValueInfoDesc{};
-    paramValueInfoDesc.stype = static_cast<zet_structure_type_t>(ZET_INTEL_STRUCTURE_TYPE_METRIC_PROGRAMMABLE_PARAM_VALUE_INFO_DESC_EXP); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
-    paramValueInfoDesc.pNext = nullptr;
-    valueInfo.pNext = &paramValueInfoDesc;
     EXPECT_EQ(ZE_RESULT_SUCCESS, MetricProgrammable::fromHandle(programmable)->getParamValueInfo(0, &valueInfoCount, &valueInfo));
     EXPECT_EQ(valueInfoCount, 1u);
-    EXPECT_STREQ(paramValueInfoDesc.description, "SymbolName");
-
-    metricEnumeration->cleanupExtendedMetricInformation();
-}
-
-TEST_F(OaMetricProgrammableTests, givenValidMetricProgrammableWhenUnsupportedStructureTypeIsSetThenHandleOnlySupportedOnes) {
-    MockIConcurrentGroup1x13 mockConcurrentGroup;
-    MetricsDiscovery::IConcurrentGroup_1_13 &concurrentGroup1x13 = mockConcurrentGroup;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, metricEnumeration->cacheExtendedMetricInformation(concurrentGroup1x13, 1));
-    uint32_t count = 0;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, deviceContext->metricProgrammableGet(&count, nullptr));
-    EXPECT_EQ(count, 1u);
-    zet_metric_programmable_exp_handle_t programmable{};
-    EXPECT_EQ(ZE_RESULT_SUCCESS, deviceContext->metricProgrammableGet(&count, &programmable));
-    std::vector<zet_metric_programmable_param_info_exp_t> parameterInfo(4);
-    uint32_t parameterCount = 2;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, MetricProgrammable::fromHandle(programmable)->getParamInfo(&parameterCount, parameterInfo.data()));
-    uint32_t valueInfoCount = 2;
-    zet_metric_programmable_param_value_info_exp_t valueInfo{};
-    zet_intel_metric_programmable_param_value_info_exp_desc_t paramValueInfoDesc{};
-    paramValueInfoDesc.stype = static_cast<zet_structure_type_t>(ZET_STRUCTURE_TYPE_FORCE_UINT32);
-    paramValueInfoDesc.pNext = nullptr;
-    strcpy_s(paramValueInfoDesc.description, ZET_INTEL_MAX_METRIC_PROGRAMMABLE_VALUE_DESCRIPTION_EXP, "default");
-    valueInfo.pNext = &paramValueInfoDesc;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, MetricProgrammable::fromHandle(programmable)->getParamValueInfo(0, &valueInfoCount, &valueInfo));
-    EXPECT_EQ(valueInfoCount, 1u);
-    EXPECT_STREQ(paramValueInfoDesc.description, "default");
+    EXPECT_STREQ(valueInfo.description, "SymbolName");
 
     metricEnumeration->cleanupExtendedMetricInformation();
 }
@@ -711,7 +679,7 @@ TEST_F(OaMetricProgrammableTests, givenInvalidMeticWhenMetricGroupIsCreatedThenE
     metricEnumeration->cleanupExtendedMetricInformation();
 }
 
-TEST_F(OaMetricProgrammableTests, givenCreateMetrifGroupsFromMetricsIsCalledWhenMetricCountIsZeroThenErrorIsReturned) {
+TEST_F(OaMetricProgrammableTests, givenCreateMetricGroupsFromMetricsIsCalledWhenMetricCountIsZeroThenErrorIsReturned) {
     MockIConcurrentGroup1x13 mockConcurrentGroup;
     MetricsDiscovery::IConcurrentGroup_1_13 &concurrentGroup1x13 = mockConcurrentGroup;
     EXPECT_EQ(ZE_RESULT_SUCCESS, metricEnumeration->cacheExtendedMetricInformation(concurrentGroup1x13, 1));
@@ -1452,7 +1420,7 @@ TEST_F(OaMetricProgrammableTests, givenValidMetricGroupWhenCreatingLessThanAvail
 TEST_F(OaMetricProgrammableTests, givenEnableProgrammableMetricsSupportIsNotSetWhenMetricGroupCreateIsCalledThenErrorIsReturned) {
 
     DebugManagerStateRestore restorer;
-    debugManager.flags.EnableProgrammableMetricsSupport.set(0);
+    debugManager.flags.DisableProgrammableMetricsSupport.set(1);
     auto deviceContextTest = std::make_unique<MetricDeviceContext>(*device);
 
     uint32_t metricGroupCount = 0;
@@ -1594,8 +1562,6 @@ void MultiSourceOaMetricProgrammableFixture::TearDown() {
 void MultiSourceOaMetricProgrammableFixture::SetUp() {
     DeviceFixture::setUp();
 
-    DebugManagerStateRestore restorer;
-    debugManager.flags.EnableProgrammableMetricsSupport.set(1);
     mockAdapterGroup.mockParams.Version.MajorNumber = 1;
     mockAdapterGroup.mockParams.Version.MinorNumber = 13;
     deviceContext = std::make_unique<MockMetricDeviceContext>(*device);

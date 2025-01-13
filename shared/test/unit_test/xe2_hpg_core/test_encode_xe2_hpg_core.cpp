@@ -291,7 +291,6 @@ using EncodeKernelXe2HpgCoreTest = Test<CommandEncodeStatesFixture>;
 
 XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenNoFenceAsPostSyncOperationInComputeWalkerWhenEnqueueKernelIsCalledThenDoNotGenerateFenceCommands) {
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-    using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     DebugManagerStateRestore restore;
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
 
@@ -317,7 +316,6 @@ XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenNoFenceAsPostSyncOperationIn
 
 XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenFenceAsPostSyncOperationInComputeWalkerWhenEnqueueKernelIsCalledThenGenerateFenceCommands) {
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-    using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     DebugManagerStateRestore restore;
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(1);
 
@@ -342,7 +340,6 @@ XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenFenceAsPostSyncOperationInCo
 
 XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenDefaultSettingForFenceAsPostSyncOperationInComputeWalkerWhenEnqueueKernelIsCalledThenGenerateFenceCommands) {
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-    using MI_MEM_FENCE = typename FamilyType::MI_MEM_FENCE;
     DebugManagerStateRestore restore;
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(-1);
 
@@ -566,13 +563,13 @@ XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenRequiredWorkGroupOrderWhenCa
     EXPECT_EQ(HwWalkOrderHelper::compatibleDimensionOrders[yOrder], HwWalkOrderHelper::yOrderWalk);
 
     EncodeDispatchKernel<FamilyType>::adjustWalkOrder(walkerCmd, yOrder, rootDeviceEnvironment);
-    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::Y_ORDER_WALKER, walkerCmd.getDispatchWalkOrder());
+    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_Y_ORDER_WALK, walkerCmd.getDispatchWalkOrder());
 
     uint32_t linearOrder = 0u;
     EXPECT_EQ(HwWalkOrderHelper::compatibleDimensionOrders[linearOrder], HwWalkOrderHelper::linearWalk);
 
     EncodeDispatchKernel<FamilyType>::adjustWalkOrder(walkerCmd, linearOrder, rootDeviceEnvironment);
-    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::LINERAR_WALKER, walkerCmd.getDispatchWalkOrder());
+    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_LINEAR_WALK, walkerCmd.getDispatchWalkOrder());
 
     auto currentDispatchWalkOrder = walkerCmd.getDispatchWalkOrder();
     uint32_t fakeOrder = 5u;
@@ -594,21 +591,21 @@ XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenRequiredWorkGroupOrderWhenCa
     auto &rootDeviceEnvironment = this->pDevice->getRootDeviceEnvironment();
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, 0, 3,
                                                        0, 1, false, false, true, yOrder, rootDeviceEnvironment);
-    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::Y_ORDER_WALKER, walkerCmd.getDispatchWalkOrder());
+    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_Y_ORDER_WALK, walkerCmd.getDispatchWalkOrder());
 
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, 0, 3,
                                                        0, 1, true, false, true, yOrder, rootDeviceEnvironment);
-    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::Y_ORDER_WALKER, walkerCmd.getDispatchWalkOrder());
+    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_Y_ORDER_WALK, walkerCmd.getDispatchWalkOrder());
 
     uint32_t linearOrder = 0u;
     EXPECT_EQ(HwWalkOrderHelper::compatibleDimensionOrders[linearOrder], HwWalkOrderHelper::linearWalk);
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, 0, 3,
                                                        0, 1, false, false, true, linearOrder, rootDeviceEnvironment);
-    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::LINERAR_WALKER, walkerCmd.getDispatchWalkOrder());
+    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_LINEAR_WALK, walkerCmd.getDispatchWalkOrder());
 
     EncodeDispatchKernel<FamilyType>::encodeThreadData(walkerCmd, startWorkGroup, numWorkGroups, workGroupSizes, 0, 3,
                                                        0, 1, true, false, true, linearOrder, rootDeviceEnvironment);
-    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::LINERAR_WALKER, walkerCmd.getDispatchWalkOrder());
+    EXPECT_EQ(DefaultWalkerType::DISPATCH_WALK_ORDER::DISPATCH_WALK_ORDER_LINEAR_WALK, walkerCmd.getDispatchWalkOrder());
 }
 
 XE2_HPG_CORETEST_F(EncodeKernelXe2HpgCoreTest, givenSurfaceStateAndNullptrReleaseHelperWhenAuxParamsForMCSCCSAreSetThenCorrectAuxModeIsSet) {
@@ -654,7 +651,7 @@ XE2_HPG_CORETEST_F(Xe2HpgSbaTest, givenSpecificProductFamilyWhenAppendingSbaThen
 
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_POLICY_WBP, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_CONTROL_WBP, sbaCmd.getL1CacheControlCachePolicy());
 }
 
 XE2_HPG_CORETEST_F(Xe2HpgSbaTest, givenL1CachingOverrideWhenStateBaseAddressIsProgrammedThenItMatchesTheOverrideValue) {
@@ -669,19 +666,19 @@ XE2_HPG_CORETEST_F(Xe2HpgSbaTest, givenL1CachingOverrideWhenStateBaseAddressIsPr
     updateSbaHelperArgsL1CachePolicy<FamilyType>(args, productHelper);
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(0u, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(0u, sbaCmd.getL1CacheControlCachePolicy());
 
     debugManager.flags.ForceStatelessL1CachingPolicy.set(2u);
 
     updateSbaHelperArgsL1CachePolicy<FamilyType>(args, productHelper);
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(2u, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(2u, sbaCmd.getL1CacheControlCachePolicy());
 
     debugManager.flags.ForceAllResourcesUncached.set(true);
 
     updateSbaHelperArgsL1CachePolicy<FamilyType>(args, productHelper);
     StateBaseAddressHelper<FamilyType>::appendStateBaseAddressParameters(args);
 
-    EXPECT_EQ(1u, sbaCmd.getL1CachePolicyL1CacheControl());
+    EXPECT_EQ(1u, sbaCmd.getL1CacheControlCachePolicy());
 }

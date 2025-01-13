@@ -41,7 +41,6 @@ void PreemptionHelper::programCsrBaseAddressCmd(LinearStream &preambleCmdStream,
 
 template <typename GfxFamily>
 void PreemptionHelper::programStateSip(LinearStream &preambleCmdStream, Device &device, OsContext *context) {
-    using STATE_SIP = typename GfxFamily::STATE_SIP;
     bool debuggingEnabled = device.getDebugger() != nullptr;
     bool isMidThreadPreemption = device.getPreemptionMode() == PreemptionMode::MidThread;
 
@@ -123,18 +122,18 @@ template <typename GfxFamily, typename InterfaceDescriptorType>
 void PreemptionHelper::programInterfaceDescriptorDataPreemption(InterfaceDescriptorType *idd, PreemptionMode preemptionMode) {}
 
 template <typename GfxFamily>
-constexpr uint32_t PreemptionConfig<GfxFamily>::mmioAddress = 0x2580;
+const uint32_t PreemptionConfig<GfxFamily>::mmioAddress = 0x2580;
 
 template <typename GfxFamily>
-constexpr uint32_t PreemptionConfig<GfxFamily>::mask = ((1 << 1) | (1 << 2)) << 16;
+const uint32_t PreemptionConfig<GfxFamily>::mask = ((1 << 1) | (1 << 2)) << 16;
 
 template <typename GfxFamily>
-constexpr uint32_t PreemptionConfig<GfxFamily>::threadGroupVal = (1 << 1);
+const uint32_t PreemptionConfig<GfxFamily>::threadGroupVal = (1 << 1);
 
 template <typename GfxFamily>
-constexpr uint32_t PreemptionConfig<GfxFamily>::cmdLevelVal = (1 << 2);
+const uint32_t PreemptionConfig<GfxFamily>::cmdLevelVal = (1 << 2);
 
 template <typename GfxFamily>
-constexpr uint32_t PreemptionConfig<GfxFamily>::midThreadVal = 0;
+const uint32_t PreemptionConfig<GfxFamily>::midThreadVal = 0;
 
 } // namespace NEO

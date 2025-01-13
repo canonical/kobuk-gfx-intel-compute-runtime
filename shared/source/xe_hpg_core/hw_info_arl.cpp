@@ -78,15 +78,14 @@ const RuntimeCapabilityTable ARL::capabilityTable{
     true,                                                      // fusedEuEnabled
     true,                                                      // l0DebuggerSupported
     true,                                                      // supportsFloatAtomics
-    0,                                                         // cxlType
-    2048                                                       // syncNumRTStacksPerDSS
+    0                                                          // cxlType
 };
 
 WorkaroundTable ARL::workaroundTable = {};
 FeatureTable ARL::featureTable = {};
 
-void ARL::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
-    setupDefaultFeatureTableAndWorkaroundTable(hwInfo);
+void ARL::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo, const ReleaseHelper &releaseHelper) {
+    setupDefaultFeatureTableAndWorkaroundTable(hwInfo, releaseHelper);
     FeatureTable *featureTable = &hwInfo->featureTable;
     WorkaroundTable *workaroundTable = &hwInfo->workaroundTable;
 
@@ -100,7 +99,7 @@ void ARL::setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndW
     setupDefaultGtSysInfo(hwInfo, releaseHelper);
 
     if (setupFeatureTableAndWorkaroundTable) {
-        setupFeatureAndWorkaroundTable(hwInfo);
+        setupFeatureAndWorkaroundTable(hwInfo, *releaseHelper);
     }
 }
 
@@ -116,7 +115,7 @@ void ArlHwConfig::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTable
     ARL::setupHardwareInfoBase(hwInfo, setupFeatureTableAndWorkaroundTable, releaseHelper);
 
     if (setupFeatureTableAndWorkaroundTable) {
-        ARL::setupFeatureAndWorkaroundTable(hwInfo);
+        ARL::setupFeatureAndWorkaroundTable(hwInfo, *releaseHelper);
     }
 };
 

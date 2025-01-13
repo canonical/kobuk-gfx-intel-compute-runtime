@@ -26,6 +26,8 @@
 #include "shared/test/common/helpers/raii_product_helper.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_command_stream_receiver.h"
+#include "shared/test/common/mocks/mock_compiler_product_helper.h"
+#include "shared/test/common/mocks/mock_compilers.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_driver_info.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
@@ -36,7 +38,6 @@
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/utilities/destructor_counted.h"
 
-#include "level_zero/api/driver_experimental/public/zex_common.h"
 #include "level_zero/core/source/cache/cache_reservation.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/context/context_imp.h"
@@ -53,6 +54,7 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_context.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_memory_manager.h"
+#include "level_zero/driver_experimental/zex_common.h"
 
 #include "common/StateSaveAreaHeader.h"
 #include "gtest/gtest.h"
@@ -321,16 +323,12 @@ TEST(L0DeviceTest, givenDeviceWithoutIGCCompilerLibraryThenInvalidDependencyIsNo
     auto hwInfo = *NEO::defaultHwInfo;
 
     auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
-
-    auto oldIgcDllName = Os::igcDllName;
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
     auto mockDevice = reinterpret_cast<NEO::MockDevice *>(neoDevice.get());
     mockDevice->setPreemptionMode(NEO::PreemptionMode::Initial);
     auto device = std::unique_ptr<L0::Device>(Device::create(driverHandle.get(), neoDevice.release(), false, &returnValue));
     ASSERT_NE(nullptr, device);
     EXPECT_EQ(returnValue, ZE_RESULT_SUCCESS);
-
-    Os::igcDllName = oldIgcDllName;
 }
 
 TEST(L0DeviceTest, givenDeviceWithoutAnyCompilerLibraryThenInvalidDependencyIsNotReturned) {
@@ -342,18 +340,15 @@ TEST(L0DeviceTest, givenDeviceWithoutAnyCompilerLibraryThenInvalidDependencyIsNo
     auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
 
     auto oldFclDllName = Os::frontEndDllName;
-    auto oldIgcDllName = Os::igcDllName;
     Os::frontEndDllName = "_invalidFCL";
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
     auto mockDevice = reinterpret_cast<NEO::MockDevice *>(neoDevice.get());
     mockDevice->setPreemptionMode(NEO::PreemptionMode::Initial);
 
     auto device = std::unique_ptr<L0::Device>(Device::create(driverHandle.get(), neoDevice.release(), false, &returnValue));
+    Os::frontEndDllName = oldFclDllName;
     ASSERT_NE(nullptr, device);
     EXPECT_EQ(returnValue, ZE_RESULT_SUCCESS);
-
-    Os::igcDllName = oldIgcDllName;
-    Os::frontEndDllName = oldFclDllName;
 }
 
 TEST(L0DeviceTest, givenDeviceWithoutIGCCompilerLibraryAndMidThreadPreemptionThenInvalidDependencyIsReturned) {
@@ -364,8 +359,7 @@ TEST(L0DeviceTest, givenDeviceWithoutIGCCompilerLibraryAndMidThreadPreemptionThe
     std::unique_ptr<DriverHandleImp> driverHandle(new DriverHandleImp);
     auto hwInfo = *NEO::defaultHwInfo;
 
-    auto oldIgcDllName = Os::igcDllName;
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
     auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
     auto mockDevice = reinterpret_cast<NEO::MockDevice *>(neoDevice.get());
     mockDevice->setPreemptionMode(NEO::PreemptionMode::MidThread);
@@ -373,8 +367,6 @@ TEST(L0DeviceTest, givenDeviceWithoutIGCCompilerLibraryAndMidThreadPreemptionThe
     auto device = std::unique_ptr<L0::Device>(Device::create(driverHandle.get(), neoDevice.release(), false, &returnValue));
     ASSERT_NE(nullptr, device);
     EXPECT_EQ(returnValue, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
-
-    Os::igcDllName = oldIgcDllName;
 }
 
 TEST(L0DeviceTest, givenDeviceWithoutAnyCompilerLibraryAndMidThreadPreemptionThenInvalidDependencyIsReturned) {
@@ -386,9 +378,8 @@ TEST(L0DeviceTest, givenDeviceWithoutAnyCompilerLibraryAndMidThreadPreemptionThe
     auto hwInfo = *NEO::defaultHwInfo;
 
     auto oldFclDllName = Os::frontEndDllName;
-    auto oldIgcDllName = Os::igcDllName;
     Os::frontEndDllName = "_invalidFCL";
-    Os::igcDllName = "_invalidIGC";
+    auto igcNameGuard = NEO::pushIgcDllName("_invalidIGC");
     auto neoDevice = std::unique_ptr<NEO::Device>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0));
     auto mockDevice = reinterpret_cast<NEO::MockDevice *>(neoDevice.get());
     mockDevice->setPreemptionMode(NEO::PreemptionMode::MidThread);
@@ -397,7 +388,6 @@ TEST(L0DeviceTest, givenDeviceWithoutAnyCompilerLibraryAndMidThreadPreemptionThe
     ASSERT_NE(nullptr, device);
     EXPECT_EQ(returnValue, ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
 
-    Os::igcDllName = oldIgcDllName;
     Os::frontEndDllName = oldFclDllName;
 }
 
@@ -1700,15 +1690,109 @@ TEST_F(DeviceTest, givenInvalidPciBusInfoWhenPciPropertiesIsCalledThenUninitiali
     }
 }
 
-TEST_F(DeviceTest, whenGetGlobalTimestampIsCalledThenSuccessIsReturnedAndValuesSetCorrectly) {
+TEST_F(DeviceTest, whenGetGlobalTimestampIsCalledWithOsInterfaceThenSuccessIsReturnedAndValuesSetCorrectly) {
     uint64_t hostTs = 0u;
     uint64_t deviceTs = 0u;
+
+    debugManager.flags.EnableGlobalTimestampViaSubmission.set(0);
 
     ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_NE(0u, hostTs);
     EXPECT_NE(0u, deviceTs);
+}
+
+TEST_F(DeviceTest, whenGetGlobalTimestampIsCalledWithSubmissionThenSuccessIsReturned) {
+
+    debugManager.flags.EnableGlobalTimestampViaSubmission.set(1);
+
+    uint64_t hostTs = 0u;
+    uint64_t deviceTs = 0u;
+
+    // First time to hit the if case of initialization of internal structures.
+    ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(0u, hostTs);
+
+    // Second time to hit the false case for initialization of internal structures as they are already initialized.
+    result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(0u, hostTs);
+}
+
+TEST_F(DeviceTest, givenAppendWriteGlobalTimestampFailsWhenGetGlobalTimestampsUsingSubmissionThenErrorIsReturned) {
+    struct MockCommandListAppendWriteGlobalTimestampFail : public MockCommandList {
+        ze_result_t appendWriteGlobalTimestamp(uint64_t *dstptr, ze_event_handle_t hEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override {
+            return ZE_RESULT_ERROR_UNKNOWN;
+        }
+    };
+
+    debugManager.flags.EnableGlobalTimestampViaSubmission.set(1);
+
+    uint64_t hostTs = 0u;
+    uint64_t deviceTs = 0u;
+
+    // First time to hit the if case of initialization of internal structures.
+    ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    EXPECT_NE(0u, hostTs);
+
+    auto mockCommandList = std::make_unique<MockCommandListAppendWriteGlobalTimestampFail>();
+    ze_command_list_handle_t mockCommandListHandle = mockCommandList.get();
+
+    auto deviceImp = static_cast<DeviceImp *>(device);
+    auto actualGlobalTimestampCommandList = deviceImp->globalTimestampCommandList;
+    // Swap the command list with the mock command list.
+    deviceImp->globalTimestampCommandList = mockCommandListHandle;
+
+    L0::CommandList::fromHandle(deviceImp->globalTimestampCommandList)->appendWriteGlobalTimestamp(nullptr, nullptr, 0, nullptr);
+
+    result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_ERROR_DEVICE_LOST, result);
+
+    // Swap back the command list.
+    deviceImp->globalTimestampCommandList = actualGlobalTimestampCommandList;
+}
+
+TEST_F(DeviceTest, givenCreateHostUnifiedMemoryAllocationFailsWhenGetGlobalTimestampsUsingSubmissionThenErrorIsReturned) {
+    struct MockSvmAllocsManager : public NEO::SVMAllocsManager {
+        MockSvmAllocsManager(MemoryManager *memoryManager) : NEO::SVMAllocsManager(memoryManager, false) {}
+
+        void *createHostUnifiedMemoryAllocation(size_t size, const NEO::SVMAllocsManager::UnifiedMemoryProperties &unifiedMemoryProperties) override {
+            return nullptr;
+        }
+    };
+
+    class MockDriverHandleImp : public Mock<L0::DriverHandleImp> {
+      public:
+        void setSVMAllocsManager(MockSvmAllocsManager *mockSvmAllocsManager) {
+            this->svmAllocsManager = mockSvmAllocsManager;
+        }
+    };
+
+    debugManager.flags.EnableGlobalTimestampViaSubmission.set(1);
+
+    auto mockSvmAllocsManager = std::make_unique<MockSvmAllocsManager>(nullptr);
+    auto mockSvmAllocsManagerHandle = mockSvmAllocsManager.get();
+
+    auto mockDriverHandleImp = std::make_unique<MockDriverHandleImp>();
+    mockDriverHandleImp->setSVMAllocsManager(mockSvmAllocsManagerHandle);
+
+    // Swap the driver handle with the mock driver handle but keep the original driver handle to be swaped back.
+    auto deviceImp = static_cast<DeviceImp *>(device);
+    auto originalDriverHandle = deviceImp->getDriverHandle();
+    deviceImp->setDriverHandle(mockDriverHandleImp.get());
+
+    uint64_t hostTs = 0u;
+    uint64_t deviceTs = 0u;
+
+    ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_ERROR_DEVICE_LOST, result);
+
+    mockDriverHandleImp->setSVMAllocsManager(nullptr);
+    // Swap back the driver handle.
+    deviceImp->setDriverHandle(originalDriverHandle);
 }
 
 struct GlobalTimestampTest : public ::testing::Test {
@@ -1725,7 +1809,7 @@ struct GlobalTimestampTest : public ::testing::Test {
     const uint32_t numRootDevices = 2u;
 };
 
-TEST_F(GlobalTimestampTest, whenGetGlobalTimestampCalledAndGetGpuCpuTimeIsFalseReturnError) {
+TEST_F(GlobalTimestampTest, whenGetGlobalTimestampCalledAndGetGpuCpuTimeIsDeviceLostReturnError) {
     uint64_t hostTs = 0u;
     uint64_t deviceTs = 0u;
 
@@ -1738,6 +1822,22 @@ TEST_F(GlobalTimestampTest, whenGetGlobalTimestampCalledAndGetGpuCpuTimeIsFalseR
 
     ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
     EXPECT_EQ(ZE_RESULT_ERROR_DEVICE_LOST, result);
+}
+
+TEST_F(GlobalTimestampTest, whenGetGlobalTimestampCalledAndGetGpuCpuTimeIsUnsupportedFeatureThenSubmissionMethodIsUsed) {
+
+    neoDevice->setOSTime(new FalseUnSupportedFeatureGpuCpuTime());
+    NEO::DeviceVector devices;
+    devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
+    driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
+    driverHandle->initialize(std::move(devices));
+    device = driverHandle->devices[0];
+
+    uint64_t hostTs = 0u;
+    uint64_t deviceTs = 0u;
+
+    ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
 TEST_F(GlobalTimestampTest, whenGetProfilingTimerClockandProfilingTimerResolutionThenVerifyRelation) {
@@ -1807,10 +1907,10 @@ TEST_F(GlobalTimestampTest, whenQueryingForTimerResolutionWithUseCyclesPerSecond
 
 class FalseCpuDeviceTime : public NEO::DeviceTime {
   public:
-    bool getGpuCpuTimeImpl(TimeStampData *pGpuCpuTime, NEO::OSTime *) override {
+    TimeQueryStatus getGpuCpuTimeImpl(TimeStampData *pGpuCpuTime, NEO::OSTime *) override {
         pGpuCpuTime->cpuTimeinNS = mockCpuTimeInNs;
         pGpuCpuTime->gpuTimeStamp = mockGpuTimeInNs;
-        return true;
+        return TimeQueryStatus::success;
     }
     double getDynamicDeviceTimerResolution() const override {
         return NEO::OSTime::getDeviceTimerResolution();
@@ -1822,13 +1922,16 @@ class FalseCpuDeviceTime : public NEO::DeviceTime {
     uint64_t mockGpuTimeInNs = 100u;
 };
 
-class FalseCpuTime : public NEO::OSTime {
+class FailCpuTime : public NEO::OSTime {
   public:
-    FalseCpuTime() {
+    FailCpuTime() {
         this->deviceTime = std::make_unique<FalseCpuDeviceTime>();
     }
     bool getCpuTime(uint64_t *timeStamp) override {
         return false;
+    };
+    bool getCpuTimeHost(uint64_t *timeStamp) override {
+        return true;
     };
     double getHostTimerResolution() const override {
         return 0;
@@ -1837,7 +1940,7 @@ class FalseCpuTime : public NEO::OSTime {
         return 0;
     }
     static std::unique_ptr<OSTime> create() {
-        return std::unique_ptr<OSTime>(new FalseCpuTime());
+        return std::unique_ptr<OSTime>(new FailCpuTime());
     }
 
     FalseCpuDeviceTime *getFalseCpuDeviceTime() {
@@ -1845,11 +1948,29 @@ class FalseCpuTime : public NEO::OSTime {
     }
 };
 
+TEST_F(GlobalTimestampTest, whenGetGlobalTimestampsUsingSubmissionAndGetCpuTimeHostFailsThenDeviceLostErrorIsReturned) {
+
+    debugManager.flags.EnableGlobalTimestampViaSubmission.set(1);
+
+    neoDevice->setOSTime(new FailCpuTime());
+    NEO::DeviceVector devices;
+    devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
+    driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
+    driverHandle->initialize(std::move(devices));
+    device = driverHandle->devices[0];
+
+    uint64_t hostTs = 0u;
+    uint64_t deviceTs = 0u;
+
+    ze_result_t result = device->getGlobalTimestamps(&hostTs, &deviceTs);
+    EXPECT_EQ(ZE_RESULT_ERROR_DEVICE_LOST, result);
+}
+
 TEST_F(GlobalTimestampTest, whenGetGlobalTimestampCalledAndGetCpuTimeIsFalseReturnArbitraryValues) {
     uint64_t hostTs = 0u;
     uint64_t deviceTs = 0u;
 
-    neoDevice->setOSTime(new FalseCpuTime());
+    neoDevice->setOSTime(new FailCpuTime());
     NEO::DeviceVector devices;
     devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
     driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
@@ -1869,7 +1990,7 @@ TEST_F(DeviceTest, givenPrintGlobalTimestampIsSetWhenGetGlobalTimestampIsCalledT
     uint64_t deviceTs = 0u;
 
     auto &rootDeviceEnvironment = device->getNEODevice()->getRootDeviceEnvironmentRef();
-    auto falseCpuTime = std::make_unique<FalseCpuTime>();
+    auto falseCpuTime = std::make_unique<FailCpuTime>();
     auto cpuDeviceTime = falseCpuTime->getFalseCpuDeviceTime();
     // Using 36 bits for gpu timestamp
     cpuDeviceTime->mockGpuTimeInNs = 0xFFFFFFFFF;
@@ -1895,7 +2016,7 @@ TEST_F(DeviceTest, givenPrintGlobalTimestampIsSetWhenGetGlobalTimestampIsCalledT
 TEST_F(DeviceTest, givenPrintGlobalTimestampIsSetAnd64bitTimestampWhenGetGlobalTimestampIsCalledThenOutputStringIsAsExpected) {
 
     auto &rootDeviceEnvironment = device->getNEODevice()->getRootDeviceEnvironmentRef();
-    auto falseCpuTime = std::make_unique<FalseCpuTime>();
+    auto falseCpuTime = std::make_unique<FailCpuTime>();
     auto cpuDeviceTime = falseCpuTime->getFalseCpuDeviceTime();
     // Using 36 bits for gpu timestamp
     cpuDeviceTime->mockGpuTimeInNs = 0xFFFFFFFFF;
@@ -4539,6 +4660,8 @@ TEST_F(DeviceTest, givenValidDeviceWhenCallingReleaseResourcesThenResourcesRelea
     deviceImp->releaseResources();
     EXPECT_TRUE(deviceImp->resourcesReleased);
     EXPECT_TRUE(nullptr == deviceImp->getNEODevice());
+    EXPECT_TRUE(nullptr == deviceImp->globalTimestampCommandList);
+    EXPECT_TRUE(nullptr == deviceImp->globalTimestampAllocation);
     EXPECT_TRUE(nullptr == deviceImp->pageFaultCommandList);
     deviceImp->releaseResources();
     EXPECT_TRUE(deviceImp->resourcesReleased);

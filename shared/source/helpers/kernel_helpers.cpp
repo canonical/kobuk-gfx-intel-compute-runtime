@@ -11,19 +11,23 @@
 #include "shared/source/device/device.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/basic_math.h"
-#include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/hw_info.h"
-
-#include <algorithm>
+#include "shared/source/program/sync_buffer_handler.h"
 
 namespace NEO {
 
-uint32_t KernelHelper::getMaxWorkGroupCount(const RootDeviceEnvironment &rootDeviceEnvironment, const KernelDescriptor &kernelDescriptor, uint32_t numSubDevices,
-                                            uint32_t usedSlmSize, uint32_t workDim, const size_t *localWorkSize, EngineGroupType engineGroupType) {
-    return KernelHelper::getMaxWorkGroupCount(rootDeviceEnvironment, kernelDescriptor.kernelAttributes.numGrfRequired, kernelDescriptor.kernelAttributes.simdSize, kernelDescriptor.kernelAttributes.barrierCount,
-                                              numSubDevices, usedSlmSize, workDim, localWorkSize, engineGroupType);
+uint32_t KernelHelper::getMaxWorkGroupCount(Device &device, uint16_t numGrfRequired, uint8_t simdSize, uint8_t barrierCount, uint32_t alignedSlmSize, uint32_t workDim, const size_t *localWorkSize,
+                                            EngineGroupType engineGroupType, bool implicitScalingEnabled, bool forceSingleTileQuery) {
+    uint32_t numSubDevicesForExecution = 1;
+
+    auto deviceBitfield = device.getDeviceBitfield();
+    if (!forceSingleTileQuery && implicitScalingEnabled) {
+        numSubDevicesForExecution = static_cast<uint32_t>(deviceBitfield.count());
+    }
+
+    return KernelHelper::getMaxWorkGroupCount(device.getRootDeviceEnvironment(), numGrfRequired, simdSize, barrierCount, numSubDevicesForExecution, alignedSlmSize, workDim, localWorkSize, engineGroupType);
 }
 
 uint32_t KernelHelper::getMaxWorkGroupCount(const RootDeviceEnvironment &rootDeviceEnvironment, uint16_t numGrfRequired, uint8_t simdSize, uint8_t barrierCount,
@@ -123,6 +127,22 @@ bool KernelHelper::isAnyArgumentPtrByValue(const KernelDescriptor &kernelDescrip
         }
     }
     return false;
+}
+
+std::pair<GraphicsAllocation *, size_t> KernelHelper::getRegionGroupBarrierAllocationOffset(Device &device, const size_t threadGroupCount, const size_t localRegionSize) {
+    device.allocateSyncBufferHandler();
+
+    size_t size = KernelHelper::getRegionGroupBarrierSize(threadGroupCount, localRegionSize);
+
+    return device.syncBufferHandler->obtainAllocationAndOffset(size);
+}
+
+std::pair<GraphicsAllocation *, size_t> KernelHelper::getSyncBufferAllocationOffset(Device &device, const size_t requestedNumberOfWorkgroups) {
+    device.allocateSyncBufferHandler();
+
+    size_t requiredSize = KernelHelper::getSyncBufferSize(requestedNumberOfWorkgroups);
+
+    return device.syncBufferHandler->obtainAllocationAndOffset(requiredSize);
 }
 
 } // namespace NEO

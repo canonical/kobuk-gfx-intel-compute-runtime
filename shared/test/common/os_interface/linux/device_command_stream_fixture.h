@@ -11,6 +11,7 @@
 #include "shared/source/os_interface/linux/drm_memory_manager.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/os_context.h"
+#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/mocks/linux/mock_drm_wrappers.h"
 
@@ -64,6 +65,9 @@ class DrmMockSuccess : public Drm {
   public:
     using Drm::setupIoctlHelper;
     DrmMockSuccess(int fd, RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(fd, mockPciPath), rootDeviceEnvironment) {
+
+        DebugManagerStateRestore restore;
+        debugManager.flags.IgnoreProductSpecificIoctlHelper.set(true);
         setupIoctlHelper(NEO::defaultHwInfo->platform.eProductFamily);
     }
 
@@ -73,6 +77,8 @@ class DrmMockSuccess : public Drm {
 class DrmMockFail : public Drm {
   public:
     DrmMockFail(RootDeviceEnvironment &rootDeviceEnvironment) : Drm(std::make_unique<HwDeviceIdDrm>(mockFd, mockPciPath), rootDeviceEnvironment) {
+        DebugManagerStateRestore restore;
+        debugManager.flags.IgnoreProductSpecificIoctlHelper.set(true);
         setupIoctlHelper(NEO::defaultHwInfo->platform.eProductFamily);
     }
 
@@ -104,11 +110,11 @@ struct DrmMockCustom : public Drm {
     static std::unique_ptr<DrmMockCustom> create(std::unique_ptr<HwDeviceIdDrm> &&hwDeviceId, RootDeviceEnvironment &rootDeviceEnvironment);
 
     using Drm::bindAvailable;
-    using Drm::cacheInfo;
     using Drm::checkToDisableScratchPage;
     using Drm::completionFenceSupported;
     using Drm::disableScratch;
     using Drm::ioctlHelper;
+    using Drm::l3CacheInfo;
     using Drm::memoryInfo;
     using Drm::pageFaultSupported;
     using Drm::queryTopology;
@@ -268,6 +274,8 @@ struct DrmMockCustom : public Drm {
     uint64_t mmapOffsetFlags = 0;
     bool failOnMmapOffset = false;
     bool failOnPrimeFdToHandle = false;
+    bool failOnSecondPrimeFdToHandle = false;
+    bool failOnPrimeHandleToFd = false;
 
     // DRM_IOCTL_I915_GEM_CREATE_EXT
     uint64_t createExtSize = 0;

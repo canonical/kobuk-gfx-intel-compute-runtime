@@ -15,11 +15,11 @@
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
-#include "level_zero/include/zet_intel_gpu_metric.h"
-#include "level_zero/include/zet_intel_gpu_metric_export.h"
 #include "level_zero/tools/source/metrics/metric.h"
 #include "level_zero/tools/source/metrics/metric_ip_sampling_streamer.h"
 #include "level_zero/tools/source/metrics/os_interface_metric.h"
+#include "level_zero/zet_intel_gpu_metric.h"
+#include "level_zero/zet_intel_gpu_metric_export.h"
 #include <level_zero/zet_api.h>
 
 #include <cstring>
@@ -222,9 +222,9 @@ ze_result_t IpSamplingMetricSourceImp::handleMetricGroupExtendedProperties(zet_m
             retVal = ZE_RESULT_SUCCESS;
         }
 
-        if (extendedProperties->stype == ZET_INTEL_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP) { // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
-            zet_intel_metric_group_type_exp_t *groupType = reinterpret_cast<zet_intel_metric_group_type_exp_t *>(extendedProperties);
-            groupType->type = ZET_INTEL_METRIC_GROUP_TYPE_EXP_OTHER;
+        if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP) {
+            zet_metric_group_type_exp_t *groupType = reinterpret_cast<zet_metric_group_type_exp_t *>(extendedProperties);
+            groupType->type = ZET_METRIC_GROUP_TYPE_EXP_FLAG_OTHER;
             retVal = ZE_RESULT_SUCCESS;
         }
 

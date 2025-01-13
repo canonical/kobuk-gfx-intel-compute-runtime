@@ -81,19 +81,17 @@ const RuntimeCapabilityTable LNL::capabilityTable{
     false,                                                     // fusedEuEnabled
     true,                                                      // l0DebuggerSupported;
     true,                                                      // supportsFloatAtomics
-    0,                                                         // cxlType
-    2048                                                       // syncNumRTStacksPerDSS
+    0                                                          // cxlType
 };
 
-void LNL::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo) {
-    setupDefaultFeatureTableAndWorkaroundTable(hwInfo);
+void LNL::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo, const ReleaseHelper &releaseHelper) {
+    setupDefaultFeatureTableAndWorkaroundTable(hwInfo, releaseHelper);
     FeatureTable *featureTable = &hwInfo->featureTable;
 
     featureTable->flags.ftrFlatPhysCCS = true;
     featureTable->flags.ftrE2ECompression = true;
     featureTable->flags.ftrTile64Optimization = true;
     featureTable->flags.ftrWalkerMTP = true;
-    featureTable->flags.ftrXe2Compression = true;
     featureTable->flags.ftrXe2PlusTiling = true;
     featureTable->flags.ftrPml5Support = true;
 
@@ -119,7 +117,7 @@ void LNL::setupHardwareInfoBase(HardwareInfo *hwInfo, bool setupFeatureTableAndW
 
     LNL::adjustHardwareInfo(hwInfo);
     if (setupFeatureTableAndWorkaroundTable) {
-        LNL::setupFeatureAndWorkaroundTable(hwInfo);
+        LNL::setupFeatureAndWorkaroundTable(hwInfo, *releaseHelper);
     }
 }
 void LnlHwConfig::setupHardwareInfo(HardwareInfo *hwInfo, bool setupFeatureTableAndWorkaroundTable, const ReleaseHelper *releaseHelper) {

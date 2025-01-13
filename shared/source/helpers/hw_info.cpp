@@ -9,6 +9,7 @@
 
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/release_helper/release_helper.h"
 
@@ -148,17 +149,10 @@ void setupDefaultGtSysInfo(HardwareInfo *hwInfo, const ReleaseHelper *releaseHel
         gtSysInfo->MaxDualSubSlicesSupported = gtSysInfo->DualSubSliceCount;
     }
 
-    if (releaseHelper->getL3BankCount() > 0) {
-        gtSysInfo->L3BankCount = releaseHelper->getL3BankCount();
-    }
-    if (releaseHelper->getL3CacheBankSizeInKb() > 0) {
-        gtSysInfo->L3CacheSizeInKb = gtSysInfo->L3BankCount * releaseHelper->getL3CacheBankSizeInKb();
-    }
-
     gtSysInfo->ThreadCount = gtSysInfo->EUCount * releaseHelper->getNumThreadsPerEu();
 }
 
-void setupDefaultFeatureTableAndWorkaroundTable(HardwareInfo *hwInfo) {
+void setupDefaultFeatureTableAndWorkaroundTable(HardwareInfo *hwInfo, const ReleaseHelper &releaseHelper) {
     FeatureTable *featureTable = &hwInfo->featureTable;
 
     featureTable->flags.ftrAstcHdr2D = true;
@@ -178,9 +172,15 @@ void setupDefaultFeatureTableAndWorkaroundTable(HardwareInfo *hwInfo) {
     featureTable->flags.ftrTranslationTable = true;
     featureTable->flags.ftrUserModeTranslationTable = true;
 
+    featureTable->flags.ftrXe2Compression = releaseHelper.getFtrXe2Compression();
+
     WorkaroundTable *workaroundTable = &hwInfo->workaroundTable;
 
     workaroundTable->flags.wa4kAlignUVOffsetNV12LinearSurface = true;
+}
+
+uint32_t getNumSubSlicesPerSlice(const HardwareInfo &hwInfo) {
+    return static_cast<uint32_t>(Math::divideAndRoundUp(hwInfo.gtSystemInfo.SubSliceCount, hwInfo.gtSystemInfo.SliceCount));
 }
 
 } // namespace NEO

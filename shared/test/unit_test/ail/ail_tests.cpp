@@ -112,16 +112,33 @@ HWTEST2_F(AILTests, whenModifyKernelIfRequiredIsCalledThenDontChangeKernelSource
     EXPECT_STREQ(copyKernel.c_str(), kernelSources.c_str());
 }
 
-HWTEST2_F(AILTests, GivenAilWhenCheckingContextSyncFlagRequiredThenExpectFalse, MatchAny) {
+HWTEST2_F(AILTests, givenAilWhenCheckingContextSyncFlagRequiredThenExpectFalse, MatchAny) {
     AILWhitebox<productFamily> ail;
     ail.processName = "other";
     EXPECT_FALSE(ail.isContextSyncFlagRequired());
 }
 
-HWTEST2_F(AILTests, GivenAilWhenCheckingOverfetchDisableRequiredThenExpectFalse, MatchAny) {
+HWTEST2_F(AILTests, givenAilWhenCheckingOverfetchDisableRequiredThenExpectFalse, MatchAny) {
     AILWhitebox<productFamily> ail;
     ail.processName = "other";
     EXPECT_FALSE(ail.is256BPrefetchDisableRequired());
+}
+
+HWTEST2_F(AILTests, givenAilWhenCheckingDrainHostptrsRequiredThenExpectTrue, MatchAny) {
+    AILWhitebox<productFamily> ail;
+    ail.processName = "other";
+    EXPECT_TRUE(ail.drainHostptrs());
+}
+
+HWTEST2_F(AILTests, givenAilWhenCheckingIfPatchtokenFallbackIsRequiredThenExpectFalse, MatchAny) {
+    AILWhitebox<productFamily> ail;
+    ail.processName = "other";
+    EXPECT_FALSE(ail.isFallbackToPatchtokensRequired());
+}
+
+HWTEST2_F(AILTests, givenAilWhenGetMicrosecondResolutionCalledThenCorrectValueReturned, MatchAny) {
+    AILWhitebox<productFamily> ail;
+    EXPECT_EQ(ail.getMicrosecondResolution(), microsecondAdjustment);
 }
 
 } // namespace NEO

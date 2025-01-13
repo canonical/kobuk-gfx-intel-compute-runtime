@@ -10,6 +10,7 @@
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/kernel/kernel_descriptor.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 
@@ -122,8 +123,8 @@ size_t UnitTestHelper<GfxFamily>::getAdditionalDshSize(uint32_t iddCount) {
 
 template <typename GfxFamily>
 void UnitTestHelper<GfxFamily>::verifyDummyBlitWa(const RootDeviceEnvironment *rootDeviceEnvironment, GenCmdList::iterator &cmdIterator) {
-    const auto &productHelper = rootDeviceEnvironment->getProductHelper();
-    if (productHelper.isDummyBlitWaRequired()) {
+    const auto releaseHelper = rootDeviceEnvironment->getReleaseHelper();
+    if (releaseHelper->isDummyBlitWaRequired()) {
         using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
         auto dummyBltCmd = genCmdCast<XY_COLOR_BLT *>(*(cmdIterator++));
         EXPECT_NE(nullptr, dummyBltCmd);
@@ -135,7 +136,7 @@ void UnitTestHelper<GfxFamily>::verifyDummyBlitWa(const RootDeviceEnvironment *r
         EXPECT_EQ(1u, dummyBltCmd->getDestinationX2CoordinateRight());
         EXPECT_EQ(4u, dummyBltCmd->getDestinationY2CoordinateBottom());
         EXPECT_EQ(static_cast<uint32_t>(MemoryConstants::pageSize), dummyBltCmd->getDestinationPitch());
-        EXPECT_EQ(XY_COLOR_BLT::DESTINATION_SURFACE_TYPE::DESTINATION_SURFACE_TYPE_2D, dummyBltCmd->getDestinationSurfaceType());
+        EXPECT_EQ(XY_COLOR_BLT::DESTINATION_SURFACE_TYPE::DESTINATION_SURFACE_TYPE_SURFTYPE_2D, dummyBltCmd->getDestinationSurfaceType());
     }
 }
 

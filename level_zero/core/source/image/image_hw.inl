@@ -197,9 +197,9 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
                                              isMediaFormatLayout, minArrayElement, renderTargetViewExtent);
 
         NEO::setImageSurfaceStateDimensions<GfxFamily>(&surfaceState, imgInfo, __GMM_NO_CUBE_MAP, surfaceType, depth);
-        surfaceState.setSurfaceMinLod(0u);
-        surfaceState.setMipCountLod(0u);
-        NEO::setMipTailStartLod<GfxFamily>(&surfaceState, gmm);
+        surfaceState.setSurfaceMinLOD(0u);
+        surfaceState.setMIPCountLOD(0u);
+        NEO::setMipTailStartLOD<GfxFamily>(&surfaceState, gmm);
 
         if (!isMediaFormatLayout) {
             surfaceState.setShaderChannelSelectRed(
@@ -294,11 +294,23 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
     }
 
     {
-        const uint32_t exponent = Math::log2(imgInfo.surfaceFormat->imageElementSizeInBytes);
-        DEBUG_BREAK_IF(exponent >= 5u);
 
         NEO::ImageInfo imgInfoRedescirebed;
-        imgInfoRedescirebed.surfaceFormat = &ImageFormats::surfaceFormatsForRedescribe[exponent % 5];
+        [[maybe_unused]] uint32_t exponent;
+        switch (imgInfo.surfaceFormat->imageElementSizeInBytes) {
+        default:
+            exponent = Math::log2(imgInfo.surfaceFormat->imageElementSizeInBytes);
+            DEBUG_BREAK_IF(exponent >= 5u);
+            imgInfoRedescirebed.surfaceFormat = &ImageFormats::surfaceFormatsForRedescribe[exponent % 5];
+            break;
+        case 3:
+            imgInfoRedescirebed.surfaceFormat = &ImageFormats::surfaceFormatsForRedescribe[5];
+            break;
+        case 6:
+            imgInfoRedescirebed.surfaceFormat = &ImageFormats::surfaceFormatsForRedescribe[6];
+            break;
+        }
+
         imgInfoRedescirebed.imgDesc = imgInfo.imgDesc;
         imgInfoRedescirebed.qPitch = imgInfo.qPitch;
         redescribedSurfaceState = GfxFamily::cmdInitRenderSurfaceState;
@@ -309,9 +321,9 @@ ze_result_t ImageCoreFamily<gfxCoreFamily>::initialize(Device *device, const ze_
                                              desc->format.layout == ZE_IMAGE_FORMAT_LAYOUT_NV12, minArrayElement, renderTargetViewExtent);
 
         NEO::setImageSurfaceStateDimensions<GfxFamily>(&redescribedSurfaceState, imgInfoRedescirebed, __GMM_NO_CUBE_MAP, surfaceType, depth);
-        redescribedSurfaceState.setSurfaceMinLod(0u);
-        redescribedSurfaceState.setMipCountLod(0u);
-        NEO::setMipTailStartLod<GfxFamily>(&redescribedSurfaceState, gmm);
+        redescribedSurfaceState.setSurfaceMinLOD(0u);
+        redescribedSurfaceState.setMIPCountLOD(0u);
+        NEO::setMipTailStartLOD<GfxFamily>(&redescribedSurfaceState, gmm);
 
         if (imgInfoRedescirebed.surfaceFormat->gmmSurfaceFormat == GMM_FORMAT_R8_UINT_TYPE ||
             imgInfoRedescirebed.surfaceFormat->gmmSurfaceFormat == GMM_FORMAT_R16_UINT_TYPE ||

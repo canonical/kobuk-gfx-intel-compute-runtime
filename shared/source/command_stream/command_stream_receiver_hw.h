@@ -156,6 +156,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     }
 
     bool directSubmissionRelaxedOrderingEnabled() const override;
+    uint32_t getDirectSubmissionRelaxedOrderingQueueDepth() const override;
 
     void stopDirectSubmission(bool blocking) override;
 
@@ -167,7 +168,7 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
     GraphicsAllocation *getClearColorAllocation() override;
 
     TagAllocatorBase *getTimestampPacketAllocator() override;
-    std::unique_ptr<TagAllocatorBase> createMultiRootDeviceTimestampPacketAllocator(const RootDeviceIndicesContainer rootDeviceIndices) override;
+    std::unique_ptr<TagAllocatorBase> createMultiRootDeviceTimestampPacketAllocator(const RootDeviceIndicesContainer &rootDeviceIndices) override;
 
     void postInitFlagsSetup() override;
     void programActivePartitionConfig(LinearStream &csr);
