@@ -55,6 +55,7 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zeCommandListGetContextHandle@Base 24.35.30872.14
  zeCommandListGetDeviceHandle@Base 24.35.30872.14
  zeCommandListGetNextCommandIdExp@Base 24.35.30872.14
+ zeCommandListGetNextCommandIdWithKernelsExp@Base 24.52.32224.5
  zeCommandListGetOrdinal@Base 24.35.30872.14
  zeCommandListHostSynchronize@Base 24.35.30872.14
  zeCommandListImmediateAppendCommandListsExp@Base 24.35.30872.14
@@ -62,6 +63,7 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zeCommandListIsImmediate@Base 24.35.30872.14
  zeCommandListReset@Base 24.35.30872.14
  zeCommandListResetTracing@Base 24.35.30872.14
+ zeCommandListUpdateMutableCommandKernelsExp@Base 24.52.32224.5
  zeCommandListUpdateMutableCommandSignalEventExp@Base 24.35.30872.14
  zeCommandListUpdateMutableCommandWaitEventsExp@Base 24.35.30872.14
  zeCommandListUpdateMutableCommandsExp@Base 24.35.30872.14
@@ -225,7 +227,12 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zeImageViewCreateExp@Base 24.35.30872.14
  zeImageViewCreateExt@Base 24.35.30872.14
  zeInit@Base 24.35.30872.14
+ zeInitDrivers@Base 24.52.32224.5
  zeInitTracing@Base 24.35.30872.14
+ zeIntelCommandListAppendSignalExternalSemaphoresExp@Base 24.52.32224.5
+ zeIntelCommandListAppendWaitExternalSemaphoresExp@Base 24.52.32224.5
+ zeIntelDeviceImportExternalSemaphoreExp@Base 24.52.32224.5
+ zeIntelDeviceReleaseExternalSemaphoreExp@Base 24.52.32224.5
  zeIntelGetDriverVersionString@Base 24.35.30872.14
  zeIntelKernelGetBinaryExp@Base 24.39.31294.10
  zeKernelCreate@Base 24.35.30872.14
@@ -322,6 +329,7 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zesDeviceEccConfigurable@Base 24.35.30872.14
  zesDeviceEnumActiveVFExp@Base 24.35.30872.14
  zesDeviceEnumDiagnosticTestSuites@Base 24.35.30872.14
+ zesDeviceEnumEnabledVFExp@Base 24.52.32224.5
  zesDeviceEnumEngineGroups@Base 24.35.30872.14
  zesDeviceEnumFabricPorts@Base 24.35.30872.14
  zesDeviceEnumFans@Base 24.35.30872.14
@@ -481,7 +489,10 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zesTemperatureGetProperties@Base 24.35.30872.14
  zesTemperatureGetState@Base 24.35.30872.14
  zesTemperatureSetConfig@Base 24.35.30872.14
+ zesVFManagementGetVFCapabilitiesExp@Base 24.52.32224.5
+ zesVFManagementGetVFEngineUtilizationExp2@Base 24.52.32224.5
  zesVFManagementGetVFEngineUtilizationExp@Base 24.35.30872.14
+ zesVFManagementGetVFMemoryUtilizationExp2@Base 24.52.32224.5
  zesVFManagementGetVFMemoryUtilizationExp@Base 24.35.30872.14
  zesVFManagementGetVFPropertiesExp@Base 24.35.30872.14
  zesVFManagementSetVFTelemetryModeExp@Base 24.35.30872.14
@@ -503,13 +514,17 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zetDebugResume@Base 24.35.30872.14
  zetDebugWriteMemory@Base 24.35.30872.14
  zetDebugWriteRegisters@Base 24.35.30872.14
+ zetDeviceCreateMetricGroupsFromMetricsExp@Base 24.52.32224.5
+ zetDeviceGetConcurrentMetricGroupsExp@Base 24.52.32224.5
  zetDeviceGetDebugProperties@Base 24.35.30872.14
  zetDriverCalculateMetricExportDataExp@Base 24.35.30872.14
  zetGetCommandListProcAddrTable@Base 24.35.30872.14
  zetGetContextProcAddrTable@Base 24.35.30872.14
  zetGetDebugProcAddrTable@Base 24.35.30872.14
+ zetGetDeviceExpProcAddrTable@Base 24.52.32224.5
  zetGetDeviceProcAddrTable@Base 24.35.30872.14
  zetGetKernelProcAddrTable@Base 24.35.30872.14
+ zetGetMetricDecoderExpProcAddrTable@Base 24.52.32224.5
  zetGetMetricExpProcAddrTable@Base 24.35.30872.14
  zetGetMetricGroupExpProcAddrTable@Base 24.35.30872.14
  zetGetMetricGroupProcAddrTable@Base 24.35.30872.14
@@ -518,11 +533,14 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zetGetMetricQueryPoolProcAddrTable@Base 24.35.30872.14
  zetGetMetricQueryProcAddrTable@Base 24.35.30872.14
  zetGetMetricStreamerProcAddrTable@Base 24.35.30872.14
+ zetGetMetricTracerExpProcAddrTable@Base 24.52.32224.5
  zetGetModuleProcAddrTable@Base 24.35.30872.14
  zetGetTracerExpProcAddrTable@Base 24.35.30872.14
- zetIntelDeviceGetConcurrentMetricGroupsExp@Base 24.39.31294.10
  zetKernelGetProfileInfo@Base 24.35.30872.14
  zetMetricCreateFromProgrammableExp@Base 24.35.30872.14
+ zetMetricDecoderCreateExp@Base 24.52.32224.5
+ zetMetricDecoderDestroyExp@Base 24.52.32224.5
+ zetMetricDecoderGetDecodableMetricsExp@Base 24.52.32224.5
  zetMetricDestroyExp@Base 24.35.30872.14
  zetMetricGet@Base 24.35.30872.14
  zetMetricGetProperties@Base 24.35.30872.14
@@ -550,6 +568,12 @@ libze_intel_gpu.so.1 libze-intel-gpu1 #MINVER#
  zetMetricStreamerClose@Base 24.35.30872.14
  zetMetricStreamerOpen@Base 24.35.30872.14
  zetMetricStreamerReadData@Base 24.35.30872.14
+ zetMetricTracerCreateExp@Base 24.52.32224.5
+ zetMetricTracerDecodeExp@Base 24.52.32224.5
+ zetMetricTracerDestroyExp@Base 24.52.32224.5
+ zetMetricTracerDisableExp@Base 24.52.32224.5
+ zetMetricTracerEnableExp@Base 24.52.32224.5
+ zetMetricTracerReadDataExp@Base 24.52.32224.5
  zetModuleGetDebugInfo@Base 24.35.30872.14
  zetTracerExpCreate@Base 24.35.30872.14
  zetTracerExpDestroy@Base 24.35.30872.14
