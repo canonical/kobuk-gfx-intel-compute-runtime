@@ -1,3 +1,9 @@
+intel-compute-runtime (24.52.32224.5-1~24.10~ppa2) oracular; urgency=medium
+
+  * Add missing symbols file for libze-intel-gpu1
+
+ -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Wed, 15 Jan 2025 10:13:14 -0800
+
 intel-compute-runtime (24.52.32224.5-1~24.10~ppa1) oracular; urgency=medium
 
   * Update version to 24.52.32224.5
