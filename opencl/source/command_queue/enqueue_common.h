@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -575,7 +575,7 @@ BlitProperties CommandQueueHw<GfxFamily>::processDispatchForBlitEnqueue(CommandS
                                                                         const MultiDispatchInfo &multiDispatchInfo,
                                                                         TimestampPacketDependencies &timestampPacketDependencies,
                                                                         const EventsRequest &eventsRequest, LinearStream *commandStream,
-                                                                        uint32_t commandType, bool queueBlocked, TagNodeBase *multiRootDeviceEventSync) {
+                                                                        uint32_t commandType, bool queueBlocked, bool profilingEnabled, TagNodeBase *multiRootDeviceEventSync) {
     auto blitDirection = ClBlitProperties::obtainBlitDirection(commandType);
 
     auto blitProperties = ClBlitProperties::constructProperties(blitDirection, blitCommandStreamReceiver,
@@ -591,7 +591,8 @@ BlitProperties CommandQueueHw<GfxFamily>::processDispatchForBlitEnqueue(CommandS
     }
     blitProperties.multiRootDeviceEventSync = multiRootDeviceEventSync;
     auto currentTimestampPacketNode = timestampPacketContainer->peekNodes().at(0);
-    blitProperties.outputTimestampPacket = currentTimestampPacketNode;
+    blitProperties.blitSyncProperties.outputTimestampPacket = currentTimestampPacketNode;
+    blitProperties.blitSyncProperties.syncMode = profilingEnabled ? BlitSyncMode::timestamp : BlitSyncMode::immediate;
 
     if (commandStream) {
         if (timestampPacketDependencies.cacheFlushNodes.peekNodes().size() > 0) {
@@ -948,7 +949,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueNonBlocked(
 
     if (enqueueProperties.blitPropertiesContainer->size() > 0) {
         auto bcsCsr = getBcsForAuxTranslation();
-        const auto newTaskCount = bcsCsr->flushBcsTask(*enqueueProperties.blitPropertiesContainer, false, this->isProfilingEnabled(), getDevice());
+        const auto newTaskCount = bcsCsr->flushBcsTask(*enqueueProperties.blitPropertiesContainer, false, getDevice());
         if (newTaskCount > CompletionStamp::notReady) {
             CompletionStamp completionStamp{};
             completionStamp.taskCount = newTaskCount;
@@ -1219,7 +1220,7 @@ CompletionStamp CommandQueueHw<GfxFamily>::enqueueCommandWithoutKernel(
     if (enqueueProperties.operation == EnqueueProperties::Operation::blit) {
         UNRECOVERABLE_IF(!enqueueProperties.blitPropertiesContainer);
         if (bcsCsr) {
-            const auto newTaskCount = bcsCsr->flushBcsTask(*enqueueProperties.blitPropertiesContainer, false, this->isProfilingEnabled(), getDevice());
+            const auto newTaskCount = bcsCsr->flushBcsTask(*enqueueProperties.blitPropertiesContainer, false, getDevice());
             if (newTaskCount > CompletionStamp::notReady) {
                 CompletionStamp completionStamp{};
                 completionStamp.taskCount = newTaskCount;
@@ -1429,6 +1430,8 @@ cl_int CommandQueueHw<GfxFamily>::enqueueBlit(const MultiDispatchInfo &multiDisp
     }
     eventsRequest.setupBcsCsrForOutputEvent(bcsCsr);
 
+    const bool profilingEnabled = isProfilingEnabled() && pEventBuilder->getEvent();
+
     std::unique_ptr<KernelOperation> blockedCommandsData;
     TakeOwnershipWrapper<CommandQueueHw<GfxFamily>> queueOwnership(*this);
     if (debugManager.flags.ForceCsrLockInBcsEnqueueOnlyForGpgpuSubmission.get() != 1) {
@@ -1512,7 +1515,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueBlit(const MultiDispatchInfo &multiDisp
     }
 
     blitPropertiesContainer.push_back(processDispatchForBlitEnqueue(bcsCsr, multiDispatchInfo, timestampPacketDependencies,
-                                                                    eventsRequest, gpgpuCommandStream, cmdType, blockQueue, multiRootEventSyncStamp));
+                                                                    eventsRequest, gpgpuCommandStream, cmdType, blockQueue, profilingEnabled, multiRootEventSyncStamp));
 
     if (!blockQueue) {
         completionStamp = enqueueCommandWithoutKernel(nullptr, 0, gpgpuCommandStream, gpgpuCommandStreamStart, blocking,

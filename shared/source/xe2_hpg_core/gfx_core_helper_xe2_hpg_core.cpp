@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -23,8 +23,6 @@ using Family = NEO::Xe2HpgCoreFamily;
 #include "shared/source/helpers/local_id_gen.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/release_helper/release_helper.h"
-
-#include "gfx_core_helper_xe2_hpg_core_additional.inl"
 
 namespace NEO {
 
@@ -76,18 +74,6 @@ void GfxCoreHelperHw<Family>::adjustDefaultEngineType(HardwareInfo *pHwInfo, con
 template <>
 uint32_t GfxCoreHelperHw<Family>::getMinimalSIMDSize() const {
     return 16u;
-}
-
-template <>
-uint32_t GfxCoreHelperHw<Family>::getComputeUnitsUsedForScratch(const RootDeviceEnvironment &rootDeviceEnvironment) const {
-    if (debugManager.flags.OverrideNumComputeUnitsForScratch.get() != -1) {
-        return static_cast<uint32_t>(debugManager.flags.OverrideNumComputeUnitsForScratch.get());
-    }
-
-    auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
-    auto hwInfo = rootDeviceEnvironment.getHardwareInfo();
-    auto maxSubSlice = productHelper.computeMaxNeededSubSliceSpace(*hwInfo);
-    return maxSubSlice * hwInfo->gtSystemInfo.MaxEuPerSubSlice * productHelper.getThreadEuRatioForScratch(*hwInfo);
 }
 
 template <>
@@ -153,9 +139,9 @@ void MemorySynchronizationCommands<Family>::setAdditionalSynchronization(void *&
     if (programGlobalFenceAsMiMemFenceCommandInCommandStream == AdditionalSynchronizationType::fence) {
         MI_MEM_FENCE miMemFence = Family::cmdInitMemFence;
         if (acquire) {
-            miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_ACQUIRE);
+            miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_ACQUIRE_FENCE);
         } else {
-            miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE);
+            miMemFence.setFenceType(Family::MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE_FENCE);
         }
         *reinterpret_cast<MI_MEM_FENCE *>(commandsBuffer) = miMemFence;
         commandsBuffer = ptrOffset(commandsBuffer, sizeof(MI_MEM_FENCE));

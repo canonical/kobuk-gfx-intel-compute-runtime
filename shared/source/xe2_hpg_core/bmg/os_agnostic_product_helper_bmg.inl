@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -41,13 +41,18 @@ void ProductHelperHw<gfxProduct>::adjustNumberOfCcs(HardwareInfo &hwInfo) const 
 }
 
 template <>
-uint32_t ProductHelperHw<gfxProduct>::getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const {
-    return 16u;
+bool ProductHelperHw<gfxProduct>::isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const {
+    return true;
 }
 
 template <>
-bool ProductHelperHw<gfxProduct>::isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const {
-    return true;
+bool ProductHelperHw<gfxProduct>::adjustDispatchAllRequired(const HardwareInfo &hwInfo) const {
+    return hwInfo.gtSystemInfo.SliceCount > 2u;
+}
+
+template <>
+void ProductHelperHw<gfxProduct>::adjustScratchSize(size_t &requiredScratchSize) const {
+    requiredScratchSize *= 2;
 }
 
 } // namespace NEO

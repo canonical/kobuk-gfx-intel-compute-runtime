@@ -251,6 +251,9 @@ HWTEST_F(EventPoolCreate, givenTimestampEventsThenEventSizeSufficientForAllKerne
     if (l0GfxCoreHelper.useDynamicEventPacketsCount(hwInfo)) {
         maxPacketCount = l0GfxCoreHelper.getEventBaseMaxPacketCount(device->getNEODevice()->getRootDeviceEnvironment());
     }
+
+    maxPacketCount = std::max(maxPacketCount, 2u);
+
     uint32_t packetsSize = maxPacketCount *
                            static_cast<uint32_t>(NEO::TimestampPackets<typename FamilyType::TimestampPacketType, FamilyType::timestampPacketCount>::getSinglePacketSize());
     uint32_t kernelTimestampsSize = static_cast<uint32_t>(alignUp(packetsSize, gfxCoreHelper.getTimestampPacketAllocatorAlignment()));
@@ -2253,7 +2256,7 @@ TEST_F(EventqueryKernelTimestampsExt, givenEventWithStaticPartitionOffThenQueryK
     DebugManagerStateRestore restore;
     NEO::debugManager.flags.EnableStaticPartitioning.set(0);
 
-    event->hasKerneMappedTsCapability = true;
+    event->hasKernelMappedTsCapability = true;
 
     std::vector<ze_kernel_timestamp_result_t> kernelTsBuffer(2);
     ze_event_query_kernel_timestamps_results_ext_properties_t results{};
@@ -2271,7 +2274,7 @@ TEST_F(EventqueryKernelTimestampsExt, givenEventStatusNotReadyThenQueryKernelTim
     DebugManagerStateRestore restore;
     NEO::debugManager.flags.EnableStaticPartitioning.set(0);
 
-    event->hasKerneMappedTsCapability = true;
+    event->hasKernelMappedTsCapability = true;
 
     std::vector<ze_kernel_timestamp_result_t> kernelTsBuffer(2);
     ze_event_query_kernel_timestamps_results_ext_properties_t results{};
@@ -2286,42 +2289,47 @@ TEST_F(EventqueryKernelTimestampsExt, givenEventStatusNotReadyThenQueryKernelTim
 
 TEST_F(EventqueryKernelTimestampsExt, givenEventWithMappedTimestampCapabilityWhenQueryKernelTimestampsExtIsCalledCorrectValuesAreReturned) {
 
+    struct MappedTimeStampData {
+        typename MockTimestampPackets32::Packet packetData[3];
+        NEO::TimeStampData referenceTs{};
+    } mappedTimeStampData;
+
     auto &hwInfo = device->getNEODevice()->getHardwareInfo();
-    typename MockTimestampPackets32::Packet packetData[3];
     device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.kernelTimestampValidBits = 32;
     event->setPacketsInUse(3u);
-    event->hasKerneMappedTsCapability = true;
+    event->hasKernelMappedTsCapability = true;
     const auto deviceTsFrequency = device->getNEODevice()->getDeviceInfo().profilingTimerResolution;
     const int64_t gpuReferenceTimeInNs = 2000;
     const int64_t cpuReferenceTimeInNs = 3000;
     const auto maxKernelTsValue = maxNBitValue(hwInfo.capabilityTable.kernelTimestampValidBits);
 
-    NEO::TimeStampData *referenceTs = event->peekReferenceTs();
-    referenceTs->cpuTimeinNS = cpuReferenceTimeInNs;
-    referenceTs->gpuTimeStamp = static_cast<uint64_t>(gpuReferenceTimeInNs / deviceTsFrequency);
-
     auto timeToTimeStamp = [&](uint32_t timeInNs) {
         return static_cast<uint32_t>(timeInNs / deviceTsFrequency);
     };
 
-    packetData[0].contextStart = 50u;
-    packetData[0].contextEnd = 100u;
-    packetData[0].globalStart = timeToTimeStamp(4000u);
-    packetData[0].globalEnd = timeToTimeStamp(5000u);
+    mappedTimeStampData.packetData[0].contextStart = 50u;
+    mappedTimeStampData.packetData[0].contextEnd = 100u;
+    mappedTimeStampData.packetData[0].globalStart = timeToTimeStamp(4000u);
+    mappedTimeStampData.packetData[0].globalEnd = timeToTimeStamp(5000u);
 
     // Device Ts overflow case
-    packetData[1].contextStart = 20u;
-    packetData[1].contextEnd = 30u;
-    packetData[1].globalStart = timeToTimeStamp(500u);
-    packetData[1].globalEnd = timeToTimeStamp(1500u);
+    mappedTimeStampData.packetData[1].contextStart = 20u;
+    mappedTimeStampData.packetData[1].contextEnd = 30u;
+    mappedTimeStampData.packetData[1].globalStart = timeToTimeStamp(500u);
+    mappedTimeStampData.packetData[1].globalEnd = timeToTimeStamp(1500u);
 
-    packetData[2].contextStart = 20u;
-    packetData[2].contextEnd = 30u;
-    packetData[2].globalStart = timeToTimeStamp(5000u);
-    packetData[2].globalEnd = timeToTimeStamp(500u);
+    mappedTimeStampData.packetData[2].contextStart = 20u;
+    mappedTimeStampData.packetData[2].contextEnd = 30u;
+    mappedTimeStampData.packetData[2].globalStart = timeToTimeStamp(5000u);
+    mappedTimeStampData.packetData[2].globalEnd = timeToTimeStamp(500u);
 
-    event->hostAddressFromPool = packetData;
+    event->hostAddressFromPool = &mappedTimeStampData;
+    event->maxPacketCount = 3;
     uint32_t count = 0;
+
+    NEO::TimeStampData *referenceTs = event->peekReferenceTs();
+    referenceTs->cpuTimeinNS = cpuReferenceTimeInNs;
+    referenceTs->gpuTimeStamp = static_cast<uint64_t>(gpuReferenceTimeInNs / deviceTsFrequency);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, event->queryKernelTimestampsExt(device, &count, nullptr));
     EXPECT_EQ(count, 3u);
@@ -2344,7 +2352,7 @@ TEST_F(EventqueryKernelTimestampsExt, givenEventWithMappedTimestampCapabilityWhe
     EXPECT_LE(results.pSynchronizedTimestampsBuffer[0].global.kernelEnd, expectedGlobalEnd + errorOffset);
 
     auto expectedContextStart = expectedGlobalStart;
-    auto expectedContextEnd = expectedContextStart + (packetData[0].contextEnd - packetData[0].contextStart) * deviceTsFrequency;
+    auto expectedContextEnd = expectedContextStart + (mappedTimeStampData.packetData[0].contextEnd - mappedTimeStampData.packetData[0].contextStart) * deviceTsFrequency;
     EXPECT_GE(results.pSynchronizedTimestampsBuffer[0].context.kernelStart, expectedContextStart - errorOffset);
     EXPECT_LE(results.pSynchronizedTimestampsBuffer[0].context.kernelStart, expectedContextStart + errorOffset);
     EXPECT_GE(results.pSynchronizedTimestampsBuffer[0].context.kernelEnd, expectedContextEnd - errorOffset);
@@ -2360,7 +2368,7 @@ TEST_F(EventqueryKernelTimestampsExt, givenEventWithMappedTimestampCapabilityWhe
     EXPECT_LE(results.pSynchronizedTimestampsBuffer[1].global.kernelEnd, expectedGlobalEnd + errorOffset);
 
     expectedContextStart = expectedGlobalStart;
-    expectedContextEnd = expectedContextStart + (packetData[1].contextEnd - packetData[1].contextStart) * deviceTsFrequency;
+    expectedContextEnd = expectedContextStart + (mappedTimeStampData.packetData[1].contextEnd - mappedTimeStampData.packetData[1].contextStart) * deviceTsFrequency;
     EXPECT_GE(results.pSynchronizedTimestampsBuffer[1].context.kernelStart, expectedContextStart - errorOffset);
     EXPECT_LE(results.pSynchronizedTimestampsBuffer[1].context.kernelStart, expectedContextStart + errorOffset);
     EXPECT_GE(results.pSynchronizedTimestampsBuffer[1].context.kernelEnd, expectedContextEnd - errorOffset);
@@ -2375,7 +2383,7 @@ TEST_F(EventqueryKernelTimestampsExt, givenEventWithMappedTimestampCapabilityWhe
     EXPECT_LE(results.pSynchronizedTimestampsBuffer[2].global.kernelEnd, expectedGlobalEnd + errorOffset);
 
     expectedContextStart = expectedGlobalStart;
-    expectedContextEnd = expectedContextStart + (packetData[2].contextEnd - packetData[1].contextStart) * deviceTsFrequency;
+    expectedContextEnd = expectedContextStart + (mappedTimeStampData.packetData[2].contextEnd - mappedTimeStampData.packetData[1].contextStart) * deviceTsFrequency;
     EXPECT_GE(results.pSynchronizedTimestampsBuffer[2].context.kernelStart, expectedContextStart - errorOffset);
     EXPECT_LE(results.pSynchronizedTimestampsBuffer[2].context.kernelStart, expectedContextStart + errorOffset);
     EXPECT_GE(results.pSynchronizedTimestampsBuffer[2].context.kernelEnd, expectedContextEnd - errorOffset);
@@ -2799,9 +2807,9 @@ TEST_F(TimestampEventCreate, givenEventWhenQueryKernelTimestampThenNotReadyRetur
     EXPECT_EQ(0u, resultTimestamp.global.kernelEnd);
 }
 
-TEST_F(EventPoolCreateMultiDevice, givenFlatHierarchyWhenCallZeGetDevicesThenSubDevicesAreReturnedAsSeparateDevices) {
-    this->driverHandle->deviceHierarchyMode = L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT;
+using EventPoolCreateMultiDeviceFlatHierarchy = Test<MultiDeviceFixtureFlatHierarchy>;
 
+TEST_F(EventPoolCreateMultiDeviceFlatHierarchy, givenFlatHierarchyWhenCallZeGetDevicesThenSubDevicesAreReturnedAsSeparateDevices) {
     uint32_t deviceCount = 0;
     ze_result_t result = zeDeviceGet(driverHandle.get(), &deviceCount, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
@@ -3454,7 +3462,7 @@ HWTEST_F(EventTests, GivenEventWhenHostSynchronizeCalledThenExpectDownloadEventA
     };
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(event->csrs[0]);
-    ultCsr->initializeResources(false);
+    ultCsr->initializeResources(false, device->getDevicePreemptionMode());
     VariableBackup<std::function<void(GraphicsAllocation & gfxAllocation)>> backupCsrDownloadImpl(&ultCsr->downloadAllocationImpl);
     ultCsr->downloadAllocationImpl = [&downloadAllocationTrack](GraphicsAllocation &gfxAllocation) {
         downloadAllocationTrack[&gfxAllocation]++;
@@ -3537,7 +3545,7 @@ HWTEST_F(EventContextGroupTests, givenSecondaryCsrWhenDownloadingAllocationThenU
     OsContext osContext(0, static_cast<uint32_t>(neoDevice->getAllEngines().size()), EngineDescriptorHelper::getDefaultDescriptor());
 
     ultCsr->setupContext(osContext);
-    ultCsr->initializeResources(false);
+    ultCsr->initializeResources(false, device->getDevicePreemptionMode());
 
     uint32_t downloadCounter = 0;
     ultCsr->downloadAllocationImpl = [&downloadCounter](GraphicsAllocation &gfxAllocation) {
@@ -3577,7 +3585,7 @@ HWTEST_F(EventTests, GivenEventUsedOnNonDefaultCsrWhenHostSynchronizeCalledThenA
     EXPECT_LT(1u, neoDevice->getAllEngines().size());
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(neoDevice->getAllEngines()[1].commandStreamReceiver);
-    ultCsr->initializeResources(false);
+    ultCsr->initializeResources(false, device->getDevicePreemptionMode());
     EXPECT_NE(event->csrs[0], ultCsr);
 
     VariableBackup<std::function<void(GraphicsAllocation & gfxAllocation)>> backupCsrDownloadImpl(&ultCsr->downloadAllocationImpl);
@@ -3625,7 +3633,7 @@ HWTEST_F(EventTests, givenInOrderEventWhenHostSynchronizeIsCalledThenAllocationI
     *eventAddress = Event::STATE_SIGNALED;
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(event->csrs[0]);
-    ultCsr->initializeResources(false);
+    ultCsr->initializeResources(false, device->getDevicePreemptionMode());
 
     VariableBackup<std::function<void(GraphicsAllocation & gfxAllocation)>> backupCsrDownloadImpl(&ultCsr->downloadAllocationImpl);
     ultCsr->downloadAllocationImpl = [&downloadAllocationTrack](GraphicsAllocation &gfxAllocation) {
@@ -3727,7 +3735,7 @@ HWTEST_F(EventTests, givenInOrderEventWithHostAllocWhenHostSynchronizeIsCalledTh
     *eventAddress = Event::STATE_SIGNALED;
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(event->csrs[0]);
-    ultCsr->initializeResources(false);
+    ultCsr->initializeResources(false, device->getDevicePreemptionMode());
     VariableBackup<std::function<void(GraphicsAllocation & gfxAllocation)>> backupCsrDownloadImpl(&ultCsr->downloadAllocationImpl);
     ultCsr->downloadAllocationImpl = [&downloadAllocationTrack](GraphicsAllocation &gfxAllocation) {
         downloadAllocationTrack[&gfxAllocation]++;
@@ -4300,6 +4308,8 @@ struct EventDynamicPacketUseFixture : public DeviceFixture {
     void testSingleDevice() {
         ze_result_t result = ZE_RESULT_SUCCESS;
 
+        device->getNEODevice()->getExecutionEnvironment()->setDeviceHierarchyMode(DeviceHierarchyMode::composite);
+
         auto &hwInfo = device->getHwInfo();
         auto &l0GfxCoreHelper = device->getNEODevice()->getRootDeviceEnvironment().getHelper<L0GfxCoreHelper>();
         auto &gfxCoreHelper = device->getGfxCoreHelper();
@@ -4498,9 +4508,9 @@ HWTEST2_F(EventMultiTileDynamicPacketUseTest, givenEventUsedCreatedOnSubDeviceBu
     auto ultCsr1 = static_cast<UltCommandStreamReceiver<FamilyType> *>(subDevice1->getNEODevice()->getDefaultEngine().commandStreamReceiver);
     auto ultCsr2 = static_cast<UltCommandStreamReceiver<FamilyType> *>(subDevice1->getNEODevice()->getInternalEngine().commandStreamReceiver);
 
-    rootCsr->initializeResources(false);
-    ultCsr0->initializeResources(false);
-    ultCsr1->initializeResources(false);
+    rootCsr->initializeResources(false, device->getDevicePreemptionMode());
+    ultCsr0->initializeResources(false, device->getDevicePreemptionMode());
+    ultCsr1->initializeResources(false, device->getDevicePreemptionMode());
 
     rootCsr->commandStreamReceiverType = CommandStreamReceiverType::tbx;
     ultCsr0->commandStreamReceiverType = CommandStreamReceiverType::tbx;
@@ -4586,8 +4596,8 @@ HWTEST2_F(EventMultiTileDynamicPacketUseTest, givenEventCounterBasedUsedCreatedO
     auto ultCsr0 = static_cast<UltCommandStreamReceiver<FamilyType> *>(subDevice0->getNEODevice()->getDefaultEngine().commandStreamReceiver);
     auto ultCsr1 = static_cast<UltCommandStreamReceiver<FamilyType> *>(subDevice1->getNEODevice()->getDefaultEngine().commandStreamReceiver);
 
-    ultCsr0->initializeResources(false);
-    ultCsr1->initializeResources(false);
+    ultCsr0->initializeResources(false, device->getDevicePreemptionMode());
+    ultCsr1->initializeResources(false, device->getDevicePreemptionMode());
 
     ultCsr0->commandStreamReceiverType = CommandStreamReceiverType::tbx;
     ultCsr1->commandStreamReceiverType = CommandStreamReceiverType::tbx;

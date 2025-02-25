@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -82,6 +82,7 @@ struct MockDrmDirectSubmission : public DrmDirectSubmission<GfxFamily, Dispatche
     using BaseClass::getSizeNewResourceHandler;
     using BaseClass::getSizeSwitchRingBufferSection;
     using BaseClass::getTagAddressValue;
+    using BaseClass::gpuHangCheckPeriod;
     using BaseClass::handleNewResourcesSubmission;
     using BaseClass::handleResidency;
     using BaseClass::handleSwitchRingBuffers;
@@ -100,7 +101,6 @@ struct MockDrmDirectSubmission : public DrmDirectSubmission<GfxFamily, Dispatche
     using BaseClass::switchRingBuffers;
     using BaseClass::tagAddress;
     using BaseClass::updateTagValue;
-    using BaseClass::useNotifyForPostSync;
     using BaseClass::wait;
     using BaseClass::workPartitionAllocation;
 };
@@ -153,7 +153,7 @@ HWTEST_F(DrmDirectSubmissionTest, whenCreateDirectSubmissionThenValidObjectIsRet
     auto directSubmission = DirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>::create(*device->getDefaultEngine().commandStreamReceiver);
     EXPECT_NE(directSubmission.get(), nullptr);
 
-    bool ret = directSubmission->initialize(false, false);
+    bool ret = directSubmission->initialize(false);
     EXPECT_TRUE(ret);
 }
 
@@ -997,7 +997,7 @@ HWTEST_F(DrmDirectSubmissionTest,
 
     FlushStampTracker flushStamp(true);
 
-    EXPECT_TRUE(drmDirectSubmission.initialize(false, false));
+    EXPECT_TRUE(drmDirectSubmission.initialize(false));
 
     BatchBuffer batchBuffer = {};
     GraphicsAllocation *commandBuffer = nullptr;
@@ -1055,7 +1055,7 @@ HWTEST_F(DrmDirectSubmissionTest,
 
     FlushStampTracker flushStamp(true);
 
-    EXPECT_TRUE(drmDirectSubmission.initialize(false, false));
+    EXPECT_TRUE(drmDirectSubmission.initialize(false));
 
     BatchBuffer batchBuffer = {};
     GraphicsAllocation *commandBuffer = nullptr;
@@ -1097,4 +1097,29 @@ HWTEST_F(DrmDirectSubmissionTest,
 
     executionEnvironment.memoryManager->freeGraphicsMemory(commandBuffer);
     *drmDirectSubmission.tagAddress = 1;
+}
+
+HWTEST_F(DrmDirectSubmissionTest, givenGpuHangWhenWaitCalledThenGpuHangDetected) {
+    using Dispatcher = RenderDispatcher<FamilyType>;
+
+    VariableBackup<bool> backupWaitpkgUse(&WaitUtils::waitpkgUse, false);
+    VariableBackup<uint32_t> backupWaitCount(&WaitUtils::waitCount, 1);
+
+    MockDrmDirectSubmission<FamilyType, Dispatcher> directSubmission(*device->getDefaultEngine().commandStreamReceiver);
+    directSubmission.gpuHangCheckPeriod = {};
+    bool ret = directSubmission.allocateResources();
+    EXPECT_TRUE(ret);
+
+    auto pollAddress = directSubmission.tagAddress;
+    *pollAddress = 0;
+
+    auto drm = static_cast<DrmMock *>(executionEnvironment.rootDeviceEnvironments[0]->osInterface->getDriverModel()->as<Drm>());
+    ResetStats resetStats{};
+    resetStats.contextId = 0;
+    resetStats.batchActive = 1;
+    drm->resetStatsToReturn.push_back(resetStats);
+
+    EXPECT_EQ(0, drm->ioctlCount.getResetStats);
+    directSubmission.wait(1);
+    EXPECT_EQ(1, drm->ioctlCount.getResetStats);
 }

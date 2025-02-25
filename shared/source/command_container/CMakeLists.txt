@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2024 Intel Corporation
+# Copyright (C) 2019-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -30,7 +30,6 @@ if(SUPPORT_XEHP_AND_LATER)
        ${CMAKE_CURRENT_SOURCE_DIR}/implicit_scaling_xehp_and_later.inl
        ${CMAKE_CURRENT_SOURCE_DIR}/walker_partition_interface.h
        ${CMAKE_CURRENT_SOURCE_DIR}/walker_partition_xehp_and_later.h
-       ${CMAKE_CURRENT_SOURCE_DIR}/walker_partition_xehp_and_later.inl
   )
 endif()
 
@@ -49,6 +48,7 @@ endif()
 if(SUPPORT_XE_HPG OR SUPPORT_XE_HPC OR SUPPORT_XE2_HPG_CORE OR SUPPORT_XE3_CORE)
   list(APPEND NEO_CORE_COMMAND_CONTAINER
        ${CMAKE_CURRENT_SOURCE_DIR}/command_encoder_from_xe_hpg_core_to_xe3_core.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/walker_partition_from_xe_hpg_core_to_xe3_core.inl
   )
 endif()
 
@@ -67,6 +67,12 @@ endif()
 if(SUPPORT_XE2_AND_LATER)
   list(APPEND NEO_CORE_COMMAND_CONTAINER
        ${CMAKE_CURRENT_SOURCE_DIR}/command_encoder_xe2_hpg_core_and_later.inl
+  )
+endif()
+
+if(SUPPORT_XE3_AND_LATER)
+  list(APPEND NEO_CORE_COMMAND_CONTAINER
+       ${CMAKE_CURRENT_SOURCE_DIR}/command_encoder_from_xe3_and_later.inl
   )
 endif()
 

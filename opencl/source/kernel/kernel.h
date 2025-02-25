@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -194,10 +194,6 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
         return kernelArguments.size();
     }
 
-    bool usesBindfulAddressingForBuffers() const {
-        return KernelDescriptor::BindfulAndStateless == kernelInfo.kernelDescriptor.kernelAttributes.bufferAddressingMode;
-    }
-
     inline const KernelDescriptor &getDescriptor() const {
         return kernelInfo.kernelDescriptor;
     }
@@ -217,8 +213,14 @@ class Kernel : public ReferenceTrackedObject<Kernel> {
     void patchSyncBuffer(GraphicsAllocation *gfxAllocation, size_t bufferOffset);
     void *patchBindlessSurfaceState(NEO::GraphicsAllocation *alloc, uint32_t bindless);
     uint32_t getSurfaceStateIndexForBindlessOffset(NEO::CrossThreadDataOffset bindlessOffset) const;
-    void patchBindlessOffsetsForImplicitArgs(uint64_t bindlessSurfaceStateBaseOffset) const;
-    void patchBindlessOffsetsInCrossThreadData(uint64_t bindlessSurfaceStateBaseOffset) const;
+
+    template <bool heaplessEnabled>
+    void patchBindlessSurfaceStatesForImplicitArgs(uint64_t bindlessSurfaceStatesBaseAddress) const;
+
+    template <bool heaplessEnabled>
+    void patchBindlessSurfaceStatesInCrossThreadData(uint64_t bindlessSurfaceStatesBaseAddress) const;
+
+    void patchBindlessSamplerStatesInCrossThreadData(uint64_t bindlessSamplerStatesBaseAddress) const;
 
     // Helpers
     cl_int setArg(uint32_t argIndex, uint32_t argValue);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -83,7 +83,7 @@ struct DeviceImp : public Device, NEO::NonCopyableOrMovableClass {
     const NEO::ProductHelper &getProductHelper() override;
     const NEO::CompilerProductHelper &getCompilerProductHelper() override;
     const NEO::HardwareInfo &getHwInfo() const override;
-    NEO::OSInterface &getOsInterface() override;
+    NEO::OSInterface *getOsInterface() override;
     uint32_t getPlatformInfo() const override;
     MetricDeviceContext &getMetricDeviceContext() override;
     DebugSession *getDebugSession(const zet_debug_config_t &config) override;
@@ -196,6 +196,6 @@ struct DeviceImp : public Device, NEO::NonCopyableOrMovableClass {
     std::unique_ptr<DebugSession> debugSession;
 };
 
-void transferAndUnprotectMemoryWithHints(NEO::PageFaultManager *pageFaultHandler, void *allocPtr, NEO::PageFaultManager::PageFaultData &pageFaultData);
+void transferAndUnprotectMemoryWithHints(NEO::CpuPageFaultManager *pageFaultHandler, void *allocPtr, NEO::CpuPageFaultManager::PageFaultData &pageFaultData);
 
 } // namespace L0

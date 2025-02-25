@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -142,20 +142,18 @@ inline void HardwareInterface<GfxFamily>::programWalker(
     } else {
         kernelSystemAllocation = kernel.isAnyKernelArgumentUsingSystemMemory();
     }
-    bool requiredSystemFence = kernelSystemAllocation && walkerArgs.event != nullptr;
-    auto maxFrontEndThreads = device.getDeviceInfo().maxFrontEndThreads;
 
     EncodeWalkerArgs encodeWalkerArgs{
-        kernelInfo.kernelDescriptor,        // kernelDescriptor
-        kernel.getExecutionType(),          // kernelExecutionType
-        kernelAttributes.dispatchWalkOrder, // requiredDispatchWalkOrder
-        kernelAttributes.localRegionSize,   // localRegionSize
-        maxFrontEndThreads,                 // maxFrontEndThreads
-        requiredSystemFence};               // requiredSystemFence
+        .kernelExecutionType = kernel.getExecutionType(),
+        .requiredDispatchWalkOrder = kernelAttributes.dispatchWalkOrder,
+        .localRegionSize = kernelAttributes.localRegionSize,
+        .maxFrontEndThreads = device.getDeviceInfo().maxFrontEndThreads,
+        .requiredSystemFence = kernelSystemAllocation && walkerArgs.event != nullptr,
+        .hasSample = kernelInfo.kernelDescriptor.kernelAttributes.flags.hasSample};
 
     EncodeDispatchKernel<GfxFamily>::template encodeAdditionalWalkerFields<WalkerType>(rootDeviceEnvironment, walkerCmd, encodeWalkerArgs);
     EncodeDispatchKernel<GfxFamily>::template encodeWalkerPostSyncFields<WalkerType>(walkerCmd, encodeWalkerArgs);
-    EncodeDispatchKernel<GfxFamily>::template encodeComputeDispatchAllWalker<WalkerType>(walkerCmd, encodeWalkerArgs);
+    EncodeDispatchKernel<GfxFamily>::template encodeComputeDispatchAllWalker<WalkerType, InterfaceDescriptorType>(walkerCmd, interfaceDescriptor, rootDeviceEnvironment, encodeWalkerArgs);
     EncodeDispatchKernel<GfxFamily>::template overrideDefaultValues<WalkerType, InterfaceDescriptorType>(walkerCmd, *interfaceDescriptor);
 
     auto devices = queueCsr.getOsContext().getDeviceBitfield();
@@ -186,6 +184,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
             requiredPartitionDim,                // requiredPartitionDim
             partitionCount,                      // partitionCount
             workgroupSize,                       // workgroupSize
+            threadGroupCount,                    // threadGroupCount
             maxWgCountPerTile,                   // maxWgCountPerTile
             false,                               // useSecondaryBatchBuffer
             false,                               // apiSelfCleanup
@@ -207,7 +206,7 @@ inline void HardwareInterface<GfxFamily>::programWalker(
             timestampPacketNode->setPacketsUsed(implicitScalingArgs.partitionCount);
         }
     } else {
-        EncodeDispatchKernel<GfxFamily>::setWalkerRegionSettings(walkerCmd, device, 1, workgroupSize, maxWgCountPerTile, requiredWalkOrder != 0);
+        EncodeDispatchKernel<GfxFamily>::setWalkerRegionSettings(walkerCmd, device, 1, workgroupSize, threadGroupCount, maxWgCountPerTile, requiredWalkOrder != 0);
         auto computeWalkerOnStream = commandStream.getSpaceForCmd<WalkerType>();
         *computeWalkerOnStream = walkerCmd;
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -204,11 +204,11 @@ HWTEST2_F(CommandListTests, whenCommandListIsCreatedAndProgramExtendedPipeContro
 }
 
 using CommandListTestsReserveSize = Test<DeviceFixture>;
-HWTEST2_F(CommandListTestsReserveSize, givenCommandListWhenGetReserveSshSizeThen4PagesReturned, IsAtLeastXeHpCore) {
+HWTEST2_F(CommandListTestsReserveSize, givenCommandListWhenGetReserveSshSizeThen16slotSpaceReturned, IsAtLeastXeHpCore) {
     L0::CommandListCoreFamily<gfxCoreFamily> commandList(1u);
     commandList.initialize(device, NEO::EngineGroupType::compute, 0u);
 
-    EXPECT_EQ(commandList.getReserveSshSize(), 4 * MemoryConstants::pageSize);
+    EXPECT_EQ(commandList.getReserveSshSize(), (16 * 2 + 1) * 2 * sizeof(typename FamilyType::RENDER_SURFACE_STATE));
 }
 
 using CommandListAppendLaunchKernel = Test<ModuleFixture>;
@@ -1708,8 +1708,7 @@ void find3dBtdCommand(LinearStream &cmdStream, size_t offset, size_t size, uint6
 
     if (btdStateCmdCount > 0) {
         auto btdStateCmd = reinterpret_cast<_3DSTATE_BTD *>(*btdStateCmdList[0]);
-        auto &btdStateBody = btdStateCmd->getBtdStateBody();
-        EXPECT_EQ(gpuVa, btdStateBody.getMemoryBackedBufferBasePointer());
+        EXPECT_EQ(gpuVa, btdStateCmd->getMemoryBackedBufferBasePointer());
 
         btdCommandFound = true;
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -28,18 +28,18 @@ namespace NEO {
 template <>
 void EncodeEnableRayTracing<Family>::append3dStateBtd(void *ptr3dStateBtd) {
     using _3DSTATE_BTD = typename Family::_3DSTATE_BTD;
-    using DISPATCH_TIMEOUT_COUNTER = typename Family::_3DSTATE_BTD_BODY::DISPATCH_TIMEOUT_COUNTER;
-    using CONTROLS_THE_MAXIMUM_NUMBER_OF_OUTSTANDING_RAYQUERIES_PER_SS = typename Family::_3DSTATE_BTD_BODY::CONTROLS_THE_MAXIMUM_NUMBER_OF_OUTSTANDING_RAYQUERIES_PER_SS;
+    using DISPATCH_TIMEOUT_COUNTER = typename Family::_3DSTATE_BTD::DISPATCH_TIMEOUT_COUNTER;
+    using CONTROLS_THE_MAXIMUM_NUMBER_OF_OUTSTANDING_RAYQUERIES_PER_SS = typename Family::_3DSTATE_BTD::CONTROLS_THE_MAXIMUM_NUMBER_OF_OUTSTANDING_RAYQUERIES_PER_SS;
     auto cmd = static_cast<_3DSTATE_BTD *>(ptr3dStateBtd);
     if (debugManager.flags.ForceTheMaximumNumberOfOutstandingRayqueriesPerSs.get() != -1) {
         auto value = static_cast<CONTROLS_THE_MAXIMUM_NUMBER_OF_OUTSTANDING_RAYQUERIES_PER_SS>(debugManager.flags.ForceTheMaximumNumberOfOutstandingRayqueriesPerSs.get());
         DEBUG_BREAK_IF(value > 3);
-        cmd->getBtdStateBody().setControlsTheMaximumNumberOfOutstandingRayqueriesPerSs(value);
+        cmd->setControlsTheMaximumNumberOfOutstandingRayqueriesPerSs(value);
     }
     if (debugManager.flags.ForceDispatchTimeoutCounter.get() != -1) {
         auto value = static_cast<DISPATCH_TIMEOUT_COUNTER>(debugManager.flags.ForceDispatchTimeoutCounter.get());
         DEBUG_BREAK_IF(value > 7);
-        cmd->getBtdStateBody().setDispatchTimeoutCounter(value);
+        cmd->setDispatchTimeoutCounter(value);
     }
 }
 
@@ -59,16 +59,16 @@ void EncodeComputeMode<Family>::programComputeModeCommand(LinearStream &csr, Sta
     if (properties.threadArbitrationPolicy.isDirty) {
         switch (properties.threadArbitrationPolicy.value) {
         case ThreadArbitrationPolicy::RoundRobin:
-            stateComputeMode.setEuThreadSchedulingModeOverride(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE_OVERRIDE::EU_THREAD_SCHEDULING_MODE_OVERRIDE_ROUND_ROBIN);
+            stateComputeMode.setEuThreadSchedulingMode(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE::EU_THREAD_SCHEDULING_MODE_ROUND_ROBIN);
             break;
         case ThreadArbitrationPolicy::AgeBased:
-            stateComputeMode.setEuThreadSchedulingModeOverride(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE_OVERRIDE::EU_THREAD_SCHEDULING_MODE_OVERRIDE_OLDEST_FIRST);
+            stateComputeMode.setEuThreadSchedulingMode(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE::EU_THREAD_SCHEDULING_MODE_OLDEST_FIRST);
             break;
         case ThreadArbitrationPolicy::RoundRobinAfterDependency:
-            stateComputeMode.setEuThreadSchedulingModeOverride(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE_OVERRIDE::EU_THREAD_SCHEDULING_MODE_OVERRIDE_STALL_BASED_ROUND_ROBIN);
+            stateComputeMode.setEuThreadSchedulingMode(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE::EU_THREAD_SCHEDULING_MODE_STALL_BASED_ROUND_ROBIN);
             break;
         default:
-            stateComputeMode.setEuThreadSchedulingModeOverride(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE_OVERRIDE::EU_THREAD_SCHEDULING_MODE_OVERRIDE_HW_DEFAULT);
+            stateComputeMode.setEuThreadSchedulingMode(STATE_COMPUTE_MODE::EU_THREAD_SCHEDULING_MODE::EU_THREAD_SCHEDULING_MODE_HW_DEFAULT);
         }
         maskBits |= Family::stateComputeModeEuThreadSchedulingModeOverrideMask;
     }

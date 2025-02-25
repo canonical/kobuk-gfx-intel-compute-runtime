@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -344,6 +344,163 @@ HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageViewThenProperPlaneIsCreated
 
     zeImageDestroy(planeY);
     zeImageDestroy(planeUV);
+}
+
+HWTEST2_F(ImageView, given3ChannelImageWhenCreateImageViewIsCalledThenProperViewIsCreated, MatchAny) {
+    const size_t width = 32;
+    const size_t height = 32;
+    const size_t depth = 1;
+
+    ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                  nullptr,
+                                  (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                  ZE_IMAGE_TYPE_2D,
+                                  {ZE_IMAGE_FORMAT_LAYOUT_8_8_8, ZE_IMAGE_FORMAT_TYPE_UNORM,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_1},
+                                  width,
+                                  height,
+                                  depth,
+                                  0,
+                                  0};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &srcImgDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    ze_image_handle_t imgHandle = imagePtr->toHandle();
+
+    ze_image_handle_t viewHandle;
+    auto ret = L0::Image::fromHandle(imgHandle)->createView(device, &srcImgDesc, &viewHandle);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    auto viewDesc = static_cast<L0::Image *>(viewHandle)->getImageInfo().imgDesc;
+    EXPECT_EQ(width, viewDesc.imageWidth);
+    EXPECT_EQ(height, viewDesc.imageHeight);
+
+    zeImageDestroy(viewHandle);
+    zeImageDestroy(imgHandle);
+}
+
+HWTEST2_F(ImageView, given3Channel16BitImageWhenCreateImageViewIsCalledThenProperViewIsCreated, MatchAny) {
+    const size_t width = 32;
+    const size_t height = 32;
+    const size_t depth = 1;
+
+    ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                  nullptr,
+                                  (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                  ZE_IMAGE_TYPE_2D,
+                                  {ZE_IMAGE_FORMAT_LAYOUT_16_16_16, ZE_IMAGE_FORMAT_TYPE_FLOAT,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_1},
+                                  width,
+                                  height,
+                                  depth,
+                                  0,
+                                  0};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &srcImgDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    ze_image_handle_t imgHandle = imagePtr->toHandle();
+
+    ze_image_handle_t viewHandle;
+    auto ret = L0::Image::fromHandle(imgHandle)->createView(device, &srcImgDesc, &viewHandle);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    auto viewDesc = static_cast<L0::Image *>(viewHandle)->getImageInfo().imgDesc;
+    EXPECT_EQ(width, viewDesc.imageWidth);
+    EXPECT_EQ(height, viewDesc.imageHeight);
+
+    zeImageDestroy(viewHandle);
+    zeImageDestroy(imgHandle);
+}
+
+HWTEST2_F(ImageView, given3ChannelMickedImageWhenCreateImageViewIsCalledThenProperViewIsCreated, MatchAny) {
+    const size_t width = 32;
+    const size_t height = 32;
+    const size_t depth = 1;
+
+    ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                  nullptr,
+                                  (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                  ZE_IMAGE_TYPE_2D,
+                                  {ZE_IMAGE_FORMAT_LAYOUT_8_8_8, ZE_IMAGE_FORMAT_TYPE_UNORM,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_1},
+                                  width,
+                                  height,
+                                  depth,
+                                  0,
+                                  0};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &srcImgDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    ze_image_handle_t imgHandle = imagePtr->toHandle();
+
+    ze_image_desc_t viewImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                   nullptr,
+                                   (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                   ZE_IMAGE_TYPE_2D,
+                                   {ZE_IMAGE_FORMAT_LAYOUT_8, ZE_IMAGE_FORMAT_TYPE_UNORM,
+                                    ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_X,
+                                    ZE_IMAGE_FORMAT_SWIZZLE_X, ZE_IMAGE_FORMAT_SWIZZLE_X},
+                                   width * 3,
+                                   height,
+                                   depth,
+                                   0,
+                                   0};
+
+    ze_image_handle_t viewHandle;
+    auto ret = L0::Image::fromHandle(imgHandle)->createView(device, &viewImgDesc, &viewHandle);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    zeImageDestroy(viewHandle);
+    zeImageDestroy(imgHandle);
+}
+
+HWTEST2_F(ImageView, given32bitImageWhenCreateImageViewIsCalledWith3ChannelThenNotSuppotedIsReturned, MatchAny) {
+    const size_t width = 32;
+    const size_t height = 32;
+    const size_t depth = 1;
+
+    ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                  nullptr,
+                                  (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                  ZE_IMAGE_TYPE_2D,
+                                  {ZE_IMAGE_FORMAT_LAYOUT_32_32_32_32, ZE_IMAGE_FORMAT_TYPE_UINT,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_A},
+                                  width,
+                                  height,
+                                  depth,
+                                  0,
+                                  0};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &srcImgDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    ze_image_handle_t imgHandle = imagePtr->toHandle();
+
+    ze_image_desc_t viewImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                   nullptr,
+                                   (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                   ZE_IMAGE_TYPE_2D,
+                                   {ZE_IMAGE_FORMAT_LAYOUT_32_32_32, ZE_IMAGE_FORMAT_TYPE_UINT,
+                                    ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                    ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_1},
+                                   width,
+                                   height,
+                                   depth,
+                                   0,
+                                   0};
+
+    ze_image_handle_t viewHandle;
+    auto ret = L0::Image::fromHandle(imgHandle)->createView(device, &viewImgDesc, &viewHandle);
+    ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
+
+    zeImageDestroy(imgHandle);
 }
 
 HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageWithInvalidStructViewThenProperErrorIsReturned, MatchAny) {
@@ -2382,6 +2539,227 @@ HWTEST2_F(ImageCreate, given2DImageFormatWithPixelSizeOf6BytesWhenRowPitchIsQuer
     uint32_t pixelSizeInBytes = 6;
     imageHW->getPitchFor2dImage(device->toHandle(), desc.width, desc.height, pixelSizeInBytes, &rowPitch);
     EXPECT_EQ(rowPitch, imageHW->imgInfo.rowPitch);
+}
+
+HWTEST2_F(ImageCreate, givenValidImageDescriptionFor3ChannelWhenImageCreateThenImageIsCreatedCorrectly, MatchAny) {
+    ze_image_desc_t zeDesc = {};
+    zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    zeDesc.arraylevels = 1u;
+    zeDesc.depth = 1u;
+    zeDesc.height = 1u;
+    zeDesc.width = 100u;
+    zeDesc.miplevels = 1u;
+    zeDesc.type = ZE_IMAGE_TYPE_2DARRAY;
+    zeDesc.flags = ZE_IMAGE_FLAG_BIAS_UNCACHED;
+
+    zeDesc.format = {ZE_IMAGE_FORMAT_LAYOUT_8_8_8,
+                     ZE_IMAGE_FORMAT_TYPE_UNORM,
+                     ZE_IMAGE_FORMAT_SWIZZLE_R,
+                     ZE_IMAGE_FORMAT_SWIZZLE_G,
+                     ZE_IMAGE_FORMAT_SWIZZLE_B,
+                     ZE_IMAGE_FORMAT_SWIZZLE_1};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &zeDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    std::unique_ptr<L0::Image> image(imagePtr);
+
+    ASSERT_NE(image, nullptr);
+}
+
+HWTEST2_F(ImageCreate, givenValidImageDescriptionFor3Channel16BitFloatWhenImageCreateThenImageIsCreatedCorrectly, MatchAny) {
+    ze_image_desc_t zeDesc = {};
+    zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    zeDesc.arraylevels = 1u;
+    zeDesc.depth = 1u;
+    zeDesc.height = 1u;
+    zeDesc.width = 100u;
+    zeDesc.miplevels = 1u;
+    zeDesc.type = ZE_IMAGE_TYPE_2DARRAY;
+    zeDesc.flags = ZE_IMAGE_FLAG_BIAS_UNCACHED;
+
+    zeDesc.format = {ZE_IMAGE_FORMAT_LAYOUT_16_16_16,
+                     ZE_IMAGE_FORMAT_TYPE_FLOAT,
+                     ZE_IMAGE_FORMAT_SWIZZLE_R,
+                     ZE_IMAGE_FORMAT_SWIZZLE_G,
+                     ZE_IMAGE_FORMAT_SWIZZLE_B,
+                     ZE_IMAGE_FORMAT_SWIZZLE_1};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &zeDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    std::unique_ptr<L0::Image> image(imagePtr);
+
+    ASSERT_NE(image, nullptr);
+}
+
+HWTEST2_F(ImageCreateExternalMemoryTest, givenNTHandleWhenCreatingInteropImageThenSuccessIsReturned, MatchAny) {
+    ze_external_memory_import_win32_handle_t importNTHandle = {};
+    importNTHandle.handle = &imageHandle;
+    importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+    importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
+    desc.pNext = &importNTHandle;
+
+    delete driverHandle->svmAllocsManager;
+    driverHandle->setMemoryManager(execEnv->memoryManager.get());
+    driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &desc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    std::unique_ptr<L0::Image> image(imagePtr);
+
+    ASSERT_NE(image, nullptr);
+}
+
+HWTEST2_F(ImageCreate, givenFDWhenCreatingImageWith3Channel8bitUintThenSuccessIsReturned, MatchAny) {
+    ze_image_desc_t desc = {};
+
+    desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    desc.type = ZE_IMAGE_TYPE_3D;
+    desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_8_8_8;
+    desc.format.type = ZE_IMAGE_FORMAT_TYPE_UINT;
+    desc.width = 11;
+    desc.height = 13;
+    desc.depth = 17;
+
+    desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+    desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+    desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+    desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_1;
+
+    ze_external_memory_import_fd_t importFd = {};
+    importFd.fd = 1;
+    importFd.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+    importFd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+    desc.pNext = &importFd;
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &desc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    std::unique_ptr<L0::Image> image(imagePtr);
+
+    ASSERT_NE(image, nullptr);
+}
+
+HWTEST2_F(ImageCreateExternalMemoryTest, givenNtHandleWhenCreatingImageWith3Channel8bitUintThenNotSupportedIsReturned, MatchAny) {
+    ze_image_desc_t desc = {};
+
+    desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    desc.type = ZE_IMAGE_TYPE_3D;
+    desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_8_8_8;
+    desc.format.type = ZE_IMAGE_FORMAT_TYPE_UINT;
+    desc.width = 11;
+    desc.height = 13;
+    desc.depth = 17;
+
+    desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+    desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+    desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+    desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_1;
+
+    ze_external_memory_import_win32_handle_t importNTHandle = {};
+    importNTHandle.handle = &imageHandle;
+    importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+    importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
+    desc.pNext = &importNTHandle;
+
+    Image *imagePtr = nullptr;
+    auto result = Image::create(productFamily, device, &desc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    std::unique_ptr<L0::Image> image(imagePtr);
+    EXPECT_EQ(image, nullptr);
+}
+
+HWTEST2_F(ImageCreate, givenFDWhenCreatingImageWith3Channel16bitUintThenSuccessIsReturned, MatchAny) {
+    ze_image_desc_t desc = {};
+
+    desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    desc.type = ZE_IMAGE_TYPE_3D;
+    desc.format.layout = ZE_IMAGE_FORMAT_LAYOUT_16_16_16;
+    desc.format.type = ZE_IMAGE_FORMAT_TYPE_UINT;
+    desc.width = 11;
+    desc.height = 13;
+    desc.depth = 17;
+
+    desc.format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+    desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+    desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+    desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_1;
+
+    ze_external_memory_import_fd_t importFd = {};
+    importFd.fd = 1;
+    importFd.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_DMA_BUF;
+    importFd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
+    desc.pNext = &importFd;
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &desc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    std::unique_ptr<L0::Image> image(imagePtr);
+
+    ASSERT_NE(image, nullptr);
+}
+
+HWTEST2_F(ImageCreate, givenValidImageDescriptionFor3Channel32BitFloatWhenImageCreateThenUnsupportedIsReturned, MatchAny) {
+    ze_image_desc_t zeDesc = {};
+    zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+    zeDesc.arraylevels = 1u;
+    zeDesc.depth = 1u;
+    zeDesc.height = 1u;
+    zeDesc.width = 100u;
+    zeDesc.miplevels = 1u;
+    zeDesc.type = ZE_IMAGE_TYPE_2DARRAY;
+    zeDesc.flags = ZE_IMAGE_FLAG_BIAS_UNCACHED;
+
+    zeDesc.format = {ZE_IMAGE_FORMAT_LAYOUT_32_32_32,
+                     ZE_IMAGE_FORMAT_TYPE_FLOAT,
+                     ZE_IMAGE_FORMAT_SWIZZLE_R,
+                     ZE_IMAGE_FORMAT_SWIZZLE_G,
+                     ZE_IMAGE_FORMAT_SWIZZLE_B,
+                     ZE_IMAGE_FORMAT_SWIZZLE_1};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &zeDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    std::unique_ptr<L0::Image> image(imagePtr);
+
+    EXPECT_EQ(image, nullptr);
+}
+
+HWTEST2_F(ImageView, given3ChannelImageWhenCreateImageViewWithNtHandleIsCalledThenNotSupportedIsReturned, MatchAny) {
+    const size_t width = 32;
+    const size_t height = 32;
+    const size_t depth = 1;
+
+    ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC,
+                                  nullptr,
+                                  (ZE_IMAGE_FLAG_KERNEL_WRITE | ZE_IMAGE_FLAG_BIAS_UNCACHED),
+                                  ZE_IMAGE_TYPE_2D,
+                                  {ZE_IMAGE_FORMAT_LAYOUT_8_8_8, ZE_IMAGE_FORMAT_TYPE_UNORM,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G,
+                                   ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_1},
+                                  width,
+                                  height,
+                                  depth,
+                                  0,
+                                  0};
+
+    Image *imagePtr;
+    auto result = Image::create(productFamily, device, &srcImgDesc, &imagePtr);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    ze_image_handle_t imgHandle = imagePtr->toHandle();
+
+    ze_external_memory_import_win32_handle_t importNTHandle = {};
+    importNTHandle.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
+    importNTHandle.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32;
+    srcImgDesc.pNext = &importNTHandle;
+
+    ze_image_handle_t viewHandle;
+    auto ret = L0::Image::fromHandle(imgHandle)->createView(device, &srcImgDesc, &viewHandle);
+    ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
+
+    zeImageDestroy(imgHandle);
 }
 
 } // namespace ult

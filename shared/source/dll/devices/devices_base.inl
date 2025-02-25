@@ -1,15 +1,28 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#if SUPPORT_XE3_CORE
+#ifdef SUPPORT_PTL
+DEVICE(0xB080, PtlHwConfig)
+DEVICE(0xB081, PtlHwConfig)
+DEVICE(0xB082, PtlHwConfig)
+DEVICE(0xB083, PtlHwConfig)
+DEVICE(0xB08F, PtlHwConfig)
+DEVICE(0xB090, PtlHwConfig)
+DEVICE(0xB0A0, PtlHwConfig)
+DEVICE(0xB0B0, PtlHwConfig)
+#endif
+#endif
+
 #if SUPPORT_XE2_HPG_CORE
 #ifdef SUPPORT_BMG
 DEVICE(0xE202, BmgHwConfig)
-DEVICE(0xE20B, BmgHwConfig)
-DEVICE(0xE20C, BmgHwConfig)
+NAMEDDEVICE(0xE20B, BmgHwConfig, "Intel(R) Arc(TM) B580 Graphics")
+NAMEDDEVICE(0xE20C, BmgHwConfig, "Intel(R) Arc(TM) B570 Graphics")
 DEVICE(0xE20D, BmgHwConfig)
 DEVICE(0xE212, BmgHwConfig)
 #endif
@@ -72,6 +85,7 @@ NAMEDDEVICE(0x56A1, Dg2HwConfig, "Intel(R) Arc(TM) A750 Graphics")
 NAMEDDEVICE(0x56A2, Dg2HwConfig, "Intel(R) Arc(TM) A580 Graphics")
 NAMEDDEVICE(0x56A5, Dg2HwConfig, "Intel(R) Arc(TM) A380 Graphics")
 NAMEDDEVICE(0x56A6, Dg2HwConfig, "Intel(R) Arc(TM) A310 LP Graphics")
+NAMEDDEVICE(0x56AF, Dg2HwConfig, "Intel(R) Arc(TM) A760A Graphics")
 NAMEDDEVICE(0x56C0, Dg2HwConfig, "Intel(R) Data Center GPU Flex 170")
 NAMEDDEVICE(0x56C1, Dg2HwConfig, "Intel(R) Data Center GPU Flex 140")
 NAMEDDEVICE(0x56C2, Dg2HwConfig, "Intel(R) Data Center GPU Flex 170V")
@@ -84,8 +98,8 @@ NAMEDDEVICE(0x7D45, MtlHwConfig, "Intel(R) Graphics")
 #endif
 #ifdef SUPPORT_ARL
 NAMEDDEVICE(0x7D67, ArlHwConfig, "Intel(R) Graphics")
-DEVICE(0x7D51, ArlHwConfig)
-DEVICE(0x7DD1, ArlHwConfig)
+NAMEDDEVICE(0x7D51, ArlHwConfig, "Intel(R) Arc(TM) Graphics")
+NAMEDDEVICE(0x7DD1, ArlHwConfig, "Intel(R) Graphics")
 DEVICE(0x7D41, ArlHwConfig)
 #endif
 #endif

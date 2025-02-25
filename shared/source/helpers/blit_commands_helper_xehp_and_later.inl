@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -43,7 +43,7 @@ void setCompressionParamsForFillOperation(typename GfxFamily::XY_COLOR_BLT &xyCo
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForFillBuffer(NEO::GraphicsAllocation *dstAlloc, typename GfxFamily::XY_COLOR_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {
+void BlitCommandsHelper<GfxFamily>::appendBlitMemoryOptionsForFillBuffer(NEO::GraphicsAllocation *dstAlloc, typename GfxFamily::XY_COLOR_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment) {
     using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
 
     uint32_t compressionFormat = rootDeviceEnvironment.getGmmClientContext()->getSurfaceStateCompressionFormat(GMM_RESOURCE_FORMAT::GMM_FORMAT_GENERIC_8BIT);
@@ -73,26 +73,6 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsForFillBuffer(NEO::Graphic
         } else if (debugManager.flags.OverrideBlitterTargetMemory.get() == 1u) {
             blitCmd.setDestinationTargetMemory(XY_COLOR_BLT::DESTINATION_TARGET_MEMORY::DESTINATION_TARGET_MEMORY_LOCAL_MEM);
         }
-    }
-}
-
-template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryColorFill(NEO::GraphicsAllocation *dstAlloc, uint64_t offset, uint32_t *pattern, size_t patternSize, LinearStream &linearStream, size_t size, RootDeviceEnvironment &rootDeviceEnvironment) {
-    switch (patternSize) {
-    case 1:
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill<1>(dstAlloc, offset, pattern, linearStream, size, rootDeviceEnvironment, COLOR_DEPTH::COLOR_DEPTH_8_BIT_COLOR);
-        break;
-    case 2:
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill<2>(dstAlloc, offset, pattern, linearStream, size, rootDeviceEnvironment, COLOR_DEPTH::COLOR_DEPTH_16_BIT_COLOR);
-        break;
-    case 4:
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill<4>(dstAlloc, offset, pattern, linearStream, size, rootDeviceEnvironment, COLOR_DEPTH::COLOR_DEPTH_32_BIT_COLOR);
-        break;
-    case 8:
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill<8>(dstAlloc, offset, pattern, linearStream, size, rootDeviceEnvironment, COLOR_DEPTH::COLOR_DEPTH_64_BIT_COLOR);
-        break;
-    default:
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill<16>(dstAlloc, offset, pattern, linearStream, size, rootDeviceEnvironment, COLOR_DEPTH::COLOR_DEPTH_128_BIT_COLOR);
     }
 }
 
@@ -386,7 +366,8 @@ void BlitCommandsHelper<GfxFamily>::dispatchDummyBlit(LinearStream &linearStream
         blitCmd.setDestinationPitch(static_cast<uint32_t>(MemoryConstants::pageSize));
 
         appendTilingEnable(blitCmd);
-        appendBlitCommandsForFillBuffer(dummyAllocation, blitCmd, *rootDeviceEnvironment);
+        appendBlitMemoryOptionsForFillBuffer(dummyAllocation, blitCmd, *rootDeviceEnvironment);
+        appendBlitFillCommand(blitCmd);
 
         auto cmd = linearStream.getSpaceForCmd<XY_COLOR_BLT>();
         *cmd = blitCmd;

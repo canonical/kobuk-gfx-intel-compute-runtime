@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -1214,7 +1214,7 @@ HWTEST_F(GfxCoreHelperTest, GivenZeroSlmSizeWhenComputeSlmSizeIsCalledThenCorrec
     auto hwInfo = *defaultHwInfo;
     auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
     auto receivedSlmSize = static_cast<SHARED_LOCAL_MEMORY_SIZE>(gfxCoreHelper.computeSlmValues(hwInfo, 0));
-    EXPECT_EQ(SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_ENCODES_0K, receivedSlmSize);
+    EXPECT_EQ(SHARED_LOCAL_MEMORY_SIZE::SHARED_LOCAL_MEMORY_SIZE_SLM_ENCODES_0K, receivedSlmSize);
 }
 
 HWCMDTEST_F(IGFX_GEN12LP_CORE, GfxCoreHelperTest, givenGfxCoreHelperWhenGettingPlanarYuvHeightThenHelperReturnsCorrectValue) {
@@ -1693,10 +1693,10 @@ HWTEST_F(GfxCoreHelperTest, givenFlagRemoveRestrictionsOnNumberOfThreadsInGpgpuT
     }
 }
 
-HWTEST2_F(GfxCoreHelperTest, whenGetDefaultDeviceHierarchyThenReturnFlatHierarchy, IsNotXeHpcCore) {
+HWTEST2_F(GfxCoreHelperTest, whenGetDefaultDeviceHierarchyThenReturnCompositeHierarchy, IsNotXeHpcCore) {
     const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
     auto defaultDeviceHierarchy = gfxCoreHelper.getDefaultDeviceHierarchy();
-    EXPECT_STREQ("COMPOSITE", defaultDeviceHierarchy);
+    EXPECT_EQ(DeviceHierarchyMode::composite, defaultDeviceHierarchy);
 }
 
 HWTEST_F(GfxCoreHelperTest, givenContextGroupDisabledWhenContextGroupContextsCountAndSecondaryContextsSupportQueriedThenZeroCountAndFalseIsReturned) {

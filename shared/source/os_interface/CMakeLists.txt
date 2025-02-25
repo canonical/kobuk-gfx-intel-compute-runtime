@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2024 Intel Corporation
+# Copyright (C) 2019-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,7 +8,6 @@ set(NEO_CORE_GLOBAL_FACTORIES
     ${CMAKE_CURRENT_SOURCE_DIR}/create_os_context_${DRIVER_MODEL}.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/create_os_time_${DRIVER_MODEL}.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/discover_devices_${DRIVER_MODEL}.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/external_semaphore_helper_${DRIVER_MODEL}.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/init_os_interface_${DRIVER_MODEL}.cpp
 )
 
@@ -23,11 +22,11 @@ set(NEO_CORE_OS_INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/device_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/device_factory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/driver_info.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/external_semaphore_helper.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/external_semaphore.h
     ${CMAKE_CURRENT_SOURCE_DIR}/product_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/product_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/product_helper.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/product_helper_bdw_and_later.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/product_helper_tgllp_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/product_helper_xe_hpc_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/product_helper_xe2_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/metrics_library.cpp

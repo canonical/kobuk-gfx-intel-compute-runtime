@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/compiler_interface/external_functions.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device_binary_format/zebin/zebin_elf.h"
+#include "shared/source/device_binary_format/zebin/zeinfo_decoder_ext.h"
 #include "shared/source/device_binary_format/zebin/zeinfo_enum_lookup.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/basic_math.h"
@@ -19,6 +20,8 @@
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/program/program_info.h"
 #include "shared/source/utilities/const_stringref.h"
+
+#include <sstream>
 
 namespace NEO::Zebin::ZeInfo {
 
@@ -74,7 +77,10 @@ DecodeError extractZeInfoSections(const Yaml::YamlParser &parser, ZeInfoSections
         } else if (Tags::functions == key) {
             outZeInfoSections.functions.push_back(&globalScopeNd);
         } else {
-            encounterUnknownZeInfoAttribute("\"" + parser.readKey(globalScopeNd).str() + "\" in global scope of .ze_info", outErrReason, outWarning, err);
+            std::ostringstream entryStream;
+
+            entryStream << "\"" << parser.readKey(globalScopeNd).str() << "\" in global scope of .ze_info";
+            encounterUnknownZeInfoAttribute(entryStream.str(), outErrReason, outWarning, err);
         }
     }
     return err;
@@ -105,7 +111,9 @@ DecodeError extractZeInfoKernelSections(const NEO::Yaml::YamlParser &parser, con
         } else if (Tags::Kernel::inlineSamplers == key) {
             outZeInfoKernelSections.inlineSamplersNd.push_back(&kernelMetadataNd);
         } else {
-            encounterUnknownZeInfoAttribute("\"" + parser.readKey(kernelMetadataNd).str() + "\" in context of : " + context.str(), outErrReason, outWarning, err);
+            std::ostringstream entryStream;
+            entryStream << "\"" << parser.readKey(kernelMetadataNd).str() << "\" in context of : " << context.str();
+            encounterUnknownZeInfoAttribute(entryStream.str(), outErrReason, outWarning, err);
         }
     }
     return err;
@@ -207,7 +215,9 @@ DecodeError readZeInfoGlobalHostAceessTable(const NEO::Yaml::YamlParser &parser,
             } else if (Tags::GlobalHostAccessTable::hostName == key) {
                 validTable &= readZeInfoValueChecked(parser, globalHostAccessNameMemberNd, globalHostAccessMetadata.hostName, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" for payload argument in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entry;
+                entry << "\"" << key.str() << "\" for payload argument in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
             }
         }
     }
@@ -281,7 +291,10 @@ DecodeError populateExternalFunctionsMetadata(NEO::ProgramInfo &dst, NEO::Yaml::
                 err = execEnvErr;
             }
         } else {
-            encounterUnknownZeInfoAttribute("\"" + yamlParser.readKey(functionMetadataNd).str() + "\" in context of : external functions", outErrReason, outWarning, err);
+            std::ostringstream entryStream;
+
+            entryStream << "\"" << yamlParser.readKey(functionMetadataNd).str() << "\" in context of : external functions";
+            encounterUnknownZeInfoAttribute(entryStream.str(), outErrReason, outWarning, err);
         }
     }
 
@@ -750,6 +763,8 @@ void populateKernelExecutionEnvironment(KernelDescriptor &dst, const KernelExecu
         dst.kernelAttributes.threadArbitrationPolicy = ThreadArbitrationPolicy::RoundRobinAfterDependency;
         break;
     }
+
+    populateKernelExecutionEnvironmentExt(dst, execEnv, srcZeInfoVersion);
 }
 
 DecodeError decodeZeInfoKernelUserAttributes(KernelDescriptor &dst, Yaml::YamlParser &parser, const ZeInfoKernelSections &kernelSections, std::string &outErrReason, std::string &outWarning) {
@@ -789,7 +804,9 @@ DecodeError readZeInfoAttributes(const Yaml::YamlParser &parser, const Yaml::Nod
         } else if (key.contains(Tags::Kernel::Attributes::hintSuffix.data())) {
             outAttributes.otherHints.push_back({key, parser.readValue(attributesMetadataNd)});
         } else {
-            encounterUnknownZeInfoAttribute("\"" + key.str() + "\" in context of " + context.str(), outErrReason, outWarning, err);
+            std::ostringstream entry;
+            entry << "\"" << key.str() << "\" in context of " << context.str();
+            encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
         }
     }
     return validAttributes ? err : DecodeError::invalidBinary;
@@ -860,7 +877,9 @@ DecodeError readZeInfoDebugEnvironment(const Yaml::YamlParser &parser, const Yam
         } else if (Tags::Kernel::DebugEnv::debugSurfaceOffset == key) {
             validDebugEnv &= readZeInfoValueChecked(parser, debugEnvNd, outDebugEnv.debugSurfaceOffset, context, outErrReason);
         } else {
-            encounterUnknownZeInfoAttribute("\"" + key.str() + "\" in context of " + context.str(), outErrReason, outWarning, err);
+            std::ostringstream entry;
+            entry << "\"" << key.str() << "\" in context of " << context.str();
+            encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
         }
     }
     return validDebugEnv ? err : DecodeError::invalidBinary;
@@ -907,11 +926,15 @@ DecodeError readZeInfoPerThreadPayloadArguments(const Yaml::YamlParser &parser, 
             } else if (Tags::Kernel::PerThreadPayloadArgument::offset == key) {
                 validPerThreadPayload &= readZeInfoValueChecked(parser, perThreadPayloadArgumentMemberNd, perThreadPayloadArgMetadata.offset, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" for per-thread payload argument in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entry;
+                entry << "\"" << key.str() << "\" for per-thread payload argument in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
             }
         }
         if (0 == perThreadPayloadArgMetadata.size) {
-            outWarning.append("DeviceBinaryFormat::zebin::.ze_info : Skippinig 0-size per-thread argument of type : " + argTypeStr.str() + " in context of " + context.str() + "\n");
+            std::ostringstream entry;
+            entry << "DeviceBinaryFormat::zebin::.ze_info : Skippinig 0-size per-thread argument of type : " << argTypeStr.str() << " in context of " << context.str() << "\n";
+            outWarning.append(entry.str());
             outPerThreadPayloadArguments.pop_back();
         }
     }
@@ -1046,7 +1069,11 @@ DecodeError decodeZeInfoKernelPayloadArguments(KernelDescriptor &dst, Yaml::Yaml
 
         if (bindlessBufferAccess) {
             dst.kernelAttributes.bufferAddressingMode = KernelDescriptor::BindlessAndStateless;
+        } else if (!bindfulBufferAccess) {
+            DEBUG_BREAK_IF(dst.kernelAttributes.numArgsStateful != 0 && !dst.kernelAttributes.flags.usesImages);
+            dst.kernelAttributes.bufferAddressingMode = KernelDescriptor::Stateless;
         }
+
         if (bindlessImageAccess) {
             dst.kernelAttributes.imageAddressingMode = KernelDescriptor::Bindless;
         }
@@ -1097,7 +1124,9 @@ DecodeError readZeInfoPayloadArguments(const Yaml::YamlParser &parser, const Yam
             } else if (Tags::Kernel::PayloadArgument::btiValue == key) {
                 validPayload &= readZeInfoValueChecked(parser, payloadArgumentMemberNd, payloadArgMetadata.btiValue, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" for payload argument in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entry;
+                entry << "\"" << key.str() << "\" for payload argument in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
             }
         }
     }
@@ -1501,7 +1530,9 @@ DecodeError readZeInfoInlineSamplers(const Yaml::YamlParser &parser, const Yaml:
             } else if (Tags::normalized == key) {
                 validInlineSamplers &= readZeInfoValueChecked(parser, inlineSamplerMemberNd, inlineSampler.normalized, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" for inline sampler in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entry;
+                entry << "\"" << key.str() << "\" for inline sampler in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
             }
         }
     }
@@ -1588,7 +1619,9 @@ DecodeError readZeInfoPerThreadMemoryBuffers(const Yaml::YamlParser &parser, con
             } else if (Tags::Kernel::PerThreadMemoryBuffer::slot == key) {
                 validBuffer &= readZeInfoValueChecked(parser, perThreadMemoryBufferMemberNd, perThreadMemoryBufferMetadata.slot, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" for per-thread memory buffer in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entry;
+                entry << "\"" << key.str() << "\" for per-thread memory buffer in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
             }
         }
     }
@@ -1675,7 +1708,9 @@ DecodeError readZeInfoExperimentalProperties(const Yaml::YamlParser &parser, con
                 validExperimentalProperty &= readZeInfoValueChecked(parser, experimentalPropertyMemberNd,
                                                                     outExperimentalProperties.hasNonKernelArgAtomic, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entry;
+                entry << "\"" << key.str() << "\" in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entry.str(), outErrReason, outWarning, err);
             }
         }
     }
@@ -1719,7 +1754,9 @@ DecodeError readZeInfoBindingTableIndices(const Yaml::YamlParser &parser, const 
             } else if (Tags::Kernel::BindingTableIndex::btiValue == key) {
                 validBindingTableEntries &= readZeInfoValueChecked(parser, bindingTableIndexMemberNd, bindingTableIndexMetadata.btiValue, context, outErrReason);
             } else {
-                encounterUnknownZeInfoAttribute("\"" + key.str() + "\" for binding table index in context of " + context.str(), outErrReason, outWarning, err);
+                std::ostringstream entryStream;
+                entryStream << "\"" << key.str() << "\" for binding table index in context of " << context.str();
+                encounterUnknownZeInfoAttribute(entryStream.str(), outErrReason, outWarning, err);
             }
         }
     }

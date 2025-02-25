@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -284,7 +284,7 @@ class CommandStreamReceiver {
     virtual void setupContext(OsContext &osContext) { this->osContext = &osContext; }
     OsContext &getOsContext() const { return *osContext; }
     uint8_t getUmdPowerHintValue() const;
-    bool initializeResources(bool allocateInterrupt);
+    bool initializeResources(bool allocateInterrupt, const PreemptionMode preemptionMode);
     TagAllocatorBase *getEventTsAllocator();
     TagAllocatorBase *getEventPerfCountAllocator(const uint32_t tagSize);
     virtual TagAllocatorBase *getTimestampPacketAllocator() = 0;
@@ -307,7 +307,7 @@ class CommandStreamReceiver {
         this->latestFlushedTaskCount = latestFlushedTaskCount;
     }
 
-    virtual TaskCountType flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) = 0;
+    virtual TaskCountType flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, Device &device) = 0;
 
     virtual SubmissionStatus flushTagUpdate() = 0;
     virtual void updateTagFromWait() = 0;
@@ -652,7 +652,7 @@ class CommandStreamReceiver {
     SamplerCacheFlushState samplerCacheFlushRequired = SamplerCacheFlushState::samplerCacheFlushNotRequired;
     PreemptionMode lastPreemptionMode = PreemptionMode::Initial;
 
-    std::chrono::microseconds gpuHangCheckPeriod{500'000};
+    std::chrono::microseconds gpuHangCheckPeriod{CommonConstants::gpuHangCheckTimeInUS};
     uint32_t lastSentL3Config = 0;
     uint32_t latestSentStatelessMocsConfig = CacheSettings::unknownMocs;
     uint64_t lastSentSliceCount = QueueSliceCount::defaultSliceCount;

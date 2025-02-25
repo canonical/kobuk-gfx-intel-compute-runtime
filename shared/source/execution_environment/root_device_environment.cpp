@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -113,7 +113,7 @@ bool RootDeviceEnvironment::initAilConfiguration() {
         return false;
     }
 
-    ailConfiguration->apply(hwInfo->capabilityTable);
+    ailConfiguration->apply(*hwInfo);
 
     return true;
 }
@@ -158,6 +158,7 @@ CompilerInterface *RootDeviceEnvironment::getCompilerInterface() {
 void RootDeviceEnvironment::initHelpers() {
     initProductHelper();
     initGfxCoreHelper();
+    initializeGfxCoreHelperFromProductHelper();
     initializeGfxCoreHelperFromHwInfo();
     initApiGfxCoreHelper();
     initCompilerProductHelper();
@@ -168,6 +169,12 @@ void RootDeviceEnvironment::initHelpers() {
 void RootDeviceEnvironment::initializeGfxCoreHelperFromHwInfo() {
     if (gfxCoreHelper != nullptr) {
         gfxCoreHelper->initializeDefaultHpCopyEngine(*this->getHardwareInfo());
+    }
+}
+
+void RootDeviceEnvironment::initializeGfxCoreHelperFromProductHelper() {
+    if (this->productHelper) {
+        gfxCoreHelper->initializeFromProductHelper(*this->productHelper.get());
     }
 }
 

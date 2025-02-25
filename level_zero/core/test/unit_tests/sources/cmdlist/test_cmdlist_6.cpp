@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -1437,7 +1437,7 @@ HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest, givenGlobalStatelessWh
 
 HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
           givenGlobalStatelessWhenExecutingRegularCommandListThenBaseAddressPropertiesSetCorrectlyAndCommandProperlyDispatched,
-          IsAtLeastXeHpCore) {
+          IsWithinXeHpCoreAndXe3Core) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     commandList->heaplessModeEnabled = false;
@@ -1613,7 +1613,7 @@ HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
 
 HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
           givenGlobalStatelessWhenExecutingRegularCommandListAndImmediateCommandListThenBaseAddressPropertiesSetCorrectlyAndCommandProperlyDispatchedOnlyOnce,
-          IsAtLeastXeHpCore) {
+          IsWithinXeHpCoreAndXe3Core) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     commandQueue->heaplessModeEnabled = false;
@@ -1764,7 +1764,7 @@ HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
 
 HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
           givenGlobalStatelessWhenExecutingRegularCommandListAndPrivateHeapsCommandListThenBaseAddressPropertiesSetCorrectlyAndCommandProperlyDispatched,
-          IsAtLeastXeHpCore) {
+          IsWithinXeHpCoreAndXe3Core) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     commandQueue->heaplessModeEnabled = false;
@@ -2715,13 +2715,15 @@ HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 
     auto cmdListHandle = cmdListObject->toHandle();
+    auto usedBefore = csrStream.getUsed();
+
     returnValue = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 
     returnValue = cmdListObject->destroy();
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 
-    EXPECT_EQ(0u, csrStream.getUsed());
+    EXPECT_EQ(usedBefore, csrStream.getUsed());
 }
 
 HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
@@ -2913,10 +2915,9 @@ HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest,
     auto otherCsr = std::unique_ptr<UltCommandStreamReceiver<FamilyType>>(static_cast<UltCommandStreamReceiver<FamilyType> *>(createCommandStream(*device->getNEODevice()->getExecutionEnvironment(), 0, 1)));
 
     otherCsr->setupContext(*neoDevice->getDefaultEngine().osContext);
-    otherCsr->initializeResources(false);
+    otherCsr->initializeResources(false, neoDevice->getPreemptionMode());
     otherCsr->initializeTagAllocation();
     otherCsr->createGlobalFenceAllocation();
-    otherCsr->createPreemptionAllocation();
     otherCsr->createGlobalStatelessHeap();
 
     ze_command_queue_desc_t desc = {};
@@ -3007,9 +3008,9 @@ HWTEST2_F(ContextGroupStateBaseAddressGlobalStatelessTest,
     hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
     hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
 
-    auto neoDevice = std::unique_ptr<NEO::MockDevice>(NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo));
+    auto neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo);
 
-    MockDeviceImp l0Device(neoDevice.get(), neoDevice->getExecutionEnvironment());
+    MockDeviceImp l0Device(neoDevice, neoDevice->getExecutionEnvironment());
     l0Device.setDriverHandle(device->getDriverHandle());
 
     auto defaultCsr = neoDevice->getDefaultEngine().commandStreamReceiver;
@@ -3046,6 +3047,7 @@ HWTEST2_F(ContextGroupStateBaseAddressGlobalStatelessTest,
 
     EXPECT_NE(nullptr, primaryCsr->getScratchSpaceController()->getScratchSpaceSlot0Allocation());
     EXPECT_NE(primaryCsr, commandListImmediate->getCsr(false));
+    commandListImmediate.reset();
 }
 
 HWTEST2_F(CommandListStateBaseAddressGlobalStatelessTest, givenGlobalStatelessAndHeaplessModeWhenExecutingCommandListThenMakeAllocationResident, IsAtLeastXeHpCore) {

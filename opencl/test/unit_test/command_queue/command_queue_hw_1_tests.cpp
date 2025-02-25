@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -1066,6 +1066,7 @@ HWTEST_F(CommandQueueHwTest, givenCommandQueueWhenDispatchingWorkThenRegisterCsr
     auto mockKernel = mockKernelWithInternals.mockKernel;
 
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    pDevice->disableSecondaryEngines = true;
 
     size_t gws = 1;
 

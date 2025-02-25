@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -36,7 +36,13 @@ namespace L0 {
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 size_t CommandListCoreFamily<gfxCoreFamily>::getReserveSshSize() {
-    return 4 * MemoryConstants::pageSize;
+    constexpr size_t maxPtssSteps = 16;
+    constexpr size_t numSlotsPerStep = 2;
+    constexpr size_t numSteps = 2;
+    constexpr size_t startSlotIndex = 1;
+
+    using RENDER_SURFACE_STATE = typename GfxFamily::RENDER_SURFACE_STATE;
+    return (maxPtssSteps * numSlotsPerStep + startSlotIndex) * numSteps * sizeof(RENDER_SURFACE_STATE);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -284,7 +290,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     std::list<void *> additionalCommands;
 
-    if (compactEvent && (!compactEvent->isCounterBased() || !this->isImmediateType())) {
+    if (compactEvent && (!compactEvent->isCounterBased() || this->asMutable())) {
         appendEventForProfilingAllWalkers(compactEvent, nullptr, launchParams.outListCommands, true, true, launchParams.omitAddingEventResidency, false);
     }
 
@@ -299,12 +305,12 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         inOrderNonWalkerSignalling = isInOrderNonWalkerSignalingRequired(eventForInOrderExec);
 
         if (inOrderExecSignalRequired) {
-            if (!compactEvent || !this->isImmediateType() || !compactEvent->isCounterBased() || compactEvent->isUsingContextEndOffset()) {
+            if (!compactEvent || this->asMutable() || !compactEvent->isCounterBased() || compactEvent->isUsingContextEndOffset()) {
                 if (inOrderNonWalkerSignalling) {
                     if (!eventForInOrderExec->getAllocation(this->device) && Event::standaloneInOrderTimestampAllocationEnabled()) {
                         eventForInOrderExec->resetInOrderTimestampNode(device->getInOrderTimestampAllocator()->getTag());
                     }
-                    if (!compactEvent || !this->isImmediateType() || !compactEvent->isCounterBased()) {
+                    if (!compactEvent || this->asMutable() || !compactEvent->isCounterBased()) {
                         dispatchEventPostSyncOperation(eventForInOrderExec, nullptr, launchParams.outListCommands, Event::STATE_CLEARED, false, false, false, false, false);
                     } else {
                         eventAddress = eventForInOrderExec->getPacketAddress(this->device);
@@ -392,7 +398,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     }
 
     if (!launchParams.makeKernelCommandView) {
-        if ((compactEvent && (!compactEvent->isCounterBased() || !this->isImmediateType()))) {
+        if (compactEvent && (!compactEvent->isCounterBased() || this->asMutable())) {
             void **syncCmdBuffer = nullptr;
             if (launchParams.outSyncCommand != nullptr) {
                 launchParams.outSyncCommand->type = CommandToPatch::SignalEventPostSyncPipeControl;
@@ -416,8 +422,11 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     if (inOrderExecSignalRequired) {
         if (inOrderNonWalkerSignalling) {
             if (!launchParams.skipInOrderNonWalkerSignaling) {
-                if ((compactEvent && (compactEvent->isCounterBased() && this->isImmediateType()))) {
+                if (compactEvent && (compactEvent->isCounterBased() && !this->asMutable())) {
+                    auto pcCmdPtr = this->commandContainer.getCommandStream()->getSpace(0u);
+                    inOrderCounterValue = this->inOrderExecInfo->getCounterValue() + getInOrderIncrementValue();
                     appendSignalInOrderDependencyCounter(eventForInOrderExec, false, true);
+                    addCmdForPatching(nullptr, pcCmdPtr, nullptr, inOrderCounterValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::pipeControl);
                 } else {
                     appendWaitOnSingleEvent(eventForInOrderExec, launchParams.outListCommands, false, false, CommandToPatch::CbEventTimestampPostSyncSemaphoreWait);
                     appendSignalInOrderDependencyCounter(eventForInOrderExec, false, false);

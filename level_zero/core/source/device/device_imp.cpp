@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -663,9 +663,8 @@ ze_result_t DeviceImp::getP2PProperties(ze_device_handle_t hPeerDevice,
 }
 
 ze_result_t DeviceImp::getRootDevice(ze_device_handle_t *phRootDevice) {
-    DriverHandleImp *driverHandleImp = static_cast<DriverHandleImp *>(driverHandle);
     // Given FLAT device Hierarchy mode, then nullptr is returned for the root device since no traversal is allowed.
-    if (driverHandleImp->deviceHierarchyMode == L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT) {
+    if (this->neoDevice->getExecutionEnvironment()->getDeviceHierarchyMode() == NEO::DeviceHierarchyMode::flat) {
         *phRootDevice = nullptr;
         return ZE_RESULT_SUCCESS;
     }
@@ -982,7 +981,7 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
     if (NEO::debugManager.flags.DebugApiUsed.get() == 1) {
         pDeviceProperties->numSubslicesPerSlice = hardwareInfo.gtSystemInfo.MaxSubSlicesSupported / hardwareInfo.gtSystemInfo.MaxSlicesSupported;
     } else {
-        pDeviceProperties->numSubslicesPerSlice = hardwareInfo.gtSystemInfo.SubSliceCount / hardwareInfo.gtSystemInfo.SliceCount;
+        pDeviceProperties->numSubslicesPerSlice = NEO::getNumSubSlicesPerSlice(hardwareInfo);
     }
 
     pDeviceProperties->numSlices = hardwareInfo.gtSystemInfo.SliceCount;
@@ -1006,11 +1005,8 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
         pDeviceProperties->flags |= ZE_DEVICE_PROPERTY_FLAG_INTEGRATED;
     }
 
-    if (isSubdevice) {
-        DriverHandleImp *driverHandleImp = static_cast<DriverHandleImp *>(driverHandle);
-        if (driverHandleImp->deviceHierarchyMode != L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT) {
-            pDeviceProperties->flags |= ZE_DEVICE_PROPERTY_FLAG_SUBDEVICE;
-        }
+    if (isSubdevice && this->neoDevice->getExecutionEnvironment()->getDeviceHierarchyMode() != NEO::DeviceHierarchyMode::flat) {
+        pDeviceProperties->flags |= ZE_DEVICE_PROPERTY_FLAG_SUBDEVICE;
     }
 
     if (this->neoDevice->getDeviceInfo().errorCorrectionSupport) {
@@ -1046,7 +1042,7 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
                 }
             } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_EU_COUNT_EXT) {
                 ze_eu_count_ext_t *zeEuCountDesc = reinterpret_cast<ze_eu_count_ext_t *>(extendedProperties);
-                uint32_t numTotalEUs = hardwareInfo.gtSystemInfo.MaxEuPerSubSlice * hardwareInfo.gtSystemInfo.SubSliceCount * hardwareInfo.gtSystemInfo.SliceCount;
+                uint32_t numTotalEUs = hardwareInfo.gtSystemInfo.EUCount;
 
                 if (isImplicitScalingCapable()) {
                     numTotalEUs *= neoDevice->getNumGenericSubDevices();
@@ -1198,9 +1194,8 @@ ze_result_t DeviceImp::getGlobalTimestampsUsingOsInterface(uint64_t *hostTimesta
 }
 
 ze_result_t DeviceImp::getSubDevices(uint32_t *pCount, ze_device_handle_t *phSubdevices) {
-    DriverHandleImp *driverHandleImp = static_cast<DriverHandleImp *>(driverHandle);
     // Given FLAT device Hierarchy mode, then a count of 0 is returned since no traversal is allowed.
-    if (driverHandleImp->deviceHierarchyMode == L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT) {
+    if (this->neoDevice->getExecutionEnvironment()->getDeviceHierarchyMode() == NEO::DeviceHierarchyMode::flat) {
         *pCount = 0;
         return ZE_RESULT_SUCCESS;
     }
@@ -1346,7 +1341,7 @@ ze_result_t DeviceImp::getDeviceImageProperties(ze_device_image_properties_t *pD
 }
 
 ze_result_t DeviceImp::getDebugProperties(zet_device_debug_properties_t *pDebugProperties) {
-    bool isDebugAttachAvailable = getOsInterface().isDebugAttachAvailable();
+    bool isDebugAttachAvailable = getOsInterface() ? getOsInterface()->isDebugAttachAvailable() : false;
     auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*this->getNEODevice()).getStateSaveAreaHeader();
 
     if (stateSaveAreaHeader.size() == 0) {
@@ -1416,7 +1411,7 @@ const NEO::CompilerProductHelper &DeviceImp::getCompilerProductHelper() {
     return this->neoDevice->getCompilerProductHelper();
 }
 
-NEO::OSInterface &DeviceImp::getOsInterface() { return *neoDevice->getRootDeviceEnvironment().osInterface; }
+NEO::OSInterface *DeviceImp::getOsInterface() { return neoDevice->getRootDeviceEnvironment().osInterface.get(); }
 
 uint32_t DeviceImp::getPlatformInfo() const {
     const auto &hardwareInfo = neoDevice->getHardwareInfo();
@@ -1905,7 +1900,7 @@ ze_result_t DeviceImp::getCsrForHighPriority(NEO::CommandStreamReceiver **csr, b
 }
 
 bool DeviceImp::isSuitableForLowPriority(ze_command_queue_priority_t priority, bool copyOnly) {
-    bool engineSuitable = copyOnly ? getGfxCoreHelper().getContextGroupContextsCount() > 0 : !this->implicitScalingCapable;
+    bool engineSuitable = copyOnly ? getGfxCoreHelper().areSecondaryContextsSupported() : !this->implicitScalingCapable;
 
     return (priority == ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_LOW && engineSuitable);
 }
@@ -2029,11 +2024,15 @@ bool DeviceImp::toApiSliceId(const NEO::TopologyMap &topologyMap, uint32_t &slic
 }
 
 NEO::Device *DeviceImp::getActiveDevice() const {
-    if (neoDevice->getNumGenericSubDevices() > 1u) {
+    if (neoDevice->getNumGenericSubDevices() > 0u) {
         if (isImplicitScalingCapable()) {
             return this->neoDevice;
         }
-        return this->neoDevice->getSubDevice(0);
+        for (auto subDevice : this->neoDevice->getSubDevices()) {
+            if (subDevice) {
+                return subDevice;
+            }
+        }
     }
     return this->neoDevice;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -394,7 +394,19 @@ inline constexpr ConstStringRef required[] = {
     Tags::Kernel::ExecutionEnv::grfCount,
     Tags::Kernel::ExecutionEnv::simdSize};
 
-struct ExecutionEnvBaseT {
+struct ExecutionEnvExt;
+ExecutionEnvExt *allocateExecEnvExt();
+void freeExecEnvExt(ExecutionEnvExt *);
+
+struct ExecutionEnvBaseT final {
+    ExecutionEnvBaseT() {
+        execEnvExt = allocateExecEnvExt();
+    }
+    ~ExecutionEnvBaseT() {
+        freeExecEnvExt(execEnvExt);
+    }
+    ExecutionEnvExt *execEnvExt = nullptr;
+
     BarrierCountT barrierCount = Defaults::barrierCount;
     DisableMidThreadPreemptionT disableMidThreadPreemption = Defaults::disableMidThreadPreemption;
     EuThreadCountT euThreadCount = Defaults::euThreadCount;

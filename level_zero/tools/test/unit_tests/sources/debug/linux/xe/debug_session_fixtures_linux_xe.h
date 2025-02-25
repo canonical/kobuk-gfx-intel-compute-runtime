@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/libult/linux/drm_mock_helper.h"
+#include "shared/test/common/libult/linux/drm_query_mock.h"
 #include "shared/test/common/mocks/linux/debug_mock_drm_xe.h"
 #include "shared/test/common/mocks/mock_sip.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
@@ -32,6 +33,18 @@
 namespace L0 {
 namespace ult {
 using typeOfLrcHandle = std::decay<decltype(NEO::EuDebugEventExecQueue::lrcHandle[0])>::type;
+
+struct DebugApiLinuxMultiDeviceFixtureXe : public MultipleDevicesWithCustomHwInfo {
+    void setUp();
+
+    void tearDown() {
+        MultipleDevicesWithCustomHwInfo::tearDown();
+    }
+    NEO::Device *neoDevice = nullptr;
+    L0::DeviceImp *deviceImp = nullptr;
+    DrmMockXeDebug *mockDrm = nullptr;
+    static constexpr uint8_t bufferSize = 16;
+};
 
 struct DebugApiLinuxXeFixture : public DeviceFixture {
     void setUp() {
@@ -159,6 +172,7 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
     using L0::DebugSessionLinuxXe::addThreadToNewlyStoppedFromRaisedAttentionForTileSession;
     using L0::DebugSessionLinuxXe::asyncThread;
     using L0::DebugSessionLinuxXe::asyncThreadFunction;
+    using L0::DebugSessionLinuxXe::canHandleVmBind;
     using L0::DebugSessionLinuxXe::checkStoppedThreadsAndGenerateEvents;
     using L0::DebugSessionLinuxXe::checkTriggerEventsForAttentionForTileSession;
     using L0::DebugSessionLinuxXe::ClientConnectionXe;
@@ -171,6 +185,8 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
     using L0::DebugSessionLinuxXe::getThreadStateMutexForTileSession;
     using L0::DebugSessionLinuxXe::getVmHandleFromClientAndlrcHandle;
     using L0::DebugSessionLinuxXe::handleEvent;
+    using L0::DebugSessionLinuxXe::handleInternalEvent;
+    using L0::DebugSessionLinuxXe::handleVmBind;
     using L0::DebugSessionLinuxXe::internalEventQueue;
     using L0::DebugSessionLinuxXe::internalEventThread;
     using L0::DebugSessionLinuxXe::invalidClientHandle;
@@ -211,6 +227,16 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
     void handleAttentionEvent(NEO::EuDebugEventEuAttention *attention) override {
         handleAttentionEventCalled++;
         return DebugSessionLinuxXe::handleAttentionEvent(attention);
+    }
+
+    void processPendingVmBindEvents() override {
+        processPendingVmBindEventsCallCount++;
+        return DebugSessionLinuxXe::processPendingVmBindEvents();
+    }
+
+    bool handleVmBind(VmBindData &vmBindData) override {
+        handleVmBindCallCount++;
+        return DebugSessionLinuxXe::handleVmBind(vmBindData);
     }
 
     int threadControl(const std::vector<EuThread::ThreadId> &threads, uint32_t tile, ThreadControlCmd threadCmd, std::unique_ptr<uint8_t[]> &bitmask, size_t &bitmaskSize) override {
@@ -272,6 +298,10 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
         return L0::DebugSessionImp::readSystemRoutineIdent(thread, vmHandle, srIdent);
     }
 
+    void handlePageFaultEvent(PageFaultEvent &pfEvent) override {
+        handlePageFaultEventCalled++;
+    }
+
     uint64_t getContextStateSaveAreaGpuVa(uint64_t memoryHandle) override {
         return 0x1000;
     }
@@ -281,6 +311,8 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
     }
 
     uint32_t readSystemRoutineIdentCallCount = 0;
+    uint32_t processPendingVmBindEventsCallCount = 0;
+    uint32_t handleVmBindCallCount = 0;
     uint32_t addThreadToNewlyStoppedFromRaisedAttentionCallCount = 0;
     uint32_t readSystemRoutineIdentFromMemoryCallCount = 0;
     size_t numThreadsPassedToThreadControl = 0;
@@ -292,6 +324,7 @@ struct MockDebugSessionLinuxXe : public L0::DebugSessionLinuxXe {
     uint32_t countToAddThreadToNewlyStoppedFromRaisedAttentionForTileSession = 0;
     int64_t returnTimeDiff = -1;
     uint32_t handleAttentionEventCalled = 0;
+    uint32_t handlePageFaultEventCalled = 0;
 };
 
 struct MockAsyncThreadDebugSessionLinuxXe : public MockDebugSessionLinuxXe {

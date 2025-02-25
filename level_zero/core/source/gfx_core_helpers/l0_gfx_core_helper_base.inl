@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -79,7 +79,7 @@ std::unique_ptr<NEO::TagAllocatorBase> L0GfxCoreHelperHw<Family>::getInOrderTime
     using TimestampPacketType = typename Family::TimestampPacketType;
     using TimestampPacketsT = NEO::TimestampPackets<TimestampPacketType, 1>;
 
-    size_t size = sizeof(TimestampPacketsT) * packetsCountPerElement;
+    size_t size = sizeof(TimestampPacketsT) * std::max(packetsCountPerElement, size_t(2));
 
     return std::make_unique<NEO::TagAllocator<TimestampPacketsT>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, size, 0, false, false, deviceBitfield);
 }

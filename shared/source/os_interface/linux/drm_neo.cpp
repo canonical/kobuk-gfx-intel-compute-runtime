@@ -45,6 +45,7 @@
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/api_intercept.h"
+#include "shared/source/utilities/cpu_info.h"
 #include "shared/source/utilities/directory.h"
 #include "shared/source/utilities/io_functions.h"
 
@@ -54,6 +55,10 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+
+#ifndef DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR
+#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 4)
+#endif
 
 namespace NEO {
 
@@ -1262,15 +1267,38 @@ unsigned int Drm::bindDrmContext(uint32_t drmContextId, uint32_t deviceIndex, au
 }
 
 void Drm::waitForBind(uint32_t vmHandleId) {
-    if (*ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr) >= fenceVal[vmHandleId]) {
-        return;
-    }
-    auto lock = this->lockBindFenceMutex();
-    auto fenceAddress = castToUint64(ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr));
-    auto fenceValue = this->fenceVal[vmHandleId];
-    lock.unlock();
 
-    waitUserFence(0u, fenceAddress, fenceValue, ValueWidth::u64, -1, ioctlHelper->getWaitUserFenceSoftFlag(), false, NEO::InterruptId::notUsed, nullptr);
+    auto fenceAddressAndValToWait = getFenceAddressAndValToWait(vmHandleId, false);
+
+    const auto fenceAddressToWait = fenceAddressAndValToWait.first;
+    const auto fenceValToWait = fenceAddressAndValToWait.second;
+
+    if (fenceAddressToWait != 0u) {
+        waitUserFence(0u, fenceAddressToWait, fenceValToWait, ValueWidth::u64, -1, ioctlHelper->getWaitUserFenceSoftFlag(), false, NEO::InterruptId::notUsed, nullptr);
+    }
+}
+
+std::pair<uint64_t, uint64_t> Drm::getFenceAddressAndValToWait(uint32_t vmHandleId, bool isLocked) {
+
+    std::pair<uint64_t, uint64_t> fenceAddressAndValToWait = std::make_pair(0, 0);
+    std::unique_lock<std::mutex> lock;
+
+    if (!isLocked) {
+        lock = this->lockBindFenceMutex();
+    }
+
+    if (!(*ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr) >= fenceVal[vmHandleId])) {
+
+        auto fenceAddress = castToUint64(ioctlHelper->getPagingFenceAddress(vmHandleId, nullptr));
+        auto fenceValue = this->fenceVal[vmHandleId];
+        fenceAddressAndValToWait = std::make_pair(fenceAddress, fenceValue);
+    }
+
+    if (!isLocked) {
+        lock.unlock();
+    }
+
+    return fenceAddressAndValToWait;
 }
 
 bool Drm::isSetPairAvailable() {
@@ -1401,7 +1429,7 @@ void programUserFence(Drm *drm, OsContext *osContext, BufferObject *bo, VmBindEx
     ioctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, address, value, nextExtension);
 }
 
-int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleId, BufferObject *bo, bool bind) {
+int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleId, BufferObject *bo, bool bind, const bool forcePagingFence) {
     auto vmId = drm->getVirtualMemoryAddressSpace(vmHandleId);
     auto ioctlHelper = drm->getIoctlHelper();
 
@@ -1413,18 +1441,21 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
         vmId = osContextLinux->getDrmVmIds()[vmHandleId];
     }
 
+    // Use only when debugger is disabled
+    const bool guaranteePagingFence = forcePagingFence && !drm->getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled();
+
     std::unique_ptr<uint8_t[]> extensions;
     if (bind) {
         bool allowUUIDsForDebug = !osContext->isInternalEngine() && !EngineHelpers::isBcs(osContext->getEngineType());
         if (bo->getBindExtHandles().size() > 0 && allowUUIDsForDebug) {
-            extensions = ioctlHelper->prepareVmBindExt(bo->getBindExtHandles(), vmHandleId);
+            extensions = ioctlHelper->prepareVmBindExt(bo->getBindExtHandles(), bo->getRegisteredBindHandleCookie());
         }
         bool bindCapture = bo->isMarkedForCapture();
         bool bindImmediate = bo->isImmediateBindingRequired();
         bool bindMakeResident = false;
         bool readOnlyResource = bo->isReadOnlyGpuResource();
 
-        if (drm->useVMBindImmediate()) {
+        if (drm->useVMBindImmediate() || guaranteePagingFence) {
             bindMakeResident = bo->isExplicitResidencyRequired();
             bindImmediate = true;
         }
@@ -1449,6 +1480,8 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
         vmBind.offset = 0;
         vmBind.start = bo->peekAddress();
         vmBind.userptr = bo->getUserptr();
+        vmBind.sharedSystemUsmEnabled = drm->isSharedSystemAllocEnabled();
+        vmBind.sharedSystemUsmBind = false;
 
         if (bo->getColourWithBind()) {
             vmBind.length = bo->getColourChunk();
@@ -1472,18 +1505,18 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
         }
 
         std::unique_lock<std::mutex> lock;
-
         VmBindExtUserFenceT vmBindExtUserFence{};
         bool incrementFenceValue = false;
-        if (ioctlHelper->isWaitBeforeBindRequired(bind)) {
-            if (drm->useVMBindImmediate()) {
-                lock = drm->lockBindFenceMutex();
-                auto nextExtension = vmBind.extensions;
-                incrementFenceValue = true;
-                programUserFence(drm, osContext, bo, vmBindExtUserFence, vmHandleId, nextExtension);
-                ioctlHelper->setVmBindUserFence(vmBind, vmBindExtUserFence);
-            }
+
+        if ((ioctlHelper->isWaitBeforeBindRequired(bind) && drm->useVMBindImmediate()) || guaranteePagingFence) {
+
+            lock = drm->lockBindFenceMutex();
+            auto nextExtension = vmBind.extensions;
+            incrementFenceValue = true;
+            programUserFence(drm, osContext, bo, vmBindExtUserFence, vmHandleId, nextExtension);
+            ioctlHelper->setVmBindUserFence(vmBind, vmBindExtUserFence);
         }
+
         if (bind) {
             ret = ioctlHelper->vmBind(vmBind);
             if (ret) {
@@ -1498,20 +1531,33 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
                 break;
             }
         }
-        bool waitOnUserFenceAfterBindAndUnbind = false;
-        if (debugManager.flags.EnableWaitOnUserFenceAfterBindAndUnbind.get() != -1) {
-            waitOnUserFenceAfterBindAndUnbind = !!debugManager.flags.EnableWaitOnUserFenceAfterBindAndUnbind.get();
-        }
-        if (ioctlHelper->isWaitBeforeBindRequired(bind) && waitOnUserFenceAfterBindAndUnbind && drm->useVMBindImmediate()) {
-            auto osContextLinux = static_cast<OsContextLinux *>(osContext);
-            osContextLinux->waitForPagingFence();
-        }
+
         if (incrementFenceValue) {
+
+            auto osContextLinux = static_cast<OsContextLinux *>(osContext);
+            std::pair<uint64_t, uint64_t> fenceAddressAndValToWait = osContextLinux->getFenceAddressAndValToWait(vmHandleId, true);
             if (drm->isPerContextVMRequired()) {
-                auto osContextLinux = static_cast<OsContextLinux *>(osContext);
                 osContextLinux->incFenceVal(vmHandleId);
             } else {
                 drm->incFenceVal(vmHandleId);
+            }
+
+            lock.unlock();
+
+            const auto fenceAddressToWait = fenceAddressAndValToWait.first;
+            const auto fenceValToWait = fenceAddressAndValToWait.second;
+
+            if (fenceAddressToWait != 0u) {
+
+                bool waitOnUserFenceAfterBindAndUnbind = false;
+                if (debugManager.flags.EnableWaitOnUserFenceAfterBindAndUnbind.get() != -1) {
+                    waitOnUserFenceAfterBindAndUnbind = !!debugManager.flags.EnableWaitOnUserFenceAfterBindAndUnbind.get();
+                }
+
+                if ((ioctlHelper->isWaitBeforeBindRequired(bind) && waitOnUserFenceAfterBindAndUnbind && drm->useVMBindImmediate()) || guaranteePagingFence) {
+
+                    drm->waitUserFence(0u, fenceAddressToWait, fenceValToWait, Drm::ValueWidth::u64, -1, ioctlHelper->getWaitUserFenceSoftFlag(), false, NEO::InterruptId::notUsed, nullptr);
+                }
             }
         }
     }
@@ -1519,17 +1565,17 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
     return ret;
 }
 
-int Drm::bindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObject *bo) {
-    auto ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);
+int Drm::bindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObject *bo, const bool forcePagingFence) {
+    auto ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true, forcePagingFence);
     if (ret != 0) {
         static_cast<DrmMemoryOperationsHandlerBind *>(this->rootDeviceEnvironment.memoryOperationsInterface.get())->evictUnusedAllocations(false, false);
-        ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true);
+        ret = changeBufferObjectBinding(this, osContext, vmHandleId, bo, true, forcePagingFence);
     }
     return ret;
 }
 
 int Drm::unbindBufferObject(OsContext *osContext, uint32_t vmHandleId, BufferObject *bo) {
-    return changeBufferObjectBinding(this, osContext, vmHandleId, bo, false);
+    return changeBufferObjectBinding(this, osContext, vmHandleId, bo, false, false);
 }
 
 int Drm::createDrmVirtualMemory(uint32_t &drmVmId) {
@@ -1562,6 +1608,26 @@ int Drm::createDrmVirtualMemory(uint32_t &drmVmId) {
 
     if (ret == 0) {
         drmVmId = ctl.vmId;
+        if (isSharedSystemAllocEnabled()) {
+            VmBindParams vmBind{};
+            vmBind.vmId = static_cast<uint32_t>(ctl.vmId);
+            vmBind.flags = DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR;
+            vmBind.length = (0x1ull << ((NEO::CpuInfo::getInstance().getVirtualAddressSize()) - 1));
+            vmBind.sharedSystemUsmEnabled = true;
+            vmBind.sharedSystemUsmBind = true;
+            VmBindExtUserFenceT vmBindExtUserFence{};
+            ioctlHelper->fillVmBindExtUserFence(vmBindExtUserFence,
+                                                castToUint64(ioctlHelper->getPagingFenceAddress(0, nullptr)),
+                                                getNextFenceVal(0),
+                                                vmBind.extensions);
+            ioctlHelper->setVmBindUserFence(vmBind, vmBindExtUserFence);
+
+            if (ioctlHelper->vmBind(vmBind)) {
+                setSharedSystemAllocEnable(false);
+                printDebugString(debugManager.flags.PrintDebugMessages.get(), stderr,
+                                 "INFO:  Shared System USM capability not detected\n");
+            }
+        }
         if (ctl.vmId == 0) {
             // 0 is reserved for invalid/unassigned ppgtt
             return -1;

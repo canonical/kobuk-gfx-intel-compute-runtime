@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -68,6 +68,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <ranges>
 #include <vector>
 
 using namespace iOpenCL;
@@ -1335,7 +1336,18 @@ void Kernel::setInlineSamplers() {
                                                                 errCode));
         UNRECOVERABLE_IF(errCode != CL_SUCCESS);
 
-        auto samplerState = ptrOffset(getDynamicStateHeap(), static_cast<size_t>(inlineSampler.getSamplerBindfulOffset()));
+        void *samplerState = nullptr;
+        auto dsh = const_cast<void *>(getDynamicStateHeap());
+
+        if (isValidOffset(inlineSampler.bindless)) {
+            auto samplerStateIndex = inlineSampler.samplerIndex;
+            auto &gfxCoreHelper = this->getGfxCoreHelper();
+            auto samplerStateSize = gfxCoreHelper.getSamplerStateSize();
+            auto offset = inlineSampler.borderColorStateSize;
+            samplerState = ptrOffset(dsh, (samplerStateIndex * samplerStateSize) + offset);
+        } else {
+            samplerState = ptrOffset(dsh, static_cast<size_t>(inlineSampler.getSamplerBindfulOffset()));
+        }
         sampler->setArg(const_cast<void *>(samplerState), clDevice.getRootDeviceEnvironment());
     }
 }
@@ -1792,8 +1804,19 @@ cl_int Kernel::setArgSampler(uint32_t argIndex,
 
         storeKernelArg(argIndex, SAMPLER_OBJ, clSamplerObj, argVal, argSize);
 
+        void *samplerState = nullptr;
         auto dsh = getDynamicStateHeap();
-        auto samplerState = ptrOffset(dsh, argAsSmp.bindful);
+
+        if (isValidOffset(argAsSmp.bindless)) {
+            auto samplerStateIndex = argAsSmp.index;
+            auto &gfxCoreHelper = this->getGfxCoreHelper();
+            auto samplerStateSize = gfxCoreHelper.getSamplerStateSize();
+            const auto offset = kernelInfo.kernelDescriptor.payloadMappings.samplerTable.tableOffset;
+            samplerState = ptrOffset(const_cast<void *>(dsh), (samplerStateIndex * samplerStateSize) + offset);
+        } else {
+            DEBUG_BREAK_IF(isUndefinedOffset(argAsSmp.bindful));
+            samplerState = ptrOffset(const_cast<void *>(dsh), argAsSmp.bindful);
+        }
 
         pSampler->setArg(const_cast<void *>(samplerState), clDevice.getRootDeviceEnvironment());
 
@@ -2116,52 +2139,66 @@ uint32_t Kernel::getSurfaceStateIndexForBindlessOffset(NEO::CrossThreadDataOffse
     return std::numeric_limits<uint32_t>::max();
 }
 
-void Kernel::patchBindlessOffsetsForImplicitArgs(uint64_t bindlessSurfaceStateBaseOffset) const {
+template <bool heaplessEnabled>
+void Kernel::patchBindlessSurfaceStatesForImplicitArgs(uint64_t bindlessSurfaceStatesBaseAddress) const {
     auto implicitArgsVec = kernelInfo.kernelDescriptor.getImplicitArgBindlessCandidatesVec();
 
     auto &gfxCoreHelper = this->getGfxCoreHelper();
     auto surfaceStateSize = gfxCoreHelper.getRenderSurfaceStateSize();
+    auto *crossThreadDataPtr = reinterpret_cast<uint8_t *>(getCrossThreadData());
 
     for (size_t i = 0; i < implicitArgsVec.size(); i++) {
         if (NEO::isValidOffset(implicitArgsVec[i]->bindless)) {
-            auto patchLocation = ptrOffset(getCrossThreadData(), implicitArgsVec[i]->bindless);
+            auto patchLocation = ptrOffset(crossThreadDataPtr, implicitArgsVec[i]->bindless);
             auto index = getSurfaceStateIndexForBindlessOffset(implicitArgsVec[i]->bindless);
 
             if (index < std::numeric_limits<uint32_t>::max()) {
-                auto surfaceStateOffset = static_cast<uint32_t>(bindlessSurfaceStateBaseOffset + index * surfaceStateSize);
-                auto patchValue = gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(surfaceStateOffset));
 
-                patchWithRequiredSize(reinterpret_cast<uint8_t *>(patchLocation), sizeof(patchValue), patchValue);
+                auto surfaceStateAddress = bindlessSurfaceStatesBaseAddress + (index * surfaceStateSize);
+
+                if constexpr (heaplessEnabled) {
+                    uint64_t patchValue = surfaceStateAddress;
+                    patchWithRequiredSize(patchLocation, sizeof(uint64_t), patchValue);
+                } else {
+                    uint32_t patchValue = gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(surfaceStateAddress));
+                    patchWithRequiredSize(patchLocation, sizeof(uint32_t), patchValue);
+                }
             }
         }
     }
 }
 
-void Kernel::patchBindlessOffsetsInCrossThreadData(uint64_t bindlessSurfaceStateBaseOffset) const {
+template <bool heaplessEnabled>
+void Kernel::patchBindlessSurfaceStatesInCrossThreadData(uint64_t bindlessSurfaceStatesBaseAddress) const {
     auto &gfxCoreHelper = this->getGfxCoreHelper();
     auto surfaceStateSize = gfxCoreHelper.getRenderSurfaceStateSize();
+    auto *crossThreadDataPtr = reinterpret_cast<uint8_t *>(getCrossThreadData());
 
-    for (size_t argIndex = 0; argIndex < kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.size(); argIndex++) {
-        const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
+    for (auto &arg : kernelInfo.kernelDescriptor.payloadMappings.explicitArgs) {
 
-        auto crossThreadOffset = NEO::undefined<NEO::CrossThreadDataOffset>;
+        auto offset = NEO::undefined<NEO::CrossThreadDataOffset>;
         if (arg.type == NEO::ArgDescriptor::argTPointer) {
-            crossThreadOffset = arg.as<NEO::ArgDescPointer>().bindless;
+            offset = arg.as<NEO::ArgDescPointer>().bindless;
         } else if (arg.type == NEO::ArgDescriptor::argTImage) {
-            crossThreadOffset = arg.as<NEO::ArgDescImage>().bindless;
+            offset = arg.as<NEO::ArgDescImage>().bindless;
         } else {
             continue;
         }
 
-        if (NEO::isValidOffset(crossThreadOffset)) {
-            auto patchLocation = ptrOffset(getCrossThreadData(), crossThreadOffset);
-            auto index = getSurfaceStateIndexForBindlessOffset(crossThreadOffset);
+        if (NEO::isValidOffset(offset)) {
+            auto index = getSurfaceStateIndexForBindlessOffset(offset);
 
             if (index < std::numeric_limits<uint32_t>::max()) {
-                auto surfaceStateOffset = static_cast<uint32_t>(bindlessSurfaceStateBaseOffset + index * surfaceStateSize);
-                auto patchValue = gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(surfaceStateOffset));
+                auto patchLocation = ptrOffset(crossThreadDataPtr, offset);
+                auto surfaceStateAddress = bindlessSurfaceStatesBaseAddress + (index * surfaceStateSize);
 
-                patchWithRequiredSize(reinterpret_cast<uint8_t *>(patchLocation), sizeof(patchValue), patchValue);
+                if constexpr (heaplessEnabled) {
+                    uint64_t patchValue = surfaceStateAddress;
+                    patchWithRequiredSize(patchLocation, sizeof(uint64_t), patchValue);
+                } else {
+                    uint32_t patchValue = gfxCoreHelper.getBindlessSurfaceExtendedMessageDescriptorValue(static_cast<uint32_t>(surfaceStateAddress));
+                    patchWithRequiredSize(patchLocation, sizeof(uint32_t), patchValue);
+                }
             }
         }
     }
@@ -2169,7 +2206,36 @@ void Kernel::patchBindlessOffsetsInCrossThreadData(uint64_t bindlessSurfaceState
     const auto bindlessHeapsHelper = getDevice().getDevice().getBindlessHeapsHelper();
 
     if (!bindlessHeapsHelper) {
-        patchBindlessOffsetsForImplicitArgs(bindlessSurfaceStateBaseOffset);
+        patchBindlessSurfaceStatesForImplicitArgs<heaplessEnabled>(bindlessSurfaceStatesBaseAddress);
+    }
+}
+
+void Kernel::patchBindlessSamplerStatesInCrossThreadData(uint64_t bindlessSamplerStatesBaseAddress) const {
+    auto &gfxCoreHelper = this->getGfxCoreHelper();
+    const auto samplerStateSize = gfxCoreHelper.getSamplerStateSize();
+    auto *crossThreadDataPtr = reinterpret_cast<uint8_t *>(getCrossThreadData());
+
+    auto samplerArgs = std::ranges::subrange(kernelInfo.kernelDescriptor.payloadMappings.explicitArgs) | std::views::filter([](const auto &arg) {
+                           return (arg.type == NEO::ArgDescriptor::argTSampler) && NEO::isValidOffset(arg.template as<NEO::ArgDescSampler>().bindless);
+                       });
+
+    for (auto &arg : samplerArgs) {
+        auto &sampler = arg.template as<NEO::ArgDescSampler>();
+        auto patchLocation = ptrOffset(crossThreadDataPtr, sampler.bindless);
+        auto samplerStateAddress = static_cast<uint64_t>(bindlessSamplerStatesBaseAddress + sampler.index * samplerStateSize);
+        auto patchValue = samplerStateAddress;
+        patchWithRequiredSize(patchLocation, sampler.size, patchValue);
+    }
+
+    auto inlineSamplers = kernelInfo.kernelDescriptor.inlineSamplers | std::views::filter([](const auto &sampler) {
+                              return (NEO::isValidOffset(sampler.bindless));
+                          });
+
+    for (auto &sampler : inlineSamplers) {
+        auto patchLocation = ptrOffset(crossThreadDataPtr, sampler.bindless);
+        auto samplerStateAddress = static_cast<uint64_t>(bindlessSamplerStatesBaseAddress + sampler.samplerIndex * samplerStateSize);
+        auto patchValue = samplerStateAddress;
+        patchWithRequiredSize(patchLocation, sampler.size, patchValue);
     }
 }
 
@@ -2362,5 +2428,11 @@ size_t Kernel::getLocalIdsSizePerThread() const {
     UNRECOVERABLE_IF(localIdsCache.get() == nullptr);
     return localIdsCache->getLocalIdsSizePerThread();
 }
+
+template void Kernel::patchBindlessSurfaceStatesForImplicitArgs<false>(uint64_t bindlessSurfaceStatesBaseAddress) const;
+template void Kernel::patchBindlessSurfaceStatesForImplicitArgs<true>(uint64_t bindlessSurfaceStatesBaseAddress) const;
+
+template void Kernel::patchBindlessSurfaceStatesInCrossThreadData<false>(uint64_t bindlessSurfaceStatesBaseAddress) const;
+template void Kernel::patchBindlessSurfaceStatesInCrossThreadData<true>(uint64_t bindlessSurfaceStatesBaseAddress) const;
 
 } // namespace NEO

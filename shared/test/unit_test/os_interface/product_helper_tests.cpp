@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -457,8 +457,7 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfKmdMigrationIsSupported
     EXPECT_FALSE(productHelper->isKmdMigrationSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsSupportedThenReturnFalse, IsNotPVC) {
-
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsSupportedThenReturnFalse, IsBeforeXeHpcCore) {
     EXPECT_FALSE(productHelper->isDisableScratchPagesSupported());
 }
 
@@ -1095,6 +1094,13 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnTr
 }
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenGetRequiredDetectIndirectVersionCalledThenReturnCorrectVersion, IsNotPVC) {
-    EXPECT_EQ(IndirectDetectionVersions::disabled, productHelper->getRequiredDetectIndirectVersion());
-    EXPECT_EQ(IndirectDetectionVersions::requiredDetectIndirectVersionVectorCompiler, productHelper->getRequiredDetectIndirectVersionVC());
+    EXPECT_EQ(9u, productHelper->getRequiredDetectIndirectVersion());
+    EXPECT_EQ(6u, productHelper->getRequiredDetectIndirectVersionVC());
+}
+
+HWTEST_F(ProductHelperTest, whenAdjustScratchSizeThenSizeIsNotChanged) {
+    constexpr size_t initialScratchSize = 0xDEADBEEF;
+    size_t scratchSize = initialScratchSize;
+    productHelper->adjustScratchSize(scratchSize);
+    EXPECT_EQ(initialScratchSize, scratchSize);
 }

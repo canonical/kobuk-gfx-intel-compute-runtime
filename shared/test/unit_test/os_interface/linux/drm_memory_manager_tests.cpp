@@ -15,6 +15,7 @@
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/memory_manager/memory_banks.h"
 #include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
+#include "shared/source/os_interface/linux/drm_memory_operations_handler_bind.h"
 #include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
@@ -2565,6 +2566,32 @@ TEST_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenLockUnlockIsCalledThenRetu
 
     auto ptr = memoryManager->lockResource(allocation);
     EXPECT_NE(nullptr, ptr);
+
+    memoryManager->unlockResource(allocation);
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenDrmMemoryManagerAndResidentNeededbeforeLockWhenLockIsCalledThenverifyAllocationIsResident) {
+    mock->ioctlExpected.gemWait = 1;
+    mock->ioctlExpected.gemClose = 1;
+    mock->ioctlExpected.gemMmapOffset = 1;
+    mock->ioctlExpected.gemCreateExt = 1;
+
+    auto mockIoctlHelper = new MockIoctlHelper(*mock);
+    mockIoctlHelper->makeResidentBeforeLockNeededResult = true;
+
+    auto &drm = static_cast<DrmMockCustom &>(memoryManager->getDrm(rootDeviceIndex));
+    drm.ioctlHelper.reset(mockIoctlHelper);
+
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.reset(new DrmMemoryOperationsHandlerBind(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex].get(), 0));
+    auto allocation = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{rootDeviceIndex, true, MemoryConstants::pageSize, AllocationType::buffer});
+    ASSERT_NE(nullptr, allocation);
+
+    auto ptr = memoryManager->lockResource(allocation);
+    EXPECT_NE(nullptr, ptr);
+
+    auto osContext = device->getDefaultEngine().osContext;
+    EXPECT_TRUE(allocation->isAlwaysResident(osContext->getContextId()));
 
     memoryManager->unlockResource(allocation);
     memoryManager->freeGraphicsMemory(allocation);
@@ -5512,7 +5539,7 @@ TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenSingleLocalMemoryWhenParticular
     EXPECT_EQ(memoryManager->computeStorageInfoMemoryBanksCalled, 2UL);
 }
 
-TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenSingleLocalMemoryWhenAllSubdevicesIndicatedThenCorrectBankIsSelected) {
+TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenSingleLocalMemoryAndNonTileInstancedAllocationWhenAllTilesIndicatedThenCorrectBankIsSelected) {
     auto *memoryInfo = static_cast<MockMemoryInfo *>(mock->memoryInfo.get());
     auto &localMemoryRegions = memoryInfo->localMemoryRegions;
     localMemoryRegions.resize(1U);
@@ -5527,6 +5554,72 @@ TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenSingleLocalMemoryWhenAllSubdevi
     constexpr auto expectedMemoryBanks = 0b01;
     EXPECT_EQ(storageInfo.memoryBanks, expectedMemoryBanks);
     EXPECT_EQ(memoryManager->computeStorageInfoMemoryBanksCalled, 2UL);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenSingleLocalMemoryWhenTileInstancedAllocationCreatedThenMemoryBanksSetToAllTilesRegardlessOfSubDevicesIndicatedInProperties) {
+    auto *memoryInfo = static_cast<MockMemoryInfo *>(mock->memoryInfo.get());
+    auto &localMemoryRegions = memoryInfo->localMemoryRegions;
+    debugManager.flags.CreateMultipleSubDevices.set(2);
+    localMemoryRegions.resize(1U);
+    localMemoryRegions[0].tilesMask = 0b11;
+
+    const auto expectedMemoryBanks = 0b11;
+    for (auto subDevicesMask = 1U; subDevicesMask < 4; ++subDevicesMask) {
+        AllocationProperties properties{1, 4096, AllocationType::workPartitionSurface, subDevicesMask};
+
+        memoryManager->computeStorageInfoMemoryBanksCalled = 0U;
+        auto storageInfo = memoryManager->createStorageInfoFromProperties(properties);
+
+        EXPECT_TRUE(storageInfo.tileInstanced);
+        EXPECT_EQ(storageInfo.memoryBanks, expectedMemoryBanks);
+        EXPECT_EQ(memoryManager->computeStorageInfoMemoryBanksCalled, 2UL);
+    }
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenSingleLocalMemoryAndTileInstancedAllocationTypeEvenWhenSubsetOfTilesIndicatedThenCorrectBankIsSelected) {
+    auto *memoryInfo = static_cast<MockMemoryInfo *>(mock->memoryInfo.get());
+    auto &localMemoryRegions = memoryInfo->localMemoryRegions;
+    debugManager.flags.CreateMultipleSubDevices.set(2);
+
+    localMemoryRegions.resize(1U);
+    localMemoryRegions[0].tilesMask = 0b11;
+
+    AllocationProperties properties{1, true, 4096, AllocationType::workPartitionSurface, false, 0b10};
+    const auto expectedMemoryBanks = 0b11;
+
+    memoryManager->computeStorageInfoMemoryBanksCalled = 0U;
+    auto storageInfo = memoryManager->createStorageInfoFromProperties(properties);
+
+    EXPECT_EQ(storageInfo.memoryBanks, expectedMemoryBanks);
+    EXPECT_EQ(memoryManager->computeStorageInfoMemoryBanksCalled, 2UL);
+}
+
+TEST_F(DrmMemoryManagerWithLocalMemoryAndExplicitExpectationsTest, givenSingleLocalMemoryWhenTileInstancedAllocationCreatedThenItHasCorrectBOs) {
+    auto *memoryInfo = static_cast<MockMemoryInfo *>(mock->memoryInfo.get());
+    auto &localMemoryRegions = memoryInfo->localMemoryRegions;
+    localMemoryRegions.resize(1U);
+    localMemoryRegions[0].tilesMask = 0b11;
+
+    const DeviceBitfield subDeviceBitfield{0b11};
+    const auto expectedNumHandles{subDeviceBitfield.count()};
+    EXPECT_NE(expectedNumHandles, 0UL);
+
+    AllocationProperties properties{1, 4096, AllocationType::workPartitionSurface, subDeviceBitfield};
+    auto *allocation{memoryManager->allocateGraphicsMemoryInPreferredPool(properties, nullptr)};
+    EXPECT_EQ(allocation->getNumHandles(), expectedNumHandles);
+
+    const auto &bos{static_cast<DrmAllocation *>(allocation)->getBOs()};
+    const auto commonBoAddress{bos[0U]->peekAddress()};
+    auto numberOfValidBos{0U};
+    for (const auto bo : bos) {
+        if (bo == nullptr) {
+            continue;
+        }
+        ++numberOfValidBos;
+        EXPECT_EQ(bo->peekAddress(), commonBoAddress);
+    }
+    EXPECT_EQ(numberOfValidBos, expectedNumHandles);
+    memoryManager->freeGraphicsMemory(allocation);
 }
 
 TEST_F(DrmMemoryManagerWithLocalMemoryTest, givenMultipleLocalMemoryRegionsWhenParticularSubdeviceIndicatedThenItIsSelected) {
@@ -5870,7 +5963,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsUnSupportedWhenCallingBindBoOnBuffe
     allocation.bufferObjects[0] = &bo;
 
     std::vector<BufferObject *> bufferObjects;
-    allocation.bindBO(&bo, &osContext, vmHandleId, &bufferObjects, true);
+    allocation.bindBO(&bo, &osContext, vmHandleId, &bufferObjects, true, false);
 
     EXPECT_FALSE(allocation.shouldAllocationPageFault(&drm));
     EXPECT_FALSE(bo.isExplicitResidencyRequired());
@@ -5899,7 +5992,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedAndKmdMigrationEnabledForB
         debugManager.flags.UseKmdMigrationForBuffers.set(useKmdMigrationForBuffers);
 
         std::vector<BufferObject *> bufferObjects;
-        allocation.bindBO(&bo, &osContext, vmHandleId, &bufferObjects, true);
+        allocation.bindBO(&bo, &osContext, vmHandleId, &bufferObjects, true, false);
 
         if (useKmdMigrationForBuffers > 0) {
             EXPECT_TRUE(allocation.shouldAllocationPageFault(&drm));
@@ -5938,7 +6031,7 @@ TEST_F(DrmMemoryManagerTest, givenPageFaultIsSupportedWhenCallingBindBoOnAllocat
         allocation.shouldPageFault = shouldAllocationPageFault;
 
         std::vector<BufferObject *> bufferObjects;
-        allocation.bindBO(&bo, &osContext, vmHandleId, &bufferObjects, true);
+        allocation.bindBO(&bo, &osContext, vmHandleId, &bufferObjects, true, false);
 
         EXPECT_EQ(shouldAllocationPageFault, allocation.shouldAllocationPageFault(&drm));
         EXPECT_EQ(!shouldAllocationPageFault, bo.isExplicitResidencyRequired());

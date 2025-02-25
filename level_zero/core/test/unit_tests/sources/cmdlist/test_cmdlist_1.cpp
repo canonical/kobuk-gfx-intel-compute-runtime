@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -545,9 +545,9 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     EXPECT_EQ(handlerWithHints, reinterpret_cast<void *>(mockPageFaultManager->gpuDomainHandler));
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
-    pageData.domain = NEO::PageFaultManager::AllocationDomain::gpu;
+    pageData.domain = NEO::CpuPageFaultManager::AllocationDomain::gpu;
     mockPageFaultManager->gpuDomainHandler(mockPageFaultManager, ptr, pageData);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.cpuMigrationBlocked);
@@ -586,9 +586,9 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     EXPECT_EQ(handlerWithHints, reinterpret_cast<void *>(mockPageFaultManager->gpuDomainHandler));
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
-    pageData.domain = NEO::PageFaultManager::AllocationDomain::gpu;
+    pageData.domain = NEO::CpuPageFaultManager::AllocationDomain::gpu;
     pageData.unifiedMemoryManager = device->getDriverHandle()->getSvmAllocsManager();
     EXPECT_EQ(0u, device->getDriverHandle()->getSvmAllocsManager()->nonGpuDomainAllocs.size());
     mockPageFaultManager->gpuDomainHandler(mockPageFaultManager, ptr, pageData);
@@ -661,9 +661,9 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     testing::internal::CaptureStdout(); // start capturing
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
-    pageData.domain = NEO::PageFaultManager::AllocationDomain::gpu;
+    pageData.domain = NEO::CpuPageFaultManager::AllocationDomain::gpu;
     pageData.unifiedMemoryManager = device->getDriverHandle()->getSvmAllocsManager();
     mockPageFaultManager->gpuDomainHandler(mockPageFaultManager, ptr, pageData);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
@@ -715,9 +715,9 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     EXPECT_EQ(handlerWithHints, reinterpret_cast<void *>(mockPageFaultManager->gpuDomainHandler));
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
-    pageData.domain = NEO::PageFaultManager::AllocationDomain::gpu;
+    pageData.domain = NEO::CpuPageFaultManager::AllocationDomain::gpu;
     pageData.unifiedMemoryManager = device->getDriverHandle()->getSvmAllocsManager();
     mockPageFaultManager->gpuDomainHandler(mockPageFaultManager, ptr, pageData);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
@@ -762,9 +762,9 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     EXPECT_EQ(handlerWithHints, reinterpret_cast<void *>(mockPageFaultManager->gpuDomainHandler));
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
-    pageData.domain = NEO::PageFaultManager::AllocationDomain::cpu;
+    pageData.domain = NEO::CpuPageFaultManager::AllocationDomain::cpu;
     pageData.unifiedMemoryManager = device->getDriverHandle()->getSvmAllocsManager();
     mockPageFaultManager->gpuDomainHandler(mockPageFaultManager, ptr, pageData);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
@@ -809,9 +809,9 @@ TEST_F(CommandListMemAdvisePageFault, givenInvalidPtrAndPageFaultHandlerAndGpuDo
 
     EXPECT_EQ(handlerWithHints, reinterpret_cast<void *>(mockPageFaultManager->gpuDomainHandler));
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
-    pageData.domain = NEO::PageFaultManager::AllocationDomain::gpu;
+    pageData.domain = NEO::CpuPageFaultManager::AllocationDomain::gpu;
     pageData.unifiedMemoryManager = device->getDriverHandle()->getSvmAllocsManager();
     void *alloc = reinterpret_cast<void *>(0x1);
     mockPageFaultManager->gpuDomainHandler(mockPageFaultManager, alloc, pageData);
@@ -838,7 +838,7 @@ TEST_F(CommandListMemAdvisePageFault, givenUnifiedMemoryAllocWhenAllowCPUMemoryE
 
     L0::DeviceImp *deviceImp = static_cast<L0::DeviceImp *>((L0::Device::fromHandle(device)));
 
-    NEO::PageFaultManager::PageFaultData pageData;
+    NEO::CpuPageFaultManager::PageFaultData pageData;
     pageData.cmdQ = deviceImp;
 
     mockPageFaultManager->baseAllowCPUMemoryEviction(true, ptr, pageData);
@@ -1795,6 +1795,7 @@ HWTEST2_F(CommandListCreateTests, givenInOrderExecutionWhenDispatchingBarrierWit
     auto commandList0 = zeUniquePtr(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::renderCompute, returnValue));
     auto commandList = zeUniquePtr(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::renderCompute, returnValue));
     ASSERT_NE(nullptr, commandList);
+    auto whiteBoxCmdList0 = static_cast<CommandList *>(commandList0.get());
     auto whiteBoxCmdList = static_cast<CommandList *>(commandList.get());
     whiteBoxCmdList->enableInOrderExecution();
 
@@ -1813,7 +1814,7 @@ HWTEST2_F(CommandListCreateTests, givenInOrderExecutionWhenDispatchingBarrierWit
     ASSERT_EQ(ZE_RESULT_SUCCESS, eventPool->createEvent(&eventDesc, &event));
     std::unique_ptr<L0::Event> eventObject(L0::Event::fromHandle(event));
 
-    auto ultCsr = static_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(whiteBoxCmdList->getCsr(false));
+    auto ultCsr = static_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(whiteBoxCmdList0->getCsr(false));
     ultCsr->recordFlushedBatchBuffer = true;
 
     auto directSubmission = new MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>(*ultCsr);
@@ -1837,6 +1838,9 @@ HWTEST2_F(CommandListCreateTests, givenInOrderExecutionWhenDispatchingBarrierWit
 
     ultCsr->unregisterClient(&client1);
     ultCsr->unregisterClient(&client2);
+
+    ultCsr = static_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(whiteBoxCmdList->getCsr(false));
+    ultCsr->recordFlushedBatchBuffer = true;
 
     commandList->appendBarrier(event, 0, nullptr, false);
 

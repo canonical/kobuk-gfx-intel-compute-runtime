@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -3399,6 +3399,60 @@ HWTEST2_F(SetKernelArg, givenBindlessKernelAndNoAvailableSpaceOnSshWhenSetArgBuf
     svmAllocsManager->freeSVMAlloc(svmAllocation);
 }
 
+HWTEST2_F(SetKernelArg, givenSlmPointerWhenSettingKernelArgThenPropertyIsSaved, MatchAny) {
+    ze_kernel_desc_t desc = {};
+    desc.pKernelName = kernelName.c_str();
+    WhiteBoxKernelHw<gfxCoreFamily> mockKernel;
+    mockKernel.module = module.get();
+    mockKernel.initialize(&desc);
+
+    {
+        auto &baseArg = const_cast<NEO::ArgDescriptor &>(mockKernel.kernelImmData->getDescriptor().payloadMappings.explicitArgs[0]);
+        ArgTypeTraits &traits = const_cast<NEO::ArgTypeTraits &>(baseArg.getTraits());
+        traits.addressQualifier = static_cast<uint8_t>(NEO::KernelArgMetadata::AddrLocal);
+
+        auto &arg = const_cast<NEO::ArgDescPointer &>(baseArg.template as<NEO::ArgDescPointer>());
+        arg.stateless = undefined<SurfaceStateHeapOffset>;
+        arg.bindless = undefined<SurfaceStateHeapOffset>;
+        arg.bindful = undefined<SurfaceStateHeapOffset>;
+        arg.requiredSlmAlignment = 4;
+        arg.slmOffset = 0x20;
+    }
+
+    {
+        auto &baseArg = mockKernel.kernelImmData->getDescriptor().payloadMappings.explicitArgs[1];
+        ArgTypeTraits &traits = const_cast<NEO::ArgTypeTraits &>(baseArg.getTraits());
+        traits.addressQualifier = static_cast<uint8_t>(NEO::KernelArgMetadata::AddrLocal);
+
+        auto &arg = const_cast<NEO::ArgDescPointer &>(baseArg.template as<NEO::ArgDescPointer>());
+        arg.stateless = undefined<SurfaceStateHeapOffset>;
+        arg.bindless = undefined<SurfaceStateHeapOffset>;
+        arg.bindful = undefined<SurfaceStateHeapOffset>;
+        arg.requiredSlmAlignment = 8;
+        arg.slmOffset = 0x40;
+    }
+
+    auto ret = mockKernel.setArgBuffer(0, 64, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    ret = mockKernel.setArgBuffer(1, 32, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+
+    auto slmArgOffsetValues = mockKernel.getSlmArgOffsetValues();
+    EXPECT_EQ(0u, slmArgOffsetValues[0]);
+    EXPECT_EQ(64u, slmArgOffsetValues[1]);
+
+    auto slmArgSizes = mockKernel.getSlmArgSizes();
+    EXPECT_EQ(64u, slmArgSizes[0]);
+    EXPECT_EQ(32u, slmArgSizes[1]);
+
+    auto argSlmAlignment = mockKernel.getRequiredSlmAlignment(0);
+    EXPECT_EQ(4u, argSlmAlignment);
+
+    argSlmAlignment = mockKernel.getRequiredSlmAlignment(1);
+    EXPECT_EQ(8u, argSlmAlignment);
+}
+
 HWTEST2_F(SetKernelArg, givenImageAndBindfulKernelWhenSetArgImageThenCopySurfaceStateToSSHCalledWithCorrectArgs, ImageSupport) {
     createKernel();
 
@@ -3557,20 +3611,30 @@ class KernelProgramBinaryTests : public ModuleFixture, public ::testing::Test {
     L0::Kernel *kernel = nullptr;
 };
 
-TEST_F(KernelProgramBinaryTests, givenCallToGetKernelProgramBinaryThenCorrectSizeAndDataReturned) {
-
+TEST_F(KernelProgramBinaryTests, givenCallTozeKernelGetBinaryExpThenCorrectSizeAndDataReturned) {
     size_t kernelBinarySize = 0;
-    char *kernelBinaryRetrieved = nullptr;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel->getKernelProgramBinary(&kernelBinarySize, kernelBinaryRetrieved));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zeKernelGetBinaryExp(kernelHandle, &kernelBinarySize, nullptr));
     EXPECT_GT(kernelBinarySize, 0u);
-    kernelBinaryRetrieved = new char[kernelBinarySize];
-    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel->getKernelProgramBinary(&kernelBinarySize, kernelBinaryRetrieved));
+    std::unique_ptr<uint8_t[]> kernelBinaryRetrieved = std::make_unique<uint8_t[]>(kernelBinarySize);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zeKernelGetBinaryExp(kernelHandle, &kernelBinarySize, reinterpret_cast<uint8_t *>(kernelBinaryRetrieved.get())));
 
     auto &kernelImmutableData = this->module->kernelImmDatas.front();
     EXPECT_EQ(kernelBinarySize, kernelImmutableData->getKernelInfo()->heapInfo.kernelHeapSize);
     const char *heapPtr = reinterpret_cast<const char *>(kernelImmutableData->getKernelInfo()->heapInfo.pKernelHeap);
-    EXPECT_EQ(0, memcmp(kernelBinaryRetrieved, heapPtr, kernelBinarySize));
-    delete[] kernelBinaryRetrieved;
+    EXPECT_EQ(0, memcmp(kernelBinaryRetrieved.get(), heapPtr, kernelBinarySize));
+}
+
+TEST_F(KernelProgramBinaryTests, givenCallToGetKernelProgramBinaryThenCorrectSizeAndDataReturned) {
+    size_t kernelBinarySize = 0;
+    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel->getKernelProgramBinary(&kernelBinarySize, nullptr));
+    EXPECT_GT(kernelBinarySize, 0u);
+    std::unique_ptr<char[]> kernelBinaryRetrieved = std::make_unique<char[]>(kernelBinarySize);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel->getKernelProgramBinary(&kernelBinarySize, reinterpret_cast<char *>(kernelBinaryRetrieved.get())));
+
+    auto &kernelImmutableData = this->module->kernelImmDatas.front();
+    EXPECT_EQ(kernelBinarySize, kernelImmutableData->getKernelInfo()->heapInfo.kernelHeapSize);
+    const char *heapPtr = reinterpret_cast<const char *>(kernelImmutableData->getKernelInfo()->heapInfo.pKernelHeap);
+    EXPECT_EQ(0, memcmp(kernelBinaryRetrieved.get(), heapPtr, kernelBinarySize));
 }
 
 TEST_F(KernelProgramBinaryTests, givenCallToGetKernelProgramBinaryWithSmallSizeThenSmallSizeReturned) {

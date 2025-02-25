@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -237,9 +237,25 @@ bool SipKernel::initSipKernel(SipKernelType type, Device &device) {
         MockSipData::called = true;
 
         MockSipData::mockSipKernel->mockSipMemoryAllocation->clearUsageInfo();
+        MockSipData::mockSipKernel->createTempSipAllocation(MemoryManager::maxOsContextCount);
+
         return MockSipData::returned;
     } else {
         return SipKernel::initSipKernelImpl(type, device, nullptr);
+    }
+}
+
+void SipKernel::freeSipKernels(RootDeviceEnvironment *rootDeviceEnvironment, MemoryManager *memoryManager) {
+
+    if (MockSipData::mockSipKernel) {
+        MockSipData::mockSipKernel->tempSipMemoryAllocation.reset(nullptr);
+    }
+
+    for (auto &sipKernel : rootDeviceEnvironment->sipKernels) {
+        if (sipKernel.get()) {
+            memoryManager->freeGraphicsMemory(sipKernel->getSipAllocation());
+            sipKernel.reset();
+        }
     }
 }
 

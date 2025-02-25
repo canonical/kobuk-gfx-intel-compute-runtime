@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,6 +16,7 @@
 #include "shared/test/common/helpers/default_hw_info.inl"
 #include "shared/test/common/helpers/kernel_binary_helper.h"
 #include "shared/test/common/helpers/memory_leak_listener.h"
+#include "shared/test/common/helpers/mock_sip_listener.h"
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/helpers/ult_hw_config.inl"
 #include "shared/test/common/helpers/virtual_file_system_listener.h"
@@ -34,7 +35,7 @@
 #include <iostream>
 #include <mutex>
 #include <thread>
-#if !defined(__linux__) && NDEBUG
+#if !defined(__linux__)
 #include <regex>
 #endif
 
@@ -77,7 +78,6 @@ extern PRODUCT_FAMILY productFamily;
 extern GFXCORE_FAMILY renderCoreFamily;
 
 void applyWorkarounds();
-bool isPlatformSupported(const HardwareInfo &hwInfoForTests);
 void setupTestFiles(std::string testBinaryFiles, int32_t revId);
 std::string getBaseExecutionDir();
 void addUltListener(::testing::TestEventListeners &listener);
@@ -142,12 +142,12 @@ void applyCommonWorkarounds() {
 
 bool enableAlarm = true;
 int main(int argc, char **argv) {
-#if !defined(__linux__) && NDEBUG
-    std::regex _dummyRegex{"dummyRegex"};   // these dummy objects are neededed to prevent false-positive
-    std::wstringstream _dummyWstringstream; // leaks when using instances of std::regex and std::wstringstream in tests
-    _dummyWstringstream << std::setw(4)     // in Windows Release builds
-                        << std::setfill(L'0')
-                        << std::hex << 5;
+#if !defined(__linux__)
+    std::regex dummyRegex{"dummyRegex"};   // these dummy objects are neededed to prevent false-positive
+    std::wstringstream dummyWstringstream; // leaks when using instances of std::regex and std::wstringstream in tests
+    dummyWstringstream << std::setw(4)     // in Windows Release builds
+                       << std::setfill(L'0')
+                       << std::hex << 5;
 #endif
     int retVal = 0;
     bool useDefaultListener = false;
@@ -342,12 +342,6 @@ int main(int argc, char **argv) {
         }
 
         adjustHwInfoForTests(hwInfoForTests, euPerSubSlice, sliceCount, subSlicePerSliceCount, dieRecovery);
-        // Platforms with uninitialized factory are not supported
-        if (!isPlatformSupported(hwInfoForTests)) {
-            std::cout << "unsupported product family has been set: " << NEO::hardwarePrefix[::productFamily] << std::endl;
-            std::cout << "skipping tests" << std::endl;
-            return 0;
-        }
 
         binaryNameSuffix = hardwarePrefix[hwInfoForTests.platform.eProductFamily];
 
@@ -394,6 +388,7 @@ int main(int argc, char **argv) {
                 listeners.Append(customEventListener);
             }
 
+            listeners.Append(new MockSipListener);
             listeners.Append(new MemoryLeakListener);
             listeners.Append(new NEO::VirtualFileSystemListener);
 
@@ -443,6 +438,7 @@ int main(int argc, char **argv) {
             MockSipData::mockSipKernel.reset(new MockSipKernel());
             if (testMode == TestMode::aubTests || testMode == TestMode::aubTestsWithTbx) {
                 MockSipData::useMockSip = false;
+                debugManager.flags.OverrideCsrAllocationSize.set(1);
             } else {
                 MockSipData::useMockSip = true;
             }

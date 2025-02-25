@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -560,7 +560,7 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDefaultMemorySynchronizati
         EXPECT_EQ(1u, hwParser.cmdList.size());
         auto fenceCmd = genCmdCast<MI_MEM_FENCE *>(*hwParser.cmdList.begin());
         ASSERT_NE(nullptr, fenceCmd);
-        EXPECT_EQ(MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE, fenceCmd->getFenceType());
+        EXPECT_EQ(MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE_FENCE, fenceCmd->getFenceType());
     }
 }
 
@@ -608,7 +608,7 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenProgramGlobalFenceAsMiMemF
     EXPECT_EQ(1u, hwParser.cmdList.size());
     auto fenceCmd = genCmdCast<MI_MEM_FENCE *>(*hwParser.cmdList.begin());
     ASSERT_NE(nullptr, fenceCmd);
-    EXPECT_EQ(MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE, fenceCmd->getFenceType());
+    EXPECT_EQ(MI_MEM_FENCE::FENCE_TYPE::FENCE_TYPE_RELEASE_FENCE, fenceCmd->getFenceType());
 }
 
 using ProductHelperTestXe2HpgCore = Test<DeviceFixture>;
@@ -849,4 +849,21 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenFlagSetAn
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, whenGettingMetricsLibraryGenIdThenXe2HpgIsReturned) {
     auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
     EXPECT_EQ(static_cast<uint32_t>(MetricsLibraryApi::ClientGen::Xe2HPG), gfxCoreHelper.getMetricsLibraryGenId());
+}
+
+using GfxCoreHelperTestsXe2HpgCoreWithEnginesCheck = GfxCoreHelperTestWithEnginesCheck;
+
+XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCoreWithEnginesCheck, whenGetEnginesCalledThenRegularCcsIsNotAvailable) {
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get(), 0));
+
+    auto &engines = device->getGfxCoreHelper().getGpgpuEngineInstances(device->getRootDeviceEnvironment());
+
+    EXPECT_EQ(device->allEngines.size(), engines.size());
+
+    for (size_t idx = 0; idx < engines.size(); idx++) {
+        countEngine(engines[idx].first, engines[idx].second);
+    }
+
+    EXPECT_EQ(0u, getEngineCount(aub_stream::ENGINE_CCS, EngineUsage::regular));
+    EXPECT_EQ(1u, getEngineCount(aub_stream::ENGINE_CCCS, EngineUsage::regular));
 }

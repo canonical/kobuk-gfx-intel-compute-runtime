@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -317,7 +317,7 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandEncodeStatesTest, givenSlmTotalSizeEqualZe
 
     auto interfaceDescriptorData = static_cast<INTERFACE_DESCRIPTOR_DATA *>(cmdContainer->getIddBlock());
 
-    uint32_t expectedValue = INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE_ENCODES_0K;
+    uint32_t expectedValue = INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE_SLM_ENCODES_0K;
 
     EXPECT_EQ(expectedValue, interfaceDescriptorData->getSharedLocalMemorySize());
 }
@@ -962,18 +962,6 @@ HWTEST_F(CommandEncodeStatesTest, givenPauseOnEnqueueSetToAlwaysWhenEncodingWalk
 
 using EncodeDispatchKernelTest = Test<CommandEncodeStatesFixture>;
 
-struct HeapfulSupportedMatch {
-
-    template <PRODUCT_FAMILY productFamily>
-    static constexpr bool isMatched() {
-        const GFXCORE_FAMILY gfxCoreFamily = NEO::ToGfxCoreFamily<productFamily>::get();
-        using FamilyType = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
-        using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-        constexpr bool heaplessModeEnabled = FamilyType::template isHeaplessMode<DefaultWalkerType>();
-        return !heaplessModeEnabled;
-    }
-};
-
 HWTEST2_F(EncodeDispatchKernelTest, givenBindfulKernelWhenDispatchingKernelThenSshFromContainerIsUsed, HeapfulSupportedMatch) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
@@ -1410,14 +1398,17 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, InterfaceDescriptorDataTests, givenVariousValuesW
     INTERFACE_DESCRIPTOR_DATA idd = FamilyType::cmdInitInterfaceDescriptorData;
     MockDevice device;
     auto hwInfo = device.getHardwareInfo();
-
-    EncodeDispatchKernel<FamilyType>::programBarrierEnable(idd, 0, hwInfo);
+    KernelDescriptor kd = {};
+    kd.kernelAttributes.barrierCount = 0;
+    EncodeDispatchKernel<FamilyType>::programBarrierEnable(idd, kd, hwInfo);
     EXPECT_FALSE(idd.getBarrierEnable());
 
-    EncodeDispatchKernel<FamilyType>::programBarrierEnable(idd, 1, hwInfo);
+    kd.kernelAttributes.barrierCount = 1;
+    EncodeDispatchKernel<FamilyType>::programBarrierEnable(idd, kd, hwInfo);
     EXPECT_TRUE(idd.getBarrierEnable());
 
-    EncodeDispatchKernel<FamilyType>::programBarrierEnable(idd, 2, hwInfo);
+    kd.kernelAttributes.barrierCount = 2;
+    EncodeDispatchKernel<FamilyType>::programBarrierEnable(idd, kd, hwInfo);
     EXPECT_TRUE(idd.getBarrierEnable());
 }
 

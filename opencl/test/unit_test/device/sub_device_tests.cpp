@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -74,7 +74,9 @@ TEST(SubDevicesTest, givenDeviceWithSubDevicesWhenSubDeviceApiRefCountsAreChange
 
     VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
     initPlatform();
-    auto nonDefaultPlatform = std::make_unique<MockPlatform>(*platform()->peekExecutionEnvironment());
+    MockExecutionEnvironment *executionEnvironment = new MockExecutionEnvironment();
+    auto nonDefaultPlatform = std::make_unique<MockPlatform>(*executionEnvironment);
+
     nonDefaultPlatform->initializeWithNewDevices();
     auto device = nonDefaultPlatform->getClDevice(0);
     auto defaultDevice = platform()->getClDevice(0);
@@ -104,42 +106,47 @@ TEST(SubDevicesTest, givenDeviceWithSubDevicesWhenSubDeviceApiRefCountsAreChange
     EXPECT_EQ(baseDefaultDeviceInternalRefCount, defaultDevice->getRefInternalCount());
 }
 
-TEST(SubDevicesTest, givenDeviceWithSubDevicesAndSubDevicesAsDevicesIsSetWhenSubDeviceApiRefCountsAreChangedThenChangeIsNotPropagatedToRootDevice) {
+TEST(SubDevicesTest, givenDeviceWithFlatOrCombinedHierarchyWhenSubDeviceApiRefCountsAreChangedThenChangeIsNotPropagatedToRootDevice) {
     DebugManagerStateRestore restorer;
     debugManager.flags.CreateMultipleSubDevices.set(2);
     UnitTestSetter::disableHeaplessStateInit(restorer);
     VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
 
-    initPlatform();
-    platform()->peekExecutionEnvironment()->setExposeSubDevicesAsDevices(1);
-    auto nonDefaultPlatform = std::make_unique<MockPlatform>(*platform()->peekExecutionEnvironment());
-    nonDefaultPlatform->initializeWithNewDevices();
-    auto device = nonDefaultPlatform->getClDevice(0);
-    auto defaultDevice = platform()->getClDevice(0);
+    DeviceHierarchyMode deviceHierarchyModes[] = {DeviceHierarchyMode::flat, DeviceHierarchyMode::combined};
+    for (auto deviceHierarchyMode : deviceHierarchyModes) {
+        initPlatform();
+        MockExecutionEnvironment *executionEnvironment = new MockExecutionEnvironment();
+        executionEnvironment->setDeviceHierarchyMode(deviceHierarchyMode);
 
-    auto subDevice = device->getSubDevice(1);
-    auto baseDeviceApiRefCount = device->getRefApiCount();
-    auto baseDeviceInternalRefCount = device->getRefInternalCount();
-    auto baseSubDeviceApiRefCount = subDevice->getRefApiCount();
-    auto baseSubDeviceInternalRefCount = subDevice->getRefInternalCount();
-    auto baseDefaultDeviceApiRefCount = defaultDevice->getRefApiCount();
-    auto baseDefaultDeviceInternalRefCount = defaultDevice->getRefInternalCount();
+        auto nonDefaultPlatform = std::make_unique<MockPlatform>(*executionEnvironment);
+        nonDefaultPlatform->initializeWithNewDevices();
+        auto device = nonDefaultPlatform->getClDevice(0);
+        auto defaultDevice = platform()->getClDevice(0);
 
-    subDevice->retainApi();
-    EXPECT_EQ(baseDeviceApiRefCount, device->getRefApiCount());
-    EXPECT_EQ(baseDeviceInternalRefCount, device->getRefInternalCount());
-    EXPECT_EQ(baseSubDeviceApiRefCount, subDevice->getRefApiCount());
-    EXPECT_EQ(baseSubDeviceInternalRefCount, subDevice->getRefInternalCount());
-    EXPECT_EQ(baseDefaultDeviceApiRefCount, defaultDevice->getRefApiCount());
-    EXPECT_EQ(baseDefaultDeviceInternalRefCount, defaultDevice->getRefInternalCount());
+        auto subDevice = device->getSubDevice(1);
+        auto baseDeviceApiRefCount = device->getRefApiCount();
+        auto baseDeviceInternalRefCount = device->getRefInternalCount();
+        auto baseSubDeviceApiRefCount = subDevice->getRefApiCount();
+        auto baseSubDeviceInternalRefCount = subDevice->getRefInternalCount();
+        auto baseDefaultDeviceApiRefCount = defaultDevice->getRefApiCount();
+        auto baseDefaultDeviceInternalRefCount = defaultDevice->getRefInternalCount();
 
-    subDevice->releaseApi();
-    EXPECT_EQ(baseDeviceApiRefCount, device->getRefApiCount());
-    EXPECT_EQ(baseDeviceInternalRefCount, device->getRefInternalCount());
-    EXPECT_EQ(baseSubDeviceApiRefCount, subDevice->getRefApiCount());
-    EXPECT_EQ(baseSubDeviceInternalRefCount, subDevice->getRefInternalCount());
-    EXPECT_EQ(baseDefaultDeviceApiRefCount, defaultDevice->getRefApiCount());
-    EXPECT_EQ(baseDefaultDeviceInternalRefCount, defaultDevice->getRefInternalCount());
+        subDevice->retainApi();
+        EXPECT_EQ(baseDeviceApiRefCount, device->getRefApiCount());
+        EXPECT_EQ(baseDeviceInternalRefCount, device->getRefInternalCount());
+        EXPECT_EQ(baseSubDeviceApiRefCount, subDevice->getRefApiCount());
+        EXPECT_EQ(baseSubDeviceInternalRefCount, subDevice->getRefInternalCount());
+        EXPECT_EQ(baseDefaultDeviceApiRefCount, defaultDevice->getRefApiCount());
+        EXPECT_EQ(baseDefaultDeviceInternalRefCount, defaultDevice->getRefInternalCount());
+
+        subDevice->releaseApi();
+        EXPECT_EQ(baseDeviceApiRefCount, device->getRefApiCount());
+        EXPECT_EQ(baseDeviceInternalRefCount, device->getRefInternalCount());
+        EXPECT_EQ(baseSubDeviceApiRefCount, subDevice->getRefApiCount());
+        EXPECT_EQ(baseSubDeviceInternalRefCount, subDevice->getRefInternalCount());
+        EXPECT_EQ(baseDefaultDeviceApiRefCount, defaultDevice->getRefApiCount());
+        EXPECT_EQ(baseDefaultDeviceInternalRefCount, defaultDevice->getRefInternalCount());
+    }
 }
 
 TEST(SubDevicesTest, givenDeviceWithSubDevicesWhenSubDeviceInternalRefCountsAreChangedThenChangeIsPropagatedToRootDevice) {
@@ -176,7 +183,6 @@ TEST(SubDevicesTest, givenClDeviceWithSubDevicesWhenSubDeviceInternalRefCountsAr
     debugManager.flags.CreateMultipleSubDevices.set(2);
     VariableBackup<bool> mockDeviceFlagBackup(&MockDevice::createSingleDevice, false);
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
-    device->getExecutionEnvironment()->setExposeSubDevicesAsDevices(false);
     device->incRefInternal();
     auto &subDevice = device->subDevices[0];
 

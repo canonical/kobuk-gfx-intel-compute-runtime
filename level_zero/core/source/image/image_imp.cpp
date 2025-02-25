@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -25,8 +25,38 @@
 #include "igfxfmid.h"
 
 namespace L0 {
-
 ImageAllocatorFn imageFactory[IGFX_MAX_PRODUCT] = {};
+
+bool isImportedWin32Handle(const ze_image_desc_t *imgDesc) {
+    const ze_base_desc_t *extendedDesc = reinterpret_cast<const ze_base_desc_t *>(imgDesc->pNext);
+    bool importedWin32Handle = false;
+    while (extendedDesc) {
+        if (extendedDesc->stype == ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_WIN32) {
+            importedWin32Handle = true;
+        }
+        extendedDesc = reinterpret_cast<const ze_base_desc_t *>(extendedDesc->pNext);
+    }
+    return importedWin32Handle;
+}
+
+void getImageDescriptorFor3ChEmulation(const ze_image_desc_t *origImgDesc, ze_image_desc_t *imgDesc) {
+    *imgDesc = *origImgDesc;
+    if (origImgDesc->format.layout == ZE_IMAGE_FORMAT_LAYOUT_16_16_16) {
+        imgDesc->format.layout = ZE_IMAGE_FORMAT_LAYOUT_16_16_16_16;
+        imgDesc->format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+        imgDesc->format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+        imgDesc->format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+        imgDesc->format.w = ZE_IMAGE_FORMAT_SWIZZLE_1;
+    }
+    if (origImgDesc->format.layout == ZE_IMAGE_FORMAT_LAYOUT_8_8_8) {
+        imgDesc->format.layout = ZE_IMAGE_FORMAT_LAYOUT_8_8_8_8;
+        imgDesc->format.x = ZE_IMAGE_FORMAT_SWIZZLE_R;
+        imgDesc->format.y = ZE_IMAGE_FORMAT_SWIZZLE_G;
+        imgDesc->format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
+        imgDesc->format.w = ZE_IMAGE_FORMAT_SWIZZLE_1;
+    }
+    return;
+}
 
 ImageImp::~ImageImp() {
     if ((isImageView() || imageFromBuffer) && this->device != nullptr) {
@@ -86,13 +116,30 @@ ze_result_t ImageImp::createView(Device *device, const ze_image_desc_t *desc, ze
     image->imgInfo = this->imgInfo;
     image->imageFromBuffer = this->imageFromBuffer;
 
-    auto result = image->initialize(device, desc);
-
+    auto result = ZE_RESULT_SUCCESS;
+    switch (desc->format.layout) {
+    default:
+        result = image->initialize(device, desc);
+        break;
+    case ZE_IMAGE_FORMAT_LAYOUT_32_32_32:
+        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        break;
+    case ZE_IMAGE_FORMAT_LAYOUT_8_8_8:
+    case ZE_IMAGE_FORMAT_LAYOUT_16_16_16:
+        if (isImportedWin32Handle(desc)) {
+            result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        } else {
+            ze_image_desc_t imgDesc = {};
+            getImageDescriptorFor3ChEmulation(desc, &imgDesc);
+            image->setMimickedImage(true);
+            result = image->initialize(device, &imgDesc);
+        }
+        break;
+    }
     if (result != ZE_RESULT_SUCCESS) {
         image->destroy();
         image = nullptr;
     }
-
     *pImage = image;
 
     return result;
@@ -138,7 +185,25 @@ ze_result_t Image::create(uint32_t productFamily, Device *device, const ze_image
     ImageImp *image = nullptr;
     if (allocator) {
         image = static_cast<ImageImp *>((*allocator)());
-        result = image->initialize(device, desc);
+        switch (desc->format.layout) {
+        default:
+            result = image->initialize(device, desc);
+            break;
+        case ZE_IMAGE_FORMAT_LAYOUT_8_8_8:
+        case ZE_IMAGE_FORMAT_LAYOUT_16_16_16:
+            if (isImportedWin32Handle(desc)) {
+                result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+            } else {
+                ze_image_desc_t imgDesc = {};
+                getImageDescriptorFor3ChEmulation(desc, &imgDesc);
+                image->setMimickedImage(true);
+                result = image->initialize(device, &imgDesc);
+            }
+            break;
+        case ZE_IMAGE_FORMAT_LAYOUT_32_32_32:
+            result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+            break;
+        }
         if (result != ZE_RESULT_SUCCESS) {
             image->destroy();
             image = nullptr;

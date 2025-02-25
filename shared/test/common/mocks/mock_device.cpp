@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -60,6 +60,7 @@ MockDevice::MockDevice(ExecutionEnvironment *executionEnvironment, uint32_t root
     UnitTestSetter::setRcsExposure(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
     UnitTestSetter::setCcsExposure(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]);
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initGmm();
+    executionEnvironment->calculateMaxOsContextCount();
 
     if (!executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface) {
         executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface = std::make_unique<MockMemoryOperations>();
@@ -96,6 +97,21 @@ void MockDevice::resetCommandStreamReceiver(CommandStreamReceiver *newCsr, uint3
 
     registeredEngine.commandStreamReceiver = newCsr;
     allEngines[engineIndex].commandStreamReceiver = newCsr;
+
+    if (osContext->isPartOfContextGroup()) {
+        auto &secondaryEnginesForType = secondaryEngines[osContext->getEngineType()];
+        for (size_t i = 0; i < secondaryEnginesForType.engines.size(); i++) {
+            if (secondaryEnginesForType.engines[i].commandStreamReceiver == commandStreamReceivers[engineIndex].get()) {
+                secondaryEnginesForType.engines[i].commandStreamReceiver = newCsr;
+                // only primary csr is replaced
+                EXPECT_EQ(0u, i);
+            }
+            if (i > 0) {
+                secondaryEnginesForType.engines[i].commandStreamReceiver->setPrimaryCsr(newCsr);
+            }
+        }
+    }
+
     const_cast<EngineControlContainer &>(memoryManager->getRegisteredEngines(rootDeviceIndex)).emplace_back(registeredEngine);
     osContext->incRefInternal();
     newCsr->setupContext(*osContext);
@@ -121,7 +137,7 @@ ExecutionEnvironment *MockDevice::prepareExecutionEnvironment(const HardwareInfo
         UnitTestSetter::setCcsExposure(*executionEnvironment->rootDeviceEnvironments[i]);
         executionEnvironment->rootDeviceEnvironments[i]->initGmm();
     }
-    executionEnvironment->setDeviceHierarchy(executionEnvironment->rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>());
+    executionEnvironment->setDeviceHierarchyMode(executionEnvironment->rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>());
     executionEnvironment->calculateMaxOsContextCount();
     return executionEnvironment;
 }
@@ -160,7 +176,7 @@ ExecutionEnvironment *MockDevice::prepareExecutionEnvironment(const HardwareInfo
     UnitTestSetter::setRcsExposure(*executionEnvironment->rootDeviceEnvironments[0]);
     UnitTestSetter::setCcsExposure(*executionEnvironment->rootDeviceEnvironments[0]);
 
-    executionEnvironment->setDeviceHierarchy(executionEnvironment->rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>());
+    executionEnvironment->setDeviceHierarchyMode(executionEnvironment->rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>());
 
     MockAubCenterFixture::setMockAubCenter(*executionEnvironment->rootDeviceEnvironments[0]);
     executionEnvironment->initializeMemoryManager();
@@ -179,6 +195,13 @@ AILConfiguration *MockDevice::getAilConfigurationHelper() const {
         return mockAilConfigurationHelper;
     }
     return Device::getAilConfigurationHelper();
+}
+
+EngineControl *MockDevice::getSecondaryEngineCsr(EngineTypeUsage engineTypeUsage, bool allocateInterrupt) {
+    if (disableSecondaryEngines) {
+        return nullptr;
+    }
+    return RootDevice::getSecondaryEngineCsr(engineTypeUsage, allocateInterrupt);
 }
 
 bool MockSubDevice::createEngine(EngineTypeUsage engineTypeUsage) {

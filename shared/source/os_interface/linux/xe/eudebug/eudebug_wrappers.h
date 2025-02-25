@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -60,8 +60,8 @@ struct EuDebugEventExecQueuePlacements {
     uint64_t vmHandle;
     uint64_t execQueueHandle;
     uint64_t lrcHandle;
-    uint64_t numPlacements;
-    uint64_t pad;
+    uint32_t numPlacements;
+    uint32_t pad;
     uint64_t instances[];
 };
 
@@ -99,6 +99,17 @@ struct EuDebugEventVmBindOpMetadata {
 struct EuDebugEventVmBindUfence {
     struct EuDebugEvent base;
     uint64_t vmBindRefSeqno;
+};
+
+struct EuDebugEventPageFault {
+    struct EuDebugEvent base;
+    uint64_t clientHandle;
+    uint64_t execQueueHandle;
+    uint64_t lrcHandle;
+    uint32_t flags;
+    uint32_t bitmaskSize;
+    uint64_t pagefaultAddress;
+    uint8_t bitmask[];
 };
 
 struct EuDebugReadMetadata {
@@ -147,6 +158,13 @@ struct DebugMetadataCreate {
 struct DebugMetadataDestroy {
     uint64_t extensions;
     uint32_t metadataId;
+};
+
+struct XeEngineClassInstance {
+    uint16_t engineClass;
+    uint16_t engineInstance;
+    uint16_t gtId;
+    uint16_t pad;
 };
 
 struct XeUserExtension {

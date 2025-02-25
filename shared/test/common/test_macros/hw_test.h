@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -756,6 +756,18 @@ struct SupportsSampler {
     template <PRODUCT_FAMILY productFamily>
     static constexpr bool isMatched() {
         return NEO::HwMapper<productFamily>::GfxProduct::supportsSampler;
+    }
+};
+
+struct HeapfulSupportedMatch {
+
+    template <PRODUCT_FAMILY productFamily>
+    static constexpr bool isMatched() {
+        [[maybe_unused]] const GFXCORE_FAMILY gfxCoreFamily = NEO::ToGfxCoreFamily<productFamily>::get();
+        using FamilyType = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+        using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
+        constexpr bool heaplessModeEnabled = FamilyType::template isHeaplessMode<DefaultWalkerType>();
+        return !heaplessModeEnabled;
     }
 };
 

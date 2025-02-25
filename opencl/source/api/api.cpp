@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -259,8 +259,7 @@ cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id platform,
 
         cl_uint retNum = 0;
         for (auto platformDeviceIndex = 0u; platformDeviceIndex < numDev; platformDeviceIndex++) {
-            bool exposeSubDevices = pPlatform->peekExecutionEnvironment()->isExposingSubDevicesAsDevices() ||
-                                    pPlatform->peekExecutionEnvironment()->isCombinedDeviceHierarchy();
+            bool exposeSubDevices = pPlatform->peekExecutionEnvironment()->getDeviceHierarchyMode() != DeviceHierarchyMode::composite;
 
             ClDevice *device = pPlatform->getClDevice(platformDeviceIndex);
             UNRECOVERABLE_IF(device == nullptr);
@@ -2546,16 +2545,26 @@ cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue commandQueue,
             return retVal;
         }
 
-        retVal = pCommandQueue->enqueueWriteBuffer(
-            pBuffer,
-            blockingWrite,
-            offset,
-            cb,
-            ptr,
-            nullptr,
-            numEventsInWaitList,
-            eventWaitList,
-            event);
+        if (pCommandQueue->isValidForStagingTransfer(pBuffer, ptr, numEventsInWaitList > 0)) {
+            retVal = pCommandQueue->enqueueStagingWriteBuffer(
+                pBuffer,
+                blockingWrite,
+                offset,
+                cb,
+                ptr,
+                event);
+        } else {
+            retVal = pCommandQueue->enqueueWriteBuffer(
+                pBuffer,
+                blockingWrite,
+                offset,
+                cb,
+                ptr,
+                nullptr,
+                numEventsInWaitList,
+                eventWaitList,
+                event);
+        }
     }
 
     DBG_LOG_INPUTS("event", getClFileLogger().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
@@ -2965,8 +2974,8 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
             TRACING_EXIT(ClEnqueueWriteImage, &retVal);
             return retVal;
         }
-        if (pCommandQueue->isValidForStagingTransferImage(pImage, ptr, numEventsInWaitList > 0)) {
-            retVal = pCommandQueue->enqueueStagingWriteImage(pImage, blockingWrite, origin, region, inputRowPitch, inputSlicePitch, ptr, event);
+        if (pCommandQueue->isValidForStagingTransfer(pImage, ptr, numEventsInWaitList > 0)) {
+            retVal = pCommandQueue->enqueueStagingImageTransfer(CL_COMMAND_WRITE_IMAGE, pImage, blockingWrite, origin, region, inputRowPitch, inputSlicePitch, ptr, event);
         } else {
             retVal = pCommandQueue->enqueueWriteImage(
                 pImage,

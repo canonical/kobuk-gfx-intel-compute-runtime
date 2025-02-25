@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -979,7 +979,7 @@ uint32_t CommandStreamReceiverHw<GfxFamily>::getDirectSubmissionRelaxedOrderingQ
 }
 
 template <typename GfxFamily>
-TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) {
+TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, Device &device) {
     auto lock = obtainUniqueOwnership();
     bool blitterDirectSubmission = this->isBlitterDirectSubmissionEnabled();
     auto debugPauseEnabled = PauseOnGpuProperties::featureEnabled(debugManager.flags.PauseOnBlitCopy.get());
@@ -989,7 +989,7 @@ TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropert
     const bool hasStallingCmds = updateTag || !this->isEnginePrologueSent;
     const bool relaxedOrderingAllowed = bcsRelaxedOrderingAllowed(blitPropertiesContainer, hasStallingCmds);
 
-    auto estimatedCsSize = BlitCommandsHelper<GfxFamily>::estimateBlitCommandsSize(blitPropertiesContainer, profilingEnabled, debugPauseEnabled, blitterDirectSubmission,
+    auto estimatedCsSize = BlitCommandsHelper<GfxFamily>::estimateBlitCommandsSize(blitPropertiesContainer, blitPropertiesContainer[0].blitSyncProperties.isTimestampMode(), debugPauseEnabled, blitterDirectSubmission,
                                                                                    relaxedOrderingAllowed, *rootDeviceEnvironment.get());
     auto &commandStream = getCS(estimatedCsSize);
 
@@ -997,7 +997,7 @@ TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropert
     auto newTaskCount = taskCount + 1;
     latestSentTaskCount = newTaskCount;
 
-    this->initializeResources(false);
+    this->initializeResources(false, device.getPreemptionMode());
     this->initDirectSubmission();
 
     if (PauseOnGpuProperties::pauseModeAllowed(debugManager.flags.PauseOnBlitCopy.get(), taskCount, PauseOnGpuProperties::PauseMode::BeforeWorkload)) {
@@ -1037,8 +1037,8 @@ TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropert
 
         BlitCommandsHelper<GfxFamily>::encodeWa(commandStream, blitProperties, latestSentBcsWaValue);
 
-        if (blitProperties.outputTimestampPacket && profilingEnabled) {
-            BlitCommandsHelper<GfxFamily>::encodeProfilingStartMmios(commandStream, *blitProperties.outputTimestampPacket);
+        if (blitProperties.blitSyncProperties.outputTimestampPacket && blitProperties.blitSyncProperties.isTimestampMode()) {
+            BlitCommandsHelper<GfxFamily>::encodeProfilingStartMmios(commandStream, *blitProperties.blitSyncProperties.outputTimestampPacket);
         }
 
         if (debugManager.flags.FlushTlbBeforeCopy.get() == 1) {
@@ -1051,7 +1051,7 @@ TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropert
 
         BlitCommandsHelper<GfxFamily>::dispatchBlitCommands(blitProperties, commandStream, *waArgs.rootDeviceEnvironment);
 
-        if (blitProperties.outputTimestampPacket) {
+        if (blitProperties.blitSyncProperties.outputTimestampPacket) {
             bool deviceToHostPostSyncFenceRequired = getProductHelper().isDeviceToHostCopySignalingFenceRequired() &&
                                                      !blitProperties.dstAllocation->isAllocatedInLocalMemoryPool() &&
                                                      blitProperties.srcAllocation->isAllocatedInLocalMemoryPool();
@@ -1060,16 +1060,16 @@ TaskCountType CommandStreamReceiverHw<GfxFamily>::flushBcsTask(const BlitPropert
                 MemorySynchronizationCommands<GfxFamily>::addAdditionalSynchronization(commandStream, tagAllocation->getGpuAddress(), false, peekRootDeviceEnvironment());
             }
 
-            if (profilingEnabled) {
+            if (blitProperties.blitSyncProperties.isTimestampMode()) {
                 EncodeMiFlushDW<GfxFamily>::programWithWa(commandStream, 0llu, newTaskCount, args);
-                BlitCommandsHelper<GfxFamily>::encodeProfilingEndMmios(commandStream, *blitProperties.outputTimestampPacket);
+                BlitCommandsHelper<GfxFamily>::encodeProfilingEndMmios(commandStream, *blitProperties.blitSyncProperties.outputTimestampPacket);
             } else {
-                auto timestampPacketGpuAddress = TimestampPacketHelper::getContextEndGpuAddress(*blitProperties.outputTimestampPacket);
+                auto timestampPacketGpuAddress = TimestampPacketHelper::getContextEndGpuAddress(*blitProperties.blitSyncProperties.outputTimestampPacket);
                 args.commandWithPostSync = true;
 
                 EncodeMiFlushDW<GfxFamily>::programWithWa(commandStream, timestampPacketGpuAddress, 0, args);
             }
-            makeResident(*blitProperties.outputTimestampPacket->getBaseGraphicsAllocation());
+            makeResident(*blitProperties.blitSyncProperties.outputTimestampPacket->getBaseGraphicsAllocation());
         }
 
         blitProperties.csrDependencies.makeResident(*this);
@@ -1394,12 +1394,12 @@ inline bool CommandStreamReceiverHw<GfxFamily>::initDirectSubmission() {
             if (!this->isAnyDirectSubmissionEnabled()) {
                 if (EngineHelpers::isBcs(this->osContext->getEngineType())) {
                     blitterDirectSubmission = DirectSubmissionHw<GfxFamily, BlitterDispatcher<GfxFamily>>::create(*this);
-                    ret = blitterDirectSubmission->initialize(submitOnInit, this->isUsedNotifyEnableForPostSync());
+                    ret = blitterDirectSubmission->initialize(submitOnInit);
                     completionFenceValuePointer = blitterDirectSubmission->getCompletionValuePointer();
 
                 } else {
                     directSubmission = DirectSubmissionHw<GfxFamily, RenderDispatcher<GfxFamily>>::create(*this);
-                    ret = directSubmission->initialize(submitOnInit, this->isUsedNotifyEnableForPostSync());
+                    ret = directSubmission->initialize(submitOnInit);
                     completionFenceValuePointer = directSubmission->getCompletionValuePointer();
                 }
                 auto directSubmissionController = executionEnvironment.initializeDirectSubmissionController();
@@ -1575,6 +1575,7 @@ inline void CommandStreamReceiverHw<GfxFamily>::programStateBaseAddress(const In
                                                                         bool stateBaseAddressDirty) {
 
     const auto bindlessHeapsHelper = device.getBindlessHeapsHelper();
+    const bool useGlobalHeaps = bindlessHeapsHelper != nullptr;
 
     auto &hwInfo = this->peekHwInfo();
 
@@ -1582,15 +1583,15 @@ inline void CommandStreamReceiverHw<GfxFamily>::programStateBaseAddress(const In
     int64_t dynamicStateBaseAddress = 0;
     size_t dynamicStateSize = 0;
     if (hasDsh) {
-        dynamicStateBaseAddress = NEO::getStateBaseAddress(*dsh, bindlessHeapsHelper);
+        dynamicStateBaseAddress = NEO::getStateBaseAddress(*dsh, useGlobalHeaps);
         dynamicStateSize = NEO::getStateSize(*dsh, bindlessHeapsHelper);
     }
 
     int64_t surfaceStateBaseAddress = 0;
     size_t surfaceStateSize = 0;
     if (ssh != nullptr) {
-        surfaceStateBaseAddress = NEO::getStateBaseAddressForSsh(*ssh, bindlessHeapsHelper);
-        surfaceStateSize = NEO::getStateSizeForSsh(*ssh, bindlessHeapsHelper);
+        surfaceStateBaseAddress = NEO::getStateBaseAddressForSsh(*ssh, useGlobalHeaps);
+        surfaceStateSize = NEO::getStateSizeForSsh(*ssh, useGlobalHeaps);
     }
 
     bool dshDirty = hasDsh ? dshState.updateAndCheck(dsh, dynamicStateBaseAddress, dynamicStateSize) : false;

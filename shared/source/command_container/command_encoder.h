@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -104,23 +104,12 @@ enum class CompareOperation : uint32_t {
 };
 
 struct EncodeWalkerArgs {
-    EncodeWalkerArgs() = delete;
-
-    EncodeWalkerArgs(const KernelDescriptor &kernelDescriptor, KernelExecutionType kernelExecutionType, NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder,
-                     uint32_t localRegionSize, uint32_t maxFrontEndThreads, bool requiredSystemFence)
-        : kernelDescriptor(kernelDescriptor),
-          kernelExecutionType(kernelExecutionType),
-          requiredDispatchWalkOrder(requiredDispatchWalkOrder),
-          localRegionSize(localRegionSize),
-          maxFrontEndThreads(maxFrontEndThreads),
-          requiredSystemFence(requiredSystemFence) {}
-
-    const KernelDescriptor &kernelDescriptor;
     KernelExecutionType kernelExecutionType = KernelExecutionType::defaultType;
     NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder = NEO::RequiredDispatchWalkOrder::none;
     uint32_t localRegionSize = NEO::localRegionSizeParamNotSet;
     uint32_t maxFrontEndThreads = 0;
     bool requiredSystemFence = false;
+    bool hasSample = false;
 };
 
 template <typename GfxFamily>
@@ -181,7 +170,7 @@ struct EncodeDispatchKernel {
     static bool inlineDataProgrammingRequired(const KernelDescriptor &kernelDesc);
 
     template <typename InterfaceDescriptorType>
-    static void programBarrierEnable(InterfaceDescriptorType &interfaceDescriptor, uint32_t value, const HardwareInfo &hwInfo);
+    static void programBarrierEnable(InterfaceDescriptorType &interfaceDescriptor, const KernelDescriptor &kernelDescriptor, const HardwareInfo &hwInfo);
 
     template <typename WalkerType, typename InterfaceDescriptorType>
     static void encodeThreadGroupDispatch(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo,
@@ -197,7 +186,7 @@ struct EncodeDispatchKernel {
     static void setupPostSyncForRegularEvent(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
 
     template <typename WalkerType>
-    static void setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder);
+    static void setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t threadGroupCount, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder);
 
     template <typename WalkerType>
     static void setupPostSyncForInOrderExec(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
@@ -243,8 +232,8 @@ struct EncodeDispatchKernel {
     static void overrideDefaultValues(WalkerType &walkerCmd, InterfaceDescriptorType &interfaceDescriptor);
     template <typename WalkerType>
     static void encodeWalkerPostSyncFields(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs);
-    template <typename WalkerType>
-    static void encodeComputeDispatchAllWalker(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs);
+    template <typename WalkerType, typename InterfaceDescriptorType>
+    static void encodeComputeDispatchAllWalker(WalkerType &walkerCmd, const InterfaceDescriptorType *idd, const RootDeviceEnvironment &rootDeviceEnvironment, const EncodeWalkerArgs &walkerArgs);
 };
 
 template <typename GfxFamily>

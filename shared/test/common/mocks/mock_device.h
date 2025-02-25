@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -33,6 +33,7 @@ extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executio
 struct MockSubDevice : public SubDevice {
     using Device::allEngines;
     using Device::createEngines;
+    using Device::maxAllocationsSavedForReuseSize;
     using SubDevice::getDeviceBitfield;
     using SubDevice::getGlobalMemorySize;
     using SubDevice::SubDevice;
@@ -66,6 +67,8 @@ class MockDevice : public RootDevice {
     using Device::generateUuidFromPciBusInfo;
     using Device::getGlobalMemorySize;
     using Device::initializeCaps;
+    using Device::initUsmReuseMaxSize;
+    using Device::maxAllocationsSavedForReuseSize;
     using Device::maxBufferPoolCount;
     using Device::microsecondResolution;
     using Device::preemptionMode;
@@ -179,6 +182,8 @@ class MockDevice : public RootDevice {
         return getGlobalMemorySizeReturn;
     }
 
+    EngineControl *getSecondaryEngineCsr(EngineTypeUsage engineTypeUsage, bool allocateInterrupt) override;
+
     static ExecutionEnvironment *prepareExecutionEnvironment(const HardwareInfo *pHwInfo);
     static decltype(&createCommandStream) createCommandStreamReceiverFunc;
 
@@ -192,6 +197,7 @@ class MockDevice : public RootDevice {
     AILConfiguration *mockAilConfigurationHelper = nullptr;
     uint64_t getGlobalMemorySizeReturn = 0u;
     bool callBaseGetGlobalMemorySize = true;
+    bool disableSecondaryEngines = false;
 };
 
 template <>

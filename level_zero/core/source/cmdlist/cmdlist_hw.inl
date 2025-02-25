@@ -195,7 +195,7 @@ void CommandListCoreFamily<gfxCoreFamily>::handleInOrderDependencyCounter(Event 
     this->commandContainer.addToResidencyContainer(inOrderExecInfo->getHostCounterAllocation());
 
     if (signalEvent) {
-        if (signalEvent->isCounterBased() || nonWalkerInOrderCmdsChaining) {
+        if (signalEvent->isCounterBased() || nonWalkerInOrderCmdsChaining || (isImmediateType() && this->duplicatedInOrderCounterStorageEnabled)) {
             signalEvent->updateInOrderExecState(inOrderExecInfo, inOrderExecInfo->getCounterValue(), inOrderExecInfo->getAllocationOffset());
         } else {
             signalEvent->unsetInOrderExecInfo();
@@ -695,7 +695,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyFromMemoryExt(z
 
     auto image = Image::fromHandle(hDstImage);
     auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
-
     Vec3<size_t> imgSize = {image->getImageDesc().width,
                             image->getImageDesc().height,
                             image->getImageDesc().depth};
@@ -718,7 +717,18 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyFromMemoryExt(z
     }
 
     if (srcRowPitch == 0) {
-        srcRowPitch = pDstRegion->width * bytesPerPixel;
+        if (image->isMimickedImage()) {
+            uint32_t srcBytesPerPixel = bytesPerPixel;
+            if (bytesPerPixel == 8) {
+                srcBytesPerPixel = 6;
+            }
+            if (bytesPerPixel == 4) {
+                srcBytesPerPixel = 3;
+            }
+            srcRowPitch = pDstRegion->width * srcBytesPerPixel;
+        } else {
+            srcRowPitch = pDstRegion->width * bytesPerPixel;
+        }
     }
     if (srcSlicePitch == 0) {
         srcSlicePitch = (image->getImageInfo().imgDesc.imageType == NEO::ImageType::image1DArray ? 1 : pDstRegion->height) * srcRowPitch;
@@ -743,6 +753,9 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyFromMemoryExt(z
     }
 
     if (isCopyOnly(false)) {
+        if ((bytesPerPixel == 3) || (bytesPerPixel == 6) || image->isMimickedImage()) {
+            return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        }
         size_t imgRowPitch = image->getImageInfo().rowPitch;
         size_t imgSlicePitch = image->getImageInfo().slicePitch;
         auto status = appendCopyImageBlit(allocationStruct.alloc, image->getAllocation(),
@@ -763,10 +776,18 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyFromMemoryExt(z
         builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d2Bytes>(isHeaplessEnabled);
         break;
     case 4u:
-        builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d4Bytes>(isHeaplessEnabled);
+        if (image->isMimickedImage()) {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d3To4Bytes>(isHeaplessEnabled);
+        } else {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d4Bytes>(isHeaplessEnabled);
+        }
         break;
     case 8u:
-        builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d8Bytes>(isHeaplessEnabled);
+        if (image->isMimickedImage()) {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d6To8Bytes>(isHeaplessEnabled);
+        } else {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d8Bytes>(isHeaplessEnabled);
+        }
         break;
     case 16u:
         builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyBufferToImage3d16Bytes>(isHeaplessEnabled);
@@ -868,7 +889,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyToMemoryExt(voi
 
     auto image = Image::fromHandle(hSrcImage);
     auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
-
     Vec3<size_t> imgSize = {image->getImageDesc().width,
                             image->getImageDesc().height,
                             image->getImageDesc().depth};
@@ -891,7 +911,18 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyToMemoryExt(voi
     }
 
     if (destRowPitch == 0) {
-        destRowPitch = pSrcRegion->width * bytesPerPixel;
+        if (image->isMimickedImage()) {
+            uint32_t destBytesPerPixel = bytesPerPixel;
+            if (bytesPerPixel == 8) {
+                destBytesPerPixel = 6;
+            }
+            if (bytesPerPixel == 4) {
+                destBytesPerPixel = 3;
+            }
+            destRowPitch = pSrcRegion->width * destBytesPerPixel;
+        } else {
+            destRowPitch = pSrcRegion->width * bytesPerPixel;
+        }
     }
     if (destSlicePitch == 0) {
         destSlicePitch = (image->getImageInfo().imgDesc.imageType == NEO::ImageType::image1DArray ? 1 : pSrcRegion->height) * destRowPitch;
@@ -916,7 +947,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyToMemoryExt(voi
     }
 
     if (isCopyOnly(false)) {
-        if ((bytesPerPixel == 3) || (bytesPerPixel == 6)) {
+        if ((bytesPerPixel == 3) || (bytesPerPixel == 6) || image->isMimickedImage()) {
             return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
         }
         size_t imgRowPitch = image->getImageInfo().rowPitch;
@@ -943,13 +974,21 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyToMemoryExt(voi
         builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer3Bytes>(isHeaplessEnabled);
         break;
     case 4u:
-        builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer4Bytes>(isHeaplessEnabled);
+        if (image->isMimickedImage()) {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer4To3Bytes>(isHeaplessEnabled);
+        } else {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer4Bytes>(isHeaplessEnabled);
+        }
         break;
     case 6u:
         builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer6Bytes>(isHeaplessEnabled);
         break;
     case 8u:
-        builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer8Bytes>(isHeaplessEnabled);
+        if (image->isMimickedImage()) {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer8To6Bytes>(isHeaplessEnabled);
+        } else {
+            builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer8Bytes>(isHeaplessEnabled);
+        }
         break;
     case 16u:
         builtInType = BuiltinTypeHelper::adjustImageBuiltinType<ImageBuiltin::copyImage3dToBuffer16Bytes>(isHeaplessEnabled);
@@ -1678,6 +1717,8 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendMemoryCopy(void *dstptr,
             if ((!signalEvent || !signalEvent->getAllocation(this->device)) && !isCopyOnlyEnabled) {
                 NEO::PipeControlArgs args;
                 args.dcFlushEnable = dcFlush;
+
+                NEO::MemorySynchronizationCommands<GfxFamily>::setPostSyncExtraProperties(args);
                 NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
             }
             appendSignalInOrderDependencyCounter(signalEvent, isCopyOnlyEnabled, false);
@@ -2225,6 +2266,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendMemoryFill(void *ptr,
             if (!signalEvent || !signalEvent->getAllocation(this->device)) {
                 NEO::PipeControlArgs args;
                 args.dcFlushEnable = dcFlush;
+                NEO::MemorySynchronizationCommands<GfxFamily>::setPostSyncExtraProperties(args);
                 NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
             }
             appendSignalInOrderDependencyCounter(signalEvent, false, false);
@@ -2586,74 +2628,87 @@ void CommandListCoreFamily<gfxCoreFamily>::appendWaitOnInOrderDependency(std::sh
             NEO::EncodeBatchBufferStartOrEnd<GfxFamily>::programConditionalDataMemBatchBufferStart(*commandContainer.getCommandStream(), 0, gpuAddress, waitValue, NEO::CompareOperation::less, true, isQwordInOrderCounter(), isCopyOnly(copyOffloadOperation));
 
         } else {
-            using MI_SEMAPHORE_WAIT = typename GfxFamily::MI_SEMAPHORE_WAIT;
-            using MI_LOAD_REGISTER_IMM = typename GfxFamily::MI_LOAD_REGISTER_IMM;
+            auto resolveDependenciesViaPipeControls = !this->isCopyOnly(copyOffloadOperation) && !this->asMutable() && implicitDependency && this->dcFlushSupport;
 
-            bool indirectMode = false;
+            if (NEO::debugManager.flags.ResolveDependenciesViaPipeControls.get() != -1) {
+                resolveDependenciesViaPipeControls = NEO::debugManager.flags.ResolveDependenciesViaPipeControls.get();
+            }
 
-            size_t inOrderPatchListIndex = std::numeric_limits<size_t>::max();
-            if (isQwordInOrderCounter()) {
-                indirectMode = true;
+            if (resolveDependenciesViaPipeControls) {
+                NEO::PipeControlArgs args;
+                args.csStallOnly = true;
+                NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
+                break;
+            } else {
+                using MI_SEMAPHORE_WAIT = typename GfxFamily::MI_SEMAPHORE_WAIT;
+                using MI_LOAD_REGISTER_IMM = typename GfxFamily::MI_LOAD_REGISTER_IMM;
 
-                constexpr uint32_t firstRegister = RegisterOffsets::csGprR0;
-                constexpr uint32_t secondRegister = RegisterOffsets::csGprR0 + 4;
+                bool indirectMode = false;
 
-                auto lri1 = commandContainer.getCommandStream()->template getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
-                auto lri2 = commandContainer.getCommandStream()->template getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
+                size_t inOrderPatchListIndex = std::numeric_limits<size_t>::max();
+                if (isQwordInOrderCounter()) {
+                    indirectMode = true;
 
-                if (!noopDispatch) {
-                    NEO::LriHelper<GfxFamily>::program(lri1, firstRegister, getLowPart(waitValue), true, isCopyOnly(copyOffloadOperation));
-                    NEO::LriHelper<GfxFamily>::program(lri2, secondRegister, getHighPart(waitValue), true, isCopyOnly(copyOffloadOperation));
-                } else {
-                    memset(lri1, 0, sizeof(MI_LOAD_REGISTER_IMM));
-                    memset(lri2, 0, sizeof(MI_LOAD_REGISTER_IMM));
+                    constexpr uint32_t firstRegister = RegisterOffsets::csGprR0;
+                    constexpr uint32_t secondRegister = RegisterOffsets::csGprR0 + 4;
+
+                    auto lri1 = commandContainer.getCommandStream()->template getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
+                    auto lri2 = commandContainer.getCommandStream()->template getSpaceForCmd<MI_LOAD_REGISTER_IMM>();
+
+                    if (!noopDispatch) {
+                        NEO::LriHelper<GfxFamily>::program(lri1, firstRegister, getLowPart(waitValue), true, isCopyOnly(copyOffloadOperation));
+                        NEO::LriHelper<GfxFamily>::program(lri2, secondRegister, getHighPart(waitValue), true, isCopyOnly(copyOffloadOperation));
+                    } else {
+                        memset(lri1, 0, sizeof(MI_LOAD_REGISTER_IMM));
+                        memset(lri2, 0, sizeof(MI_LOAD_REGISTER_IMM));
+                    }
+
+                    if (inOrderExecInfo->isRegularCmdList()) {
+                        inOrderPatchListIndex = addCmdForPatching((implicitDependency ? nullptr : &inOrderExecInfo), lri1, lri2, waitValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::lri64b);
+                        if (noopDispatch) {
+                            disablePatching(inOrderPatchListIndex);
+                        }
+                    }
+                    if (outListCommands != nullptr) {
+                        auto &lri1ToPatch = outListCommands->emplace_back();
+                        lri1ToPatch.type = CommandToPatch::CbWaitEventLoadRegisterImm;
+                        lri1ToPatch.pDestination = lri1;
+                        lri1ToPatch.inOrderPatchListIndex = inOrderPatchListIndex;
+                        lri1ToPatch.offset = firstRegister;
+
+                        auto &lri2ToPatch = outListCommands->emplace_back();
+                        lri2ToPatch.type = CommandToPatch::CbWaitEventLoadRegisterImm;
+                        lri2ToPatch.pDestination = lri2;
+                        lri2ToPatch.inOrderPatchListIndex = inOrderPatchListIndex;
+                        lri2ToPatch.offset = secondRegister;
+                    }
                 }
 
-                if (inOrderExecInfo->isRegularCmdList()) {
-                    inOrderPatchListIndex = addCmdForPatching((implicitDependency ? nullptr : &inOrderExecInfo), lri1, lri2, waitValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::lri64b);
+                auto semaphoreCommand = reinterpret_cast<MI_SEMAPHORE_WAIT *>(commandContainer.getCommandStream()->getSpace(sizeof(MI_SEMAPHORE_WAIT)));
+
+                if (!noopDispatch) {
+                    NEO::EncodeSemaphore<GfxFamily>::programMiSemaphoreWait(semaphoreCommand, gpuAddress, waitValue, COMPARE_OPERATION::COMPARE_OPERATION_SAD_GREATER_THAN_OR_EQUAL_SDD,
+                                                                            false, true, isQwordInOrderCounter(), indirectMode, false);
+                } else {
+                    memset(semaphoreCommand, 0, sizeof(MI_SEMAPHORE_WAIT));
+                }
+
+                if (inOrderExecInfo->isRegularCmdList() && !isQwordInOrderCounter()) {
+                    inOrderPatchListIndex = addCmdForPatching((implicitDependency ? nullptr : &inOrderExecInfo), semaphoreCommand, nullptr, waitValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::semaphore);
                     if (noopDispatch) {
                         disablePatching(inOrderPatchListIndex);
                     }
+                } else {
+                    inOrderPatchListIndex = std::numeric_limits<size_t>::max();
                 }
+
                 if (outListCommands != nullptr) {
-                    auto &lri1ToPatch = outListCommands->emplace_back();
-                    lri1ToPatch.type = CommandToPatch::CbWaitEventLoadRegisterImm;
-                    lri1ToPatch.pDestination = lri1;
-                    lri1ToPatch.inOrderPatchListIndex = inOrderPatchListIndex;
-                    lri1ToPatch.offset = firstRegister;
-
-                    auto &lri2ToPatch = outListCommands->emplace_back();
-                    lri2ToPatch.type = CommandToPatch::CbWaitEventLoadRegisterImm;
-                    lri2ToPatch.pDestination = lri2;
-                    lri2ToPatch.inOrderPatchListIndex = inOrderPatchListIndex;
-                    lri2ToPatch.offset = secondRegister;
+                    auto &semaphoreWaitPatch = outListCommands->emplace_back();
+                    semaphoreWaitPatch.type = CommandToPatch::CbWaitEventSemaphoreWait;
+                    semaphoreWaitPatch.pDestination = semaphoreCommand;
+                    semaphoreWaitPatch.offset = i * immWriteOffset;
+                    semaphoreWaitPatch.inOrderPatchListIndex = inOrderPatchListIndex;
                 }
-            }
-
-            auto semaphoreCommand = reinterpret_cast<MI_SEMAPHORE_WAIT *>(commandContainer.getCommandStream()->getSpace(sizeof(MI_SEMAPHORE_WAIT)));
-
-            if (!noopDispatch) {
-                NEO::EncodeSemaphore<GfxFamily>::programMiSemaphoreWait(semaphoreCommand, gpuAddress, waitValue, COMPARE_OPERATION::COMPARE_OPERATION_SAD_GREATER_THAN_OR_EQUAL_SDD,
-                                                                        false, true, isQwordInOrderCounter(), indirectMode, false);
-            } else {
-                memset(semaphoreCommand, 0, sizeof(MI_SEMAPHORE_WAIT));
-            }
-
-            if (inOrderExecInfo->isRegularCmdList() && !isQwordInOrderCounter()) {
-                inOrderPatchListIndex = addCmdForPatching((implicitDependency ? nullptr : &inOrderExecInfo), semaphoreCommand, nullptr, waitValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::semaphore);
-                if (noopDispatch) {
-                    disablePatching(inOrderPatchListIndex);
-                }
-            } else {
-                inOrderPatchListIndex = std::numeric_limits<size_t>::max();
-            }
-
-            if (outListCommands != nullptr) {
-                auto &semaphoreWaitPatch = outListCommands->emplace_back();
-                semaphoreWaitPatch.type = CommandToPatch::CbWaitEventSemaphoreWait;
-                semaphoreWaitPatch.pDestination = semaphoreCommand;
-                semaphoreWaitPatch.offset = i * immWriteOffset;
-                semaphoreWaitPatch.inOrderPatchListIndex = inOrderPatchListIndex;
             }
         }
 
@@ -2731,6 +2786,10 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendWaitOnEvents(uint32_t nu
                                                                                 isCbEventBoundToCmdList(event), copyOffloadOperation);
 
             continue;
+        }
+
+        if (!isImmediateType()) {
+            event->disableImplicitCounterBasedMode();
         }
 
         if (!skipAddingWaitEventsToResidency) {
@@ -2934,7 +2993,7 @@ void CommandListCoreFamily<gfxCoreFamily>::appendWriteKernelTimestamp(Event *eve
         outTimeStampSyncCmds->push_back(ctxCmd);
     }
 
-    adjustWriteKernelTimestamp(globalAddress, contextAddress, baseAddr, outTimeStampSyncCmds, maskLsb, mask, workloadPartition, copyOperation);
+    adjustWriteKernelTimestamp(globalAddress, contextAddress, baseAddr, outTimeStampSyncCmds, workloadPartition, copyOperation);
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -3267,6 +3326,7 @@ void CommandListCoreFamily<gfxCoreFamily>::updateStreamPropertiesForRegularComma
     auto &kernelAttributes = kernel.getKernelDescriptor().kernelAttributes;
 
     const auto bindlessHeapsHelper = device->getNEODevice()->getBindlessHeapsHelper();
+    const bool useGlobalHeaps = bindlessHeapsHelper != nullptr;
 
     KernelImp &kernelImp = static_cast<KernelImp &>(kernel);
 
@@ -3279,8 +3339,8 @@ void CommandListCoreFamily<gfxCoreFamily>::updateStreamPropertiesForRegularComma
         if (currentSurfaceStateBaseAddress == NEO::StreamProperty64::initValue || commandContainer.isHeapDirty(NEO::IndirectHeap::Type::surfaceState)) {
             auto ssh = commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::surfaceState);
             if (ssh) {
-                currentSurfaceStateBaseAddress = NEO::getStateBaseAddressForSsh(*ssh, bindlessHeapsHelper);
-                currentSurfaceStateSize = NEO::getStateSizeForSsh(*ssh, bindlessHeapsHelper);
+                currentSurfaceStateBaseAddress = NEO::getStateBaseAddressForSsh(*ssh, useGlobalHeaps);
+                currentSurfaceStateSize = NEO::getStateSizeForSsh(*ssh, useGlobalHeaps);
 
                 currentBindingTablePoolBaseAddress = currentSurfaceStateBaseAddress;
                 currentBindingTablePoolSize = currentSurfaceStateSize;
@@ -3293,8 +3353,8 @@ void CommandListCoreFamily<gfxCoreFamily>::updateStreamPropertiesForRegularComma
         if (this->dynamicHeapRequired && (currentDynamicStateBaseAddress == NEO::StreamProperty64::initValue || commandContainer.isHeapDirty(NEO::IndirectHeap::Type::dynamicState))) {
             auto dsh = commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::dynamicState);
 
-            currentDynamicStateBaseAddress = NEO::getStateBaseAddress(*dsh, bindlessHeapsHelper);
-            currentDynamicStateSize = NEO::getStateSize(*dsh, bindlessHeapsHelper);
+            currentDynamicStateBaseAddress = NEO::getStateBaseAddress(*dsh, useGlobalHeaps);
+            currentDynamicStateSize = NEO::getStateSize(*dsh, useGlobalHeaps);
 
             checkDsh = true;
         }
@@ -3811,6 +3871,20 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendWriteToMemory(void *desc
     handleInOrderDependencyCounter(nullptr, false, false);
 
     return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendWaitExternalSemaphores(uint32_t numExternalSemaphores, const ze_intel_external_semaphore_exp_handle_t *hSemaphores,
+                                                                               const ze_intel_external_semaphore_wait_params_exp_t *params, ze_event_handle_t hSignalEvent,
+                                                                               uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
+    return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendSignalExternalSemaphores(size_t numExternalSemaphores, const ze_intel_external_semaphore_exp_handle_t *hSemaphores,
+                                                                                 const ze_intel_external_semaphore_signal_params_exp_t *params, ze_event_handle_t hSignalEvent,
+                                                                                 uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
+    return ZE_RESULT_ERROR_INVALID_ARGUMENT;
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>

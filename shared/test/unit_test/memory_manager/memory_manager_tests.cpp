@@ -2169,6 +2169,8 @@ TEST_F(MemoryManagerWithCsrTest, givenAllocationThatWasUsedAndIsCompletedWhenche
 
 TEST_F(MemoryManagerWithCsrTest, givenAllocationThatWasUsedAndIsNotCompletedWhencheckGpuUsageAndDestroyGraphicsAllocationsIsCalledThenItIsAddedToTemporaryAllocationList) {
     auto &gfxCoreHelper = csr->getGfxCoreHelper();
+    csr->initializeTagAllocation();
+
     memoryManager->createAndRegisterOsContext(csr.get(), EngineDescriptorHelper::getDefaultDescriptor(gfxCoreHelper.getGpgpuEngineInstances(*executionEnvironment.rootDeviceEnvironments[0])[0],
                                                                                                       PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
     auto usedAllocationAndNotGpuCompleted = memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{csr->getRootDeviceIndex(), MemoryConstants::pageSize});
@@ -2351,7 +2353,8 @@ HWTEST_F(GraphicsAllocationDestroyTests, givenAllocationUsedOnlyByNonDefaultCsrW
 
     memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(graphicsAllocation);
     EXPECT_NE(nullptr, nonDefaultCsr->getInternalAllocationStorage()->getDeferredAllocations().peekHead());
-    (*nonDefaultCsr->getTagAddress())++;
+    auto newTag = *nonDefaultCsr->getTagAddress() + 1;
+    (*nonDefaultCsr->getTagAddress()) = newTag;
     // no need to call freeGraphicsAllocation
 }
 
@@ -2374,7 +2377,8 @@ HWTEST_F(GraphicsAllocationDestroyTests, givenAllocationUsedOnlyByNonDefaultDevi
     memoryManager->checkGpuUsageAndDestroyGraphicsAllocations(graphicsAllocation);
     EXPECT_FALSE(nonDefaultCommandStreamReceiver.getInternalAllocationStorage()->getDeferredAllocations().peekIsEmpty());
     EXPECT_TRUE(nonDefaultCommandStreamReceiver.getInternalAllocationStorage()->getTemporaryAllocations().peekIsEmpty());
-    (*nonDefaultCommandStreamReceiver.getTagAddress())++;
+    auto newTag = *nonDefaultCommandStreamReceiver.getTagAddress() + 1;
+    (*nonDefaultCommandStreamReceiver.getTagAddress()) = newTag;
     // no need to call freeGraphicsAllocation
 }
 
@@ -3309,7 +3313,7 @@ TEST(MemoryManagerTest, givenMemoryAllocationWhenFreedThenFreeCalledOnMemoryOper
     auto memoryAllocation = memoryManager.allocateGraphicsMemoryWithProperties(allocationProperties);
     EXPECT_NE(nullptr, memoryAllocation);
 
-    memoryOperationsHandler->makeResident(device.get(), ArrayRef<GraphicsAllocation *>(&memoryAllocation, 1), false);
+    memoryOperationsHandler->makeResident(device.get(), ArrayRef<GraphicsAllocation *>(&memoryAllocation, 1), false, false);
 
     EXPECT_EQ(1u, memoryOperationsHandler->residentAllocations.size());
 

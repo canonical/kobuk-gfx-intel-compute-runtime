@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -128,6 +128,7 @@ class ProductHelper {
     virtual bool isPageFaultSupported() const = 0;
     virtual bool isKmdMigrationSupported() const = 0;
     virtual bool isDisableScratchPagesSupported() const = 0;
+    virtual bool areSecondaryContextsSupported() const = 0;
     virtual bool isTile64With3DSurfaceOnBCSSupported(const HardwareInfo &hwInfo) const = 0;
     virtual bool isDcFlushAllowed() const = 0;
     virtual bool isDcFlushMitigated() const = 0;
@@ -145,8 +146,10 @@ class ProductHelper {
     virtual bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const = 0;
+    virtual void adjustScratchSize(size_t &requiredScratchSize) const = 0;
     virtual size_t getSvmCpuAlignment() const = 0;
     virtual bool isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const = 0;
+    virtual bool adjustDispatchAllRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isVmBindPatIndexProgrammingSupported() const = 0;
     virtual bool isIpSamplingSupported(const HardwareInfo &hwInfo) const = 0;
     virtual bool isGrfNumReportedWithScm() const = 0;

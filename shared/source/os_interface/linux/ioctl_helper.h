@@ -75,6 +75,8 @@ struct VmBindParams {
     uint64_t userFence;
     uint64_t patIndex;
     uint64_t userptr;
+    bool sharedSystemUsmEnabled;
+    bool sharedSystemUsmBind;
 };
 
 struct UuidRegisterResult {
@@ -132,7 +134,7 @@ class IoctlHelper {
     virtual bool setGemTiling(void *setTiling) = 0;
     virtual bool getGemTiling(void *setTiling) = 0;
     virtual uint32_t getDirectSubmissionFlag() = 0;
-    virtual std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) = 0;
+    virtual std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint64_t cookie) = 0;
     virtual uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLockedMemory, bool readOnlyResource) = 0;
     virtual int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) = 0;
     virtual uint16_t getWaitUserFenceSoftFlag() = 0;
@@ -218,6 +220,7 @@ class IoctlHelper {
 
     virtual void insertEngineToContextParams(ContextParamEngines<> &contextParamEngines, uint32_t engineId, const EngineClassInstance *engineClassInstance, uint32_t tileId, bool hasVirtualEngines) = 0;
     virtual bool isPreemptionSupported() = 0;
+    virtual int getTileIdFromGtId(int gtId) const = 0;
 
     virtual bool allocateInterrupt(uint32_t &outHandle) { return false; }
     virtual bool releaseInterrupt(uint32_t handle) { return false; }
@@ -235,6 +238,8 @@ class IoctlHelper {
 
     virtual bool isTimestampsRefreshEnabled() { return false; }
 
+    virtual bool makeResidentBeforeLockNeeded() const { return false; }
+
   protected:
     Drm &drm;
     ExternalCtx *externalCtx = nullptr;
@@ -244,8 +249,7 @@ class IoctlHelperI915 : public IoctlHelper {
   public:
     using IoctlHelper::IoctlHelper;
 
-    static bool queryDeviceIdAndRevision(const Drm &drm);
-
+    static bool queryDeviceIdAndRevision(Drm &drm);
     void fillExecObject(ExecObject &execObject, uint32_t handle, uint64_t gpuAddress, uint32_t drmContextId, bool bindInfo, bool isMarkedForCapture) override;
     void logExecObject(const ExecObject &execObject, std::stringstream &logger, size_t size) override;
     void fillExecBuffer(ExecBuffer &execBuffer, uintptr_t buffersPtr, uint32_t bufferCount, uint32_t startOffset, uint32_t size, uint64_t flags, uint32_t drmContextId) override;
@@ -270,6 +274,7 @@ class IoctlHelperI915 : public IoctlHelper {
     bool getGemTiling(void *setTiling) override;
     bool setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) override;
     void insertEngineToContextParams(ContextParamEngines<> &contextParamEngines, uint32_t engineId, const EngineClassInstance *engineClassInstance, uint32_t tileId, bool hasVirtualEngines) override;
+    int getTileIdFromGtId(int gtId) const override { return -1; }
 
   protected:
     virtual std::vector<MemoryRegion> translateToMemoryRegions(const std::vector<uint64_t> &regionInfo);
@@ -303,7 +308,7 @@ class IoctlHelperUpstream : public IoctlHelperI915 {
     bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) override;
     bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) override;
     uint32_t getDirectSubmissionFlag() override;
-    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) override;
+    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint64_t cookie) override;
     uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLockedMemory, bool readOnlyResource) override;
     int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) override;
     uint16_t getWaitUserFenceSoftFlag() override;
@@ -380,7 +385,7 @@ class IoctlHelperPrelim20 : public IoctlHelperI915 {
     bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) override;
     bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) override;
     uint32_t getDirectSubmissionFlag() override;
-    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) override;
+    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint64_t cookie) override;
     uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLockedMemory, bool readOnlyResource) override;
     int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) override;
     uint16_t getWaitUserFenceSoftFlag() override;

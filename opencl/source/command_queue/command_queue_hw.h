@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -291,6 +291,16 @@ class CommandQueueHw : public CommandQueue {
                               const cl_event *eventWaitList,
                               cl_event *event) override;
 
+    cl_int enqueueWriteBufferImpl(Buffer *buffer,
+                                  cl_bool blockingWrite,
+                                  size_t offset,
+                                  size_t cb,
+                                  const void *ptr,
+                                  GraphicsAllocation *mapAllocation,
+                                  cl_uint numEventsInWaitList,
+                                  const cl_event *eventWaitList,
+                                  cl_event *event, CommandStreamReceiver &csr) override;
+
     cl_int enqueueWriteBufferRect(Buffer *buffer,
                                   cl_bool blockingWrite,
                                   const size_t *bufferOrigin,
@@ -447,12 +457,12 @@ class CommandQueueHw : public CommandQueue {
                                                      LinearStream *commandStream,
                                                      EventsRequest &eventsRequest,
                                                      CsrDependencies &csrDeps);
-    BlitProperties processDispatchForBlitEnqueue(CommandStreamReceiver &blitCommandStreamReceiver,
-                                                 const MultiDispatchInfo &multiDispatchInfo,
-                                                 TimestampPacketDependencies &timestampPacketDependencies,
-                                                 const EventsRequest &eventsRequest,
-                                                 LinearStream *commandStream,
-                                                 uint32_t commandType, bool queueBlocked, TagNodeBase *multiRootDeviceEventSync);
+    MOCKABLE_VIRTUAL BlitProperties processDispatchForBlitEnqueue(CommandStreamReceiver &blitCommandStreamReceiver,
+                                                                  const MultiDispatchInfo &multiDispatchInfo,
+                                                                  TimestampPacketDependencies &timestampPacketDependencies,
+                                                                  const EventsRequest &eventsRequest,
+                                                                  LinearStream *commandStream,
+                                                                  uint32_t commandType, bool queueBlocked, bool profilingEnabled, TagNodeBase *multiRootDeviceEventSync);
     void submitCacheFlush(Surface **surfaces,
                           size_t numSurfaces,
                           LinearStream *commandStream,

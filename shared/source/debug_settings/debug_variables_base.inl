@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -41,6 +41,7 @@ DECLARE_DEBUG_VARIABLE(bool, AUBDumpAllocsOnEnqueueSVMMemcpyOnly, false, "Force 
 DECLARE_DEBUG_VARIABLE(bool, AUBDumpForceAllToLocalMemory, false, "Force placing every allocation in local memory address space")
 DECLARE_DEBUG_VARIABLE(bool, GenerateAubFilePerProcessId, true, "Generate aub file with process id")
 DECLARE_DEBUG_VARIABLE(bool, SetBufferHostMemoryAlwaysAubWritable, false, "Make buffer host memory allocation always uploaded to AUB/TBX")
+DECLARE_DEBUG_VARIABLE(bool, EnableTbxPageFaultManager, false, "Enables experiemental page fault manager for host buffer types, improves upon SetBufferHostMemoryAlwaysAubWritable")
 
 /*DEBUG FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, EnableSWTags, false, "Enable software tagging in batch buffer")
@@ -305,6 +306,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, DebugUmdFifoPollInterval, -1, "-1: default , > 0
 DECLARE_DEBUG_VARIABLE(int32_t, DebugUmdInterruptTimeout, -1, "-1: default , > 0: interruptTimeout based on input in milliseconds. Default is 2000 milliseconds")
 DECLARE_DEBUG_VARIABLE(int32_t, DebugUmdMaxReadWriteRetry, -1, "-1: default , > 0: max pread/pwrite retry attempts in read/writeGpuMemory calls based on input in milliseconds. Default is 3")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceIndirectDetectionForCMKernels, -1, "-1: default , 0 : disable indirect detection for CM kernels, 1 : enable indirect detection for CM kernels")
+DECLARE_DEBUG_VARIABLE(int32_t, PipelinedEuThreadArbitration, -1, "-1: default. 1: Use Walker field, 0: Use StateComputeMode command to program pipelinedEuThreadArbitration")
 DECLARE_DEBUG_VARIABLE(bool, ForceUseOnlyGlobalTimestamps, 0, "0- default disabled, 1: enable use only global timestamp")
 
 /*LOGGING FLAGS*/
@@ -376,6 +378,7 @@ DECLARE_DEBUG_VARIABLE(bool, UseNoRingFlushesKmdMode, true, "Windows only, passe
 DECLARE_DEBUG_VARIABLE(bool, DisableZeroCopyForUseHostPtr, false, "When active all buffer allocations created with CL_MEM_USE_HOST_PTR flag will not share memory with CPU.")
 DECLARE_DEBUG_VARIABLE(bool, ForceNonCoherentModeForTimestamps, false, "When active timestamp buffers are allocated in non coherent memory.")
 DECLARE_DEBUG_VARIABLE(bool, SetAssumeNotInUse, true, "Set AssumeNotInUse flag in d3d destroy allocation.")
+DECLARE_DEBUG_VARIABLE(bool, MitigateHostVisibleSignal, false, "Reset host visible signal in CB events, flush L3 when synchronize")
 DECLARE_DEBUG_VARIABLE(bool, ForceZeroCopyForUseHostPtr, false, "When active all buffer allocations created with CL_MEM_USE_HOST_PTR flag will use share memory with CPU.")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableReusingGpuTimestamps, -1, "Reuse GPU timestamp for next device time requests. -1: os-specific, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, AllowZeroCopyWithoutCoherency, -1, "Use cacheline flush instead of memory copy for map/unmap mem object")
@@ -465,7 +468,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, WaitForPagingFenceInController, -1, "Instead of 
 DECLARE_DEBUG_VARIABLE(int32_t, DirectSubmissionControllerIdleDetection, -1, "Terminate direct submission only if CSR is idle. -1: default, 0 - disable, 1 - enable.")
 /*FEATURE FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, USMEvictAfterMigration, false, "Evict USM allocation after implicit migration to GPU")
-DECLARE_DEBUG_VARIABLE(bool, RegisterPageFaultHandlerOnMigration, true, "Register handler on migration to GPU when current is not from pagefault manager")
+DECLARE_DEBUG_VARIABLE(bool, RegisterPageFaultHandlerOnMigration, false, "Register handler on migration to GPU when current is not from pagefault manager")
 DECLARE_DEBUG_VARIABLE(bool, EnableNV12, true, "Enables NV12 extension")
 DECLARE_DEBUG_VARIABLE(bool, EnablePackedYuv, true, "Enables cl_packed_yuv extension")
 DECLARE_DEBUG_VARIABLE(bool, EnableDeferredDeleter, true, "Enables async deleter")
@@ -482,6 +485,7 @@ DECLARE_DEBUG_VARIABLE(bool, ForceSamplerLowFilteringPrecision, false, "Force Lo
 DECLARE_DEBUG_VARIABLE(bool, EnablePrivateBO, false, "Enable PRELIM_I915_GEM_CREATE_EXT_VM_PRIVATE extension creating VM_PRIVATE BOs")
 DECLARE_DEBUG_VARIABLE(bool, EnableAIL, true, "Enables AIL")
 DECLARE_DEBUG_VARIABLE(bool, EnableReservingInSvmRange, true, "Enables reserving virtual memory in the SVM range")
+DECLARE_DEBUG_VARIABLE(bool, EnableDeferBacking, false, "Enables defer backing on xe kmd")
 DECLARE_DEBUG_VARIABLE(bool, DisableProgrammableMetricsSupport, false, "Disable Programmable Metrics support")
 DECLARE_DEBUG_VARIABLE(int64_t, VmBindWaitUserFenceTimeout, -1, "-1: default, >0: time in ns for wait function timeout")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceRunAloneContext, -1, "Control creation of run-alone HW context, -1:default, 0:disable, 1:enable")
@@ -561,6 +565,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, EnableFtrTile64Optimization, -1, "Control featur
 DECLARE_DEBUG_VARIABLE(int32_t, ForceTheMaximumNumberOfOutstandingRayqueriesPerSs, -1, "Set the maximum number of outstanding RayQueries per SS, -1: default, 0: 128, 1: 256, 2: 512, 3: 1024")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceDispatchTimeoutCounter, -1, "Set timeout for Synchronous Ray Tracing, -1: default, 0: 64, 1: 128, 2: 192, 3: 256, 4: 512, 5: 1024, 6: 2048, 7: 4096")
 DECLARE_DEBUG_VARIABLE(int32_t, Enable10ThreadsPerEu, -1, "Enable 10 threads per EU  HSD-18022695913, -1: default, 0: disabled, 1: enabled")
+DECLARE_DEBUG_VARIABLE(int32_t, Enable64bAddressingForRayTracing, -1, "-1: default, 0: disabled, 1: enabled. Enable support for 64 bit addressing for RayTracing HSD-14016042915")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableXe3VariableRegisterSizeAllocation, -1, "When enabled, use new Xe3 Variable Register per Thread (VRT) feature, -1: default, 0: disabled, 1: enabled")
 
 /* IMPLICIT SCALING */
 DECLARE_DEBUG_VARIABLE(int32_t, EnableWalkerPartition, -1, "-1: default, 0: disable, 1: enable, Enables Walker Partitioning via WPARID.")
@@ -581,6 +587,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableCustomLocalMemoryAlignment, 0,
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableDeviceAllocationCache, -1, "Experimentally enable device usm allocation cache. Use X% of device memory.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalEnableHostAllocationCache, -1, "Experimentally enable host usm allocation cache. Use X% of shared system memory.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalUSMAllocationReuseVersion, -1, "Version of mechanism to use for usm allocation reuse.")
+DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalUSMAllocationReuseCleaner, -1, "Enable usm allocation reuse cleaner. -1: default, 0: disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalH2DCpuCopyThreshold, -1, "Override default threshold (in bytes) for H2D CPU copy.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalD2HCpuCopyThreshold, -1, "Override default threshold (in bytes) for D2H CPU copy.")
 DECLARE_DEBUG_VARIABLE(int32_t, ExperimentalCopyThroughLock, -1, "Experimentally copy memory through locked ptr. -1: default 0: disable 1: enable ")

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,7 +34,9 @@ cl_int CommandQueue::enqueueStagingBufferMemcpy(cl_bool blockingCopy, void *dstP
         isSingleTransfer = isFirstTransfer && isLastTransfer;
         cl_event *outEvent = assignEventForStaging(event, &profilingEvent, isFirstTransfer, isLastTransfer);
 
-        return this->enqueueSVMMemcpy(false, chunkDst, chunkSrc, chunkSize, 0, nullptr, outEvent, csr);
+        auto ret = this->enqueueSVMMemcpy(false, chunkDst, chunkSrc, chunkSize, 0, nullptr, outEvent, csr);
+        ret |= this->flush();
+        return ret;
     };
 
     auto stagingBufferManager = this->context->getStagingBufferManager();
@@ -42,9 +44,10 @@ cl_int CommandQueue::enqueueStagingBufferMemcpy(cl_bool blockingCopy, void *dstP
     return postStagingTransferSync(ret, event, profilingEvent, isSingleTransfer, blockingCopy, CL_COMMAND_SVM_MEMCPY);
 }
 
-cl_int CommandQueue::enqueueStagingWriteImage(Image *dstImage, cl_bool blockingCopy, const size_t *globalOrigin, const size_t *globalRegion,
-                                              size_t inputRowPitch, size_t inputSlicePitch, const void *ptr, cl_event *event) {
-    CsrSelectionArgs csrSelectionArgs{CL_COMMAND_WRITE_IMAGE, nullptr, dstImage, this->getDevice().getRootDeviceIndex(), globalRegion, nullptr, globalOrigin};
+cl_int CommandQueue::enqueueStagingImageTransfer(cl_command_type commandType, Image *image, cl_bool blockingCopy, const size_t *globalOrigin, const size_t *globalRegion,
+                                                 size_t inputRowPitch, size_t inputSlicePitch, const void *ptr, cl_event *event) {
+    auto isRead = commandType == CL_COMMAND_READ_IMAGE;
+    CsrSelectionArgs csrSelectionArgs{commandType, isRead ? image : nullptr, isRead ? nullptr : image, this->getDevice().getRootDeviceIndex(), globalRegion, nullptr, globalOrigin};
     auto &csr = selectCsrForBuiltinOperation(csrSelectionArgs);
     cl_event profilingEvent = nullptr;
 
@@ -54,38 +57,42 @@ cl_int CommandQueue::enqueueStagingWriteImage(Image *dstImage, cl_bool blockingC
         auto isLastTransfer = (globalOrigin[1] + globalRegion[1] == origin[1] + region[1]);
         isSingleTransfer = isFirstTransfer && isLastTransfer;
         cl_event *outEvent = assignEventForStaging(event, &profilingEvent, isFirstTransfer, isLastTransfer);
-
-        return this->enqueueWriteImageImpl(dstImage, false, origin, region, inputRowPitch, inputSlicePitch, stagingBuffer, nullptr, 0, nullptr, outEvent, csr);
+        cl_int ret = 0;
+        if (isRead) {
+            ret = this->enqueueReadImageImpl(image, false, origin, region, inputRowPitch, inputSlicePitch, stagingBuffer, nullptr, 0, nullptr, outEvent, csr);
+        } else {
+            ret = this->enqueueWriteImageImpl(image, false, origin, region, inputRowPitch, inputSlicePitch, stagingBuffer, nullptr, 0, nullptr, outEvent, csr);
+        }
+        ret |= this->flush();
+        return ret;
     };
-    auto bytesPerPixel = dstImage->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
+    auto bytesPerPixel = image->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
     auto dstRowPitch = inputRowPitch ? inputRowPitch : globalRegion[0] * bytesPerPixel;
 
     auto stagingBufferManager = this->context->getStagingBufferManager();
-    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, chunkWrite, &csr, false);
-    return postStagingTransferSync(ret, event, profilingEvent, isSingleTransfer, blockingCopy, CL_COMMAND_WRITE_IMAGE);
+    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, chunkWrite, &csr, isRead);
+    return postStagingTransferSync(ret, event, profilingEvent, isSingleTransfer, blockingCopy, commandType);
 }
 
-cl_int CommandQueue::enqueueStagingReadImage(Image *srcImage, cl_bool blockingCopy, const size_t *globalOrigin, const size_t *globalRegion,
-                                             size_t inputRowPitch, size_t inputSlicePitch, const void *ptr, cl_event *event) {
-    CsrSelectionArgs csrSelectionArgs{CL_COMMAND_READ_IMAGE, srcImage, nullptr, this->getDevice().getRootDeviceIndex(), globalRegion, nullptr, globalOrigin};
-    auto &csr = selectCsrForBuiltinOperation(csrSelectionArgs);
+cl_int CommandQueue::enqueueStagingWriteBuffer(Buffer *buffer, cl_bool blockingCopy, size_t offset, size_t size, const void *ptr, cl_event *event) {
+    CsrSelectionArgs csrSelectionArgs{CL_COMMAND_WRITE_BUFFER, {}, buffer, this->getDevice().getRootDeviceIndex(), &size};
+    CommandStreamReceiver &csr = selectCsrForBuiltinOperation(csrSelectionArgs);
     cl_event profilingEvent = nullptr;
 
     bool isSingleTransfer = false;
-    ChunkTransferImageFunc chunkRead = [&](void *stagingBuffer, const size_t *origin, const size_t *region) -> int32_t {
-        auto isFirstTransfer = (globalOrigin[1] == origin[1]);
-        auto isLastTransfer = (globalOrigin[1] + globalRegion[1] == origin[1] + region[1]);
+    ChunkTransferBufferFunc chunkWrite = [&](void *stagingBuffer, size_t chunkOffset, size_t chunkSize) -> int32_t {
+        auto isFirstTransfer = (chunkOffset == offset);
+        auto isLastTransfer = (offset + size == chunkOffset + chunkSize);
         isSingleTransfer = isFirstTransfer && isLastTransfer;
         cl_event *outEvent = assignEventForStaging(event, &profilingEvent, isFirstTransfer, isLastTransfer);
 
-        return this->enqueueReadImageImpl(srcImage, false, origin, region, inputRowPitch, inputSlicePitch, stagingBuffer, nullptr, 0, nullptr, outEvent, csr);
+        auto ret = this->enqueueWriteBufferImpl(buffer, false, chunkOffset, chunkSize, stagingBuffer, nullptr, 0, nullptr, outEvent, csr);
+        ret |= this->flush();
+        return ret;
     };
-    auto bytesPerPixel = srcImage->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
-    auto dstRowPitch = inputRowPitch ? inputRowPitch : globalRegion[0] * bytesPerPixel;
-
     auto stagingBufferManager = this->context->getStagingBufferManager();
-    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, chunkRead, &csr, true);
-    return postStagingTransferSync(ret, event, profilingEvent, isSingleTransfer, blockingCopy, CL_COMMAND_READ_IMAGE);
+    auto ret = stagingBufferManager->performBufferTransfer(ptr, offset, size, chunkWrite, &csr, false);
+    return postStagingTransferSync(ret, event, profilingEvent, isSingleTransfer, blockingCopy, CL_COMMAND_WRITE_BUFFER);
 }
 
 /*
@@ -152,15 +159,21 @@ bool CommandQueue::isValidForStagingBufferCopy(Device &device, void *dstPtr, con
     return stagingBufferManager->isValidForCopy(device, dstPtr, srcPtr, size, hasDependencies, osContextId);
 }
 
-bool CommandQueue::isValidForStagingTransferImage(Image *image, const void *ptr, bool hasDependencies) {
+bool CommandQueue::isValidForStagingTransfer(MemObj *memObj, const void *ptr, bool hasDependencies) {
+    GraphicsAllocation *allocation = nullptr;
+    context->tryGetExistingMapAllocation(ptr, memObj->getSize(), allocation);
+    if (allocation != nullptr) {
+        // Direct transfer from mapped allocation is faster than staging buffer
+        return false;
+    }
     auto stagingBufferManager = context->getStagingBufferManager();
     if (!stagingBufferManager) {
         return false;
     }
-    switch (image->getImageDesc().image_type) {
+    switch (memObj->peekClMemObjType()) {
     case CL_MEM_OBJECT_IMAGE1D:
     case CL_MEM_OBJECT_IMAGE2D:
-        return stagingBufferManager->isValidForStagingTransferImage(this->getDevice(), ptr, hasDependencies);
+        return stagingBufferManager->isValidForStagingTransfer(this->getDevice(), ptr, hasDependencies);
     default:
         return false;
     }

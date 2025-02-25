@@ -36,8 +36,7 @@ class IoctlHelperXe : public IoctlHelper {
   public:
     using IoctlHelper::IoctlHelper;
     static std::unique_ptr<IoctlHelperXe> create(Drm &drmArg);
-    static bool queryDeviceIdAndRevision(const Drm &drm);
-
+    static bool queryDeviceIdAndRevision(Drm &drm);
     IoctlHelperXe(Drm &drmArg);
     ~IoctlHelperXe() override;
     int ioctl(DrmIoctl request, void *arg) override;
@@ -64,7 +63,7 @@ class IoctlHelperXe : public IoctlHelper {
     bool setGemTiling(void *setTiling) override;
     bool getGemTiling(void *setTiling) override;
     uint32_t getDirectSubmissionFlag() override;
-    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint32_t vmHandleId) override;
+    std::unique_ptr<uint8_t[]> prepareVmBindExt(const StackVec<uint32_t, 2> &bindExtHandles, uint64_t cookie) override;
     uint64_t getFlagsForVmBind(bool bindCapture, bool bindImmediate, bool bindMakeResident, bool bindLock, bool readOnlyResource) override;
     virtual std::string xeGetBindFlagNames(int bindFlags);
     int queryDistances(std::vector<QueryItem> &queryItems, std::vector<DistanceInfo> &distanceInfos) override;
@@ -133,6 +132,10 @@ class IoctlHelperXe : public IoctlHelper {
     bool resourceRegistrationEnabled() override { return true; }
     bool isPreemptionSupported() override { return true; }
     bool isTimestampsRefreshEnabled() override { return true; }
+    int getTileIdFromGtId(int gtId) const override {
+        return gtIdToTileId[gtId];
+    }
+    bool makeResidentBeforeLockNeeded() const override;
 
   protected:
     static constexpr uint32_t maxContextSetProperties = 4;

@@ -114,7 +114,7 @@ class BufferObject {
     MOCKABLE_VIRTUAL int exec(uint32_t used, size_t startOffset, unsigned int flags, bool requiresCoherency, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId,
                               BufferObject *const residency[], size_t residencyCount, ExecObject *execObjectsStorage, uint64_t completionGpuAddress, TaskCountType completionValue);
 
-    int bind(OsContext *osContext, uint32_t vmHandleId);
+    int bind(OsContext *osContext, uint32_t vmHandleId, const bool forcePagingFence);
     int unbind(OsContext *osContext, uint32_t vmHandleId);
 
     void printExecutionBuffer(ExecBuffer &execbuf, const size_t &residencyCount, ExecObject *execObjectsStorage, BufferObject *const residency[]);
@@ -247,6 +247,14 @@ class BufferObject {
     void setChunked(bool chunked) { this->chunked = chunked; }
     bool isChunked() const { return this->chunked; }
 
+    void setRegisteredBindHandleCookie(uint64_t cookie) {
+        registeredBindHandleCookie = cookie;
+    }
+
+    uint64_t getRegisteredBindHandleCookie() {
+        return registeredBindHandleCookie;
+    }
+
   protected:
     MOCKABLE_VIRTUAL MemoryOperationsStatus evictUnusedAllocations(bool waitForCompletion, bool isLockNeeded);
     MOCKABLE_VIRTUAL void fillExecObject(ExecObject &execObject, OsContext *osContext, uint32_t vmHandleId, uint32_t drmContextId);
@@ -267,6 +275,7 @@ class BufferObject {
     std::vector<uint64_t> bindAddresses;
     std::vector<std::array<bool, EngineLimits::maxHandleCount>> bindInfo;
     StackVec<uint32_t, 2> bindExtHandles;
+    uint64_t registeredBindHandleCookie = 0;
     BOType boType = BOType::legacy;
     std::atomic<uint32_t> refCount;
     uint32_t rootDeviceIndex = std::numeric_limits<uint32_t>::max();

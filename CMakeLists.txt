@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2024 Intel Corporation
+# Copyright (C) 2018-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -189,6 +189,13 @@ if(UNIX)
     message(STATUS "Disabling LTO because compiler is ${CMAKE_CXX_COMPILER_ID} v${CMAKE_CXX_COMPILER_VERSION}")
     set(NEO_DISABLE_LTO TRUE)
   endif()
+
+  if(${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 14.0)
+    message(STATUS "Disabling LTO because compiler is ${CMAKE_CXX_COMPILER_ID} v${CMAKE_CXX_COMPILER_VERSION}")
+    set(NEO_DISABLE_LTO TRUE)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+  endif()
+
   if(NOT NEO_DISABLE_LTO)
     check_cxx_compiler_flag("-flto=auto" COMPILER_SUPPORTS_FLTO_AUTO)
     if(COMPILER_SUPPORTS_FLTO_AUTO)
@@ -300,8 +307,8 @@ if(NOT NEO_BINARY_DIR)
   set(NEO_BINARY_DIR ${CMAKE_BINARY_DIR})
 endif()
 
-# we use c++17
-set(CMAKE_CXX_STANDARD 17)
+# we use c++20
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # we force using response files
@@ -522,6 +529,9 @@ if(NEO_LEGACY_PLATFORMS_SUPPORT AND NOT NEO_CURRENT_PLATFORMS_SUPPORT)
 endif()
 if(NOT DEFINED NEO_OCLOC_VERSION_MODE)
   set(NEO_OCLOC_VERSION_MODE "1")
+endif()
+if(NOT DEFINED NEO_BUILD_UNVERSIONED_OCLOC)
+  set(NEO_BUILD_UNVERSIONED_OCLOC FALSE)
 endif()
 include(platforms.cmake)
 list(LENGTH ALL_PRODUCT_FAMILY_LIST ALL_PRODUCT_FAMILY_LIST_COUNT)
@@ -849,6 +859,11 @@ if(NOT MSVC)
     endif()
   else()
     # gcc only
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+      # Disable specific warnings due to GCC bug for versions >= 13
+      # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=111073
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
+    endif()
   endif()
 
   if(USE_SANITIZE_UB)

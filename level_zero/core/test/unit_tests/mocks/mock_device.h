@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -60,7 +60,7 @@ struct MockDevice : public Device {
     ADDMETHOD_NOBASE(getBuiltinFunctionsLib, BuiltinFunctionsLib *, nullptr, ());
     ADDMETHOD_CONST_NOBASE(getMaxNumHwThreads, uint32_t, 16u, ());
     ADDMETHOD_NOBASE(activateMetricGroupsDeferred, ze_result_t, ZE_RESULT_SUCCESS, (uint32_t count, zet_metric_group_handle_t *phMetricGroups));
-    ADDMETHOD_NOBASE_REFRETURN(getOsInterface, NEO::OSInterface &, ());
+    ADDMETHOD_NOBASE_REFRETURN(getOsInterface, NEO::OSInterface *, ());
     ADDMETHOD_CONST_NOBASE(getPlatformInfo, uint32_t, 0u, ());
     ADDMETHOD_NOBASE_REFRETURN(getMetricDeviceContext, MetricDeviceContext &, ());
     ADDMETHOD_CONST_NOBASE_REFRETURN(getHwInfo, const NEO::HardwareInfo &, ());

@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2019-2024 Intel Corporation
+# Copyright (C) 2019-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -36,7 +36,7 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy_base.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy_bdw_and_later.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/cache_policy_tgllp_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/casts.h
     ${CMAKE_CURRENT_SOURCE_DIR}/common_types.h
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper.h
@@ -58,6 +58,7 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/debug_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/deferred_deleter_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/device_bitfield.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/device_hierarchy_mode.h
     ${CMAKE_CURRENT_SOURCE_DIR}/driver_model_type.h
     ${CMAKE_CURRENT_SOURCE_DIR}/dirty_state_helpers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dirty_state_helpers.h
@@ -130,7 +131,6 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/populate_factory.h
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble.h
     ${CMAKE_CURRENT_SOURCE_DIR}/preamble_base.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/preamble_bdw_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/preprocessor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/product_config_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/product_config_helper.h
@@ -210,12 +210,14 @@ endif()
 
 if(SUPPORT_PVC_AND_LATER)
   list(APPEND NEO_CORE_HELPERS
+       ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_pvc_and_later.inl
        ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_pvc_and_later.inl
   )
 endif()
 
 if(SUPPORT_XE2_AND_LATER)
   list(APPEND NEO_CORE_HELPERS
+       ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_xe2_and_later.inl
        ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_xe2_and_later.inl
   )
 endif()
@@ -223,6 +225,13 @@ endif()
 if(SUPPORT_XE2_CORE OR SUPPORT_XE_2HPG_CORE)
   list(APPEND NEO_CORE_HELPERS
        ${CMAKE_CURRENT_SOURCE_DIR}/preamble_xe2_hpg.inl
+  )
+endif()
+
+if(SUPPORT_XE3_AND_LATER)
+  list(APPEND NEO_CORE_HELPERS
+       ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_xe3_and_later.inl
+       ${CMAKE_CURRENT_SOURCE_DIR}/preamble_xe3_and_later.inl
   )
 endif()
 

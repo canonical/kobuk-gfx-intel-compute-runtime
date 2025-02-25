@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -137,9 +137,9 @@ HWTEST_F(CommandStreamReceiverTest, WhenInitializeResourcesThenCallFillReusableA
     ultCsr.fillReusableAllocationsListCalled = 0u;
     ultCsr.resourcesInitialized = false;
 
-    commandStreamReceiver->initializeResources(false);
+    commandStreamReceiver->initializeResources(false, pDevice->getPreemptionMode());
     EXPECT_EQ(1u, pDevice->getUltCommandStreamReceiver<FamilyType>().fillReusableAllocationsListCalled);
-    commandStreamReceiver->initializeResources(false);
+    commandStreamReceiver->initializeResources(false, pDevice->getPreemptionMode());
     EXPECT_EQ(1u, pDevice->getUltCommandStreamReceiver<FamilyType>().fillReusableAllocationsListCalled);
 }
 
@@ -161,7 +161,7 @@ HWTEST_F(CommandStreamReceiverTest, whenContextCreateReturnsFalseThenExpectCSRIn
     auto &ultCsr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     ultCsr.resourcesInitialized = false;
     ultCsr.setupContext(osContext);
-    bool ret = ultCsr.initializeResources(false);
+    bool ret = ultCsr.initializeResources(false, pDevice->getPreemptionMode());
     EXPECT_FALSE(ret);
 }
 
@@ -455,7 +455,7 @@ HWTEST_F(CommandStreamReceiverTest, givenGpuHangWhenWaititingForCompletionWithTi
     csr.activePartitions = 1;
     csr.gpuHangCheckPeriod = 0us;
 
-    volatile TagAddressType tasksCount[16] = {};
+    TagAddressType tasksCount[16] = {};
     csr.tagAddress = tasksCount;
 
     constexpr auto enableTimeout = false;
@@ -470,7 +470,7 @@ HWTEST_F(CommandStreamReceiverTest, givenNoGpuHangWhenWaititingForCompletionWith
     auto driverModelMock = std::make_unique<MockDriverModel>();
     driverModelMock->isGpuHangDetectedToReturn = false;
 
-    volatile TagAddressType tasksCount[16] = {};
+    TagAddressType tasksCount[16] = {};
     driverModelMock->isGpuHangDetectedSideEffect = [&tasksCount] {
         tasksCount[0]++;
     };
@@ -547,7 +547,7 @@ HWTEST_F(CommandStreamReceiverTest, givenGpuHangWhenWaitingForTaskCountThenGpuHa
     csr.activePartitions = 1;
     csr.gpuHangCheckPeriod = 0us;
 
-    volatile TagAddressType tasksCount[16] = {};
+    TagAddressType tasksCount[16] = {};
     csr.tagAddress = tasksCount;
 
     constexpr auto taskCountToWait = 1;
@@ -625,7 +625,7 @@ HWTEST_F(CommandStreamReceiverTest, givenGpuHangAndNonEmptyAllocationsListWhenCa
     csr.activePartitions = 1;
     csr.gpuHangCheckPeriod = 0us;
 
-    volatile TagAddressType tasksCount[16] = {};
+    TagAddressType tasksCount[16] = {};
     VariableBackup<volatile TagAddressType *> csrTagAddressBackup(&csr.tagAddress);
     csr.tagAddress = tasksCount;
 
@@ -2975,11 +2975,11 @@ HWTEST_F(CommandStreamReceiverHwTest, givenFailureOnFlushWhenFlushingBcsTaskThen
     container.push_back(blitProperties);
 
     commandStreamReceiver.flushReturnValue = SubmissionStatus::outOfHostMemory;
-    EXPECT_EQ(CompletionStamp::outOfHostMemory, commandStreamReceiver.flushBcsTask(container, true, false, *pDevice));
+    EXPECT_EQ(CompletionStamp::outOfHostMemory, commandStreamReceiver.flushBcsTask(container, true, *pDevice));
     commandStreamReceiver.flushReturnValue = SubmissionStatus::outOfMemory;
-    EXPECT_EQ(CompletionStamp::outOfDeviceMemory, commandStreamReceiver.flushBcsTask(container, true, false, *pDevice));
+    EXPECT_EQ(CompletionStamp::outOfDeviceMemory, commandStreamReceiver.flushBcsTask(container, true, *pDevice));
     commandStreamReceiver.flushReturnValue = SubmissionStatus::failed;
-    EXPECT_EQ(CompletionStamp::failed, commandStreamReceiver.flushBcsTask(container, true, false, *pDevice));
+    EXPECT_EQ(CompletionStamp::failed, commandStreamReceiver.flushBcsTask(container, true, *pDevice));
 }
 
 HWTEST_F(CommandStreamReceiverHwTest, givenFlushBcsTaskVerifyLatestSentTaskCountUpdated) {
@@ -3055,13 +3055,13 @@ HWTEST2_F(CommandStreamReceiverHwTest, givenDeviceToHostCopyWhenFenceIsRequiredT
                                                                               bcsCsr, &mockAllocation, nullptr, hostPtr,
                                                                               mockAllocation.getGpuAddress(), 0,
                                                                               0, 0, {1, 1, 1}, 0, 0, 0, 0);
-        blitProperties.outputTimestampPacket = timestamp.getNode(0);
+        blitProperties.blitSyncProperties.outputTimestampPacket = timestamp.getNode(0);
 
         BlitPropertiesContainer blitPropertiesContainer;
         blitPropertiesContainer.push_back(blitProperties);
 
         offset = bcsCsr.commandStream.getUsed();
-        bcsCsr.flushBcsTask(blitPropertiesContainer, true, false, *pDevice);
+        bcsCsr.flushBcsTask(blitPropertiesContainer, true, *pDevice);
 
         EXPECT_TRUE(verify(true));
     }
@@ -3079,7 +3079,7 @@ HWTEST2_F(CommandStreamReceiverHwTest, givenDeviceToHostCopyWhenFenceIsRequiredT
         blitPropertiesContainer.push_back(blitProperties);
 
         offset = bcsCsr.commandStream.getUsed();
-        bcsCsr.flushBcsTask(blitPropertiesContainer, true, false, *pDevice);
+        bcsCsr.flushBcsTask(blitPropertiesContainer, true, *pDevice);
 
         EXPECT_TRUE(verify(false));
     }
@@ -3092,13 +3092,13 @@ HWTEST2_F(CommandStreamReceiverHwTest, givenDeviceToHostCopyWhenFenceIsRequiredT
                                                                               bcsCsr, &mockAllocation, nullptr, hostPtr,
                                                                               mockAllocation.getGpuAddress(), 0,
                                                                               0, 0, {1, 1, 1}, 0, 0, 0, 0);
-        blitProperties.outputTimestampPacket = timestamp.getNode(0);
+        blitProperties.blitSyncProperties.outputTimestampPacket = timestamp.getNode(0);
 
         BlitPropertiesContainer blitPropertiesContainer;
         blitPropertiesContainer.push_back(blitProperties);
 
         offset = bcsCsr.commandStream.getUsed();
-        bcsCsr.flushBcsTask(blitPropertiesContainer, true, false, *pDevice);
+        bcsCsr.flushBcsTask(blitPropertiesContainer, true, *pDevice);
 
         EXPECT_TRUE(verify(false));
     }
@@ -3111,13 +3111,13 @@ HWTEST2_F(CommandStreamReceiverHwTest, givenDeviceToHostCopyWhenFenceIsRequiredT
                                                                               bcsCsr, &mockAllocation, nullptr, hostPtr,
                                                                               mockAllocation.getGpuAddress(), 0,
                                                                               0, 0, {1, 1, 1}, 0, 0, 0, 0);
-        blitProperties.outputTimestampPacket = timestamp.getNode(0);
+        blitProperties.blitSyncProperties.outputTimestampPacket = timestamp.getNode(0);
 
         BlitPropertiesContainer blitPropertiesContainer;
         blitPropertiesContainer.push_back(blitProperties);
 
         offset = bcsCsr.commandStream.getUsed();
-        bcsCsr.flushBcsTask(blitPropertiesContainer, true, false, *pDevice);
+        bcsCsr.flushBcsTask(blitPropertiesContainer, true, *pDevice);
 
         EXPECT_TRUE(verify(false));
     }
@@ -3127,13 +3127,13 @@ HWTEST2_F(CommandStreamReceiverHwTest, givenDeviceToHostCopyWhenFenceIsRequiredT
         mockAllocation.memoryPool = MemoryPool::localMemory;
 
         auto blitProperties = BlitProperties::constructPropertiesForCopy(&mockAllocation, &mockAllocation, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, 0, 0, 0, 0, nullptr);
-        blitProperties.outputTimestampPacket = timestamp.getNode(0);
+        blitProperties.blitSyncProperties.outputTimestampPacket = timestamp.getNode(0);
 
         BlitPropertiesContainer blitPropertiesContainer;
         blitPropertiesContainer.push_back(blitProperties);
 
         offset = bcsCsr.commandStream.getUsed();
-        bcsCsr.flushBcsTask(blitPropertiesContainer, true, false, *pDevice);
+        bcsCsr.flushBcsTask(blitPropertiesContainer, true, *pDevice);
 
         EXPECT_TRUE(verify(false));
     }
@@ -3362,7 +3362,7 @@ HWTEST_F(CommandStreamReceiverHwTest, givenMultiRootDeviceSyncNodeWhenFlushBcsTa
 
     BlitPropertiesContainer container;
     container.push_back(blitProperties);
-    commandStreamReceiver.flushBcsTask(container, true, false, *pDevice);
+    commandStreamReceiver.flushBcsTask(container, true, *pDevice);
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
 
@@ -3392,7 +3392,7 @@ HWTEST_F(CommandStreamReceiverHwTest, givenNullPtrAsMultiRootDeviceSyncNodeWhenF
 
     BlitPropertiesContainer container;
     container.push_back(blitProperties);
-    commandStreamReceiver.flushBcsTask(container, true, false, *pDevice);
+    commandStreamReceiver.flushBcsTask(container, true, *pDevice);
     HardwareParse hwParser;
     hwParser.parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
 
@@ -3592,8 +3592,7 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     auto btdStateCmd = hwParserCsr.getCommand<_3DSTATE_BTD>();
     ASSERT_NE(nullptr, btdStateCmd);
 
-    auto &btdStateBody = btdStateCmd->getBtdStateBody();
-    EXPECT_EQ(rtAllocationAddress, btdStateBody.getMemoryBackedBufferBasePointer());
+    EXPECT_EQ(rtAllocationAddress, btdStateCmd->getMemoryBackedBufferBasePointer());
 
     uint32_t residentCount = 1;
     commandStreamReceiver.isMadeResident(rtAllocation, residentCount);
@@ -4884,11 +4883,12 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverHwTest, givenScratchSpaceSurfa
 
     uint32_t perThreadScratchSize = 65;
     uint32_t expectedValue = Math::nextPowerOfTwo(perThreadScratchSize);
+
     bool stateBaseAddressDirty = false;
     bool cfeStateDirty = false;
     uint8_t surfaceHeap[1000];
     scratchController->setRequiredScratchSpace(surfaceHeap, 0u, perThreadScratchSize, 0u, *pDevice->getDefaultEngine().osContext, stateBaseAddressDirty, cfeStateDirty);
-    EXPECT_EQ(expectedValue, scratchController->perThreadScratchSize);
+    EXPECT_EQ(expectedValue, scratchController->perThreadScratchSpaceSlot0Size);
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverHwTest, givenScratchSpaceSurfaceStateEnabledWhenSizeForPrivateScratchSpaceIsMisalignedThenAlignItNextPow2) {
@@ -4906,8 +4906,16 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandStreamReceiverHwTest, givenScratchSpaceSurfa
     bool stateBaseAddressDirty = false;
     scratchController->setRequiredScratchSpace(surfaceState, 0u, 0u, misalignedSizeForPrivateScratch,
                                                *pDevice->getDefaultEngine().osContext, stateBaseAddressDirty, cfeStateDirty);
-    EXPECT_NE(scratchController->scratchSlot1SizeInBytes, misalignedSizeForPrivateScratch * scratchController->computeUnitsUsedForScratch);
-    EXPECT_EQ(scratchController->scratchSlot1SizeInBytes, alignedSizeForPrivateScratch * scratchController->computeUnitsUsedForScratch);
+
+    EXPECT_NE(scratchController->perThreadScratchSpaceSlot1Size, misalignedSizeForPrivateScratch);
+    EXPECT_EQ(scratchController->perThreadScratchSpaceSlot1Size, alignedSizeForPrivateScratch);
+
+    size_t scratchSlot1SizeInBytes = alignedSizeForPrivateScratch * scratchController->computeUnitsUsedForScratch;
+    auto &productHelper = pDevice->getProductHelper();
+    productHelper.adjustScratchSize(scratchSlot1SizeInBytes);
+
+    EXPECT_EQ(scratchController->scratchSlot1SizeInBytes, scratchSlot1SizeInBytes);
+
     EXPECT_EQ(scratchController->scratchSlot1SizeInBytes, scratchController->getScratchSpaceSlot1Allocation()->getUnderlyingBufferSize());
 }
 

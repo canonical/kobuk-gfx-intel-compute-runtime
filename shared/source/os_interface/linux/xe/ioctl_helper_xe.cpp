@@ -37,6 +37,14 @@
 #define STRINGIFY_ME(X) return #X
 #define RETURN_ME(X) return X
 
+#ifndef DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR
+#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 4)
+#endif
+
+#ifndef DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR
+#define DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR (1 << 1)
+#endif
+
 namespace NEO {
 
 const char *IoctlHelperXe::xeGetClassName(int className) {
@@ -127,7 +135,7 @@ IoctlHelperXe::IoctlHelperXe(Drm &drmArg) : IoctlHelper(drmArg) {
     xeLog("IoctlHelperXe::IoctlHelperXe\n", "");
 }
 
-bool IoctlHelperXe::queryDeviceIdAndRevision(const Drm &drm) {
+bool IoctlHelperXe::queryDeviceIdAndRevision(Drm &drm) {
     auto fileDescriptor = drm.getFileDescriptor();
 
     drm_xe_device_query queryConfig = {};
@@ -153,6 +161,10 @@ bool IoctlHelperXe::queryDeviceIdAndRevision(const Drm &drm) {
     auto hwInfo = drm.getRootDeviceEnvironment().getMutableHardwareInfo();
     hwInfo->platform.usDeviceID = config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] & 0xffff;
     hwInfo->platform.usRevId = static_cast<int>((config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] >> 16) & 0xff);
+
+    if ((debugManager.flags.EnableSharedSystemUsmSupport.get() != 0) && (config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR)) {
+        drm.setSharedSystemAllocEnable(true);
+    }
     return true;
 }
 
@@ -666,6 +678,10 @@ int IoctlHelperXe::createGemExt(const MemRegionsVec &memClassInstances, size_t a
     create.placement = static_cast<uint32_t>(memoryInstances.to_ulong());
     create.cpu_caching = this->getCpuCachingMode(isCoherent, isSysMemOnly);
 
+    if (debugManager.flags.EnableDeferBacking.get()) {
+        create.flags |= DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING;
+    }
+
     printDebugString(debugManager.flags.PrintBOCreateDestroyResult.get(), stdout, "Performing DRM_IOCTL_XE_GEM_CREATE with {vmid=0x%x size=0x%lx flags=0x%x placement=0x%x caching=%hu }",
                      create.vm_id, create.size, create.flags, create.placement, create.cpu_caching);
 
@@ -707,6 +723,10 @@ uint32_t IoctlHelperXe::createGem(uint64_t size, uint32_t memoryBanks, std::opti
     }
     create.placement = static_cast<uint32_t>(memoryInstances.to_ulong());
     create.cpu_caching = this->getCpuCachingMode(isCoherent, isSysMemOnly);
+
+    if (debugManager.flags.EnableDeferBacking.get()) {
+        create.flags |= DRM_XE_GEM_CREATE_FLAG_DEFER_BACKING;
+    }
 
     printDebugString(debugManager.flags.PrintBOCreateDestroyResult.get(), stdout, "Performing DRM_IOCTL_XE_GEM_CREATE with {vmid=0x%x size=0x%lx flags=0x%x placement=0x%x caching=%hu }",
                      create.vm_id, create.size, create.flags, create.placement, create.cpu_caching);
@@ -967,6 +987,9 @@ uint32_t IoctlHelperXe::getFlagsForVmCreate(bool disableScratch, bool enablePage
     uint32_t flags = DRM_XE_VM_CREATE_FLAG_LR_MODE;
     if (enablePageFault) {
         flags |= DRM_XE_VM_CREATE_FLAG_FAULT_MODE;
+    }
+    if (!disableScratch) {
+        flags |= DRM_XE_VM_CREATE_FLAG_SCRATCH_PAGE;
     }
     return flags;
 }
@@ -1349,22 +1372,25 @@ int IoctlHelperXe::xeVmBind(const VmBindParams &vmBindParams, bool isBind) {
 
     drm_xe_vm_bind bind = {};
     bind.vm_id = vmBindParams.vmId;
-    bind.num_syncs = 1;
+
     bind.num_binds = 1;
 
     bind.bind.range = vmBindParams.length;
-    bind.bind.addr = gmmHelper->decanonize(vmBindParams.start);
     bind.bind.obj_offset = vmBindParams.offset;
     bind.bind.pat_index = static_cast<uint16_t>(vmBindParams.patIndex);
     bind.bind.extensions = vmBindParams.extensions;
     bind.bind.flags = static_cast<uint32_t>(vmBindParams.flags);
 
-    UNRECOVERABLE_IF(vmBindParams.userFence == 0x0);
     drm_xe_sync sync[1] = {};
-
+    if (vmBindParams.sharedSystemUsmBind == true) {
+        bind.bind.addr = 0;
+    } else {
+        bind.bind.addr = gmmHelper->decanonize(vmBindParams.start);
+    }
+    bind.num_syncs = 1;
+    UNRECOVERABLE_IF(vmBindParams.userFence == 0x0);
     auto xeBindExtUserFence = reinterpret_cast<UserFenceExtension *>(vmBindParams.userFence);
     UNRECOVERABLE_IF(xeBindExtUserFence->tag != UserFenceExtension::tagValue);
-
     sync[0].type = DRM_XE_SYNC_TYPE_USER_FENCE;
     sync[0].flags = DRM_XE_SYNC_FLAG_SIGNAL;
     sync[0].addr = xeBindExtUserFence->addr;
@@ -1380,11 +1406,17 @@ int IoctlHelperXe::xeVmBind(const VmBindParams &vmBindParams, bool isBind) {
             bind.bind.obj_offset = userptr;
         }
     } else {
-        bind.bind.op = DRM_XE_VM_BIND_OP_UNMAP;
-        bind.bind.obj = 0;
-        if (userptr) {
-            bind.bind.obj_offset = userptr;
+        if (vmBindParams.sharedSystemUsmEnabled) {
+            // Use of MAP on unbind required for restoring the address space to the system allocator
+            bind.bind.op = DRM_XE_VM_BIND_OP_MAP;
+            bind.bind.flags |= DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR;
+        } else {
+            bind.bind.op = DRM_XE_VM_BIND_OP_UNMAP;
+            if (userptr) {
+                bind.bind.obj_offset = userptr;
+            }
         }
+        bind.bind.obj = 0;
     }
 
     ret = IoctlHelper::ioctl(DrmIoctl::gemVmBind, &bind);
@@ -1542,6 +1574,14 @@ bool IoctlHelperXe::isImmediateVmBindRequired() const {
     return true;
 }
 
+bool IoctlHelperXe::makeResidentBeforeLockNeeded() const {
+    auto makeResidentBeforeLockNeeded = false;
+    if (debugManager.flags.EnableDeferBacking.get()) {
+        makeResidentBeforeLockNeeded = true;
+    }
+    return makeResidentBeforeLockNeeded;
+}
+
 void IoctlHelperXe::insertEngineToContextParams(ContextParamEngines<> &contextParamEngines, uint32_t engineId, const EngineClassInstance *engineClassInstance, uint32_t tileId, bool hasVirtualEngines) {
     auto engines = reinterpret_cast<drm_xe_engine_class_instance *>(contextParamEngines.enginesData);
     if (engineClassInstance) {
@@ -1565,6 +1605,17 @@ void IoctlHelperXe::registerBOBindHandle(Drm *drm, DrmAllocation *drmAllocation)
     case AllocationType::debugModuleArea:
         resourceClass = DrmResourceClass::moduleHeapDebugArea;
         break;
+    case AllocationType::kernelIsa:
+        if (drmAllocation->storageInfo.tileInstanced) {
+            auto &bos = drmAllocation->getBOs();
+            for (auto bo : bos) {
+                if (!bo) {
+                    continue;
+                }
+                bo->setRegisteredBindHandleCookie(drmAllocation->storageInfo.subDeviceBitfield.to_ulong());
+            }
+        }
+        return;
     default:
         return;
     }
@@ -1724,4 +1775,5 @@ void IoctlHelperXe::querySupportedFeatures() {
     };
     supportedFeatures.flags.pageFault = checkVmCreateFlagsSupport(DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE);
 };
+
 } // namespace NEO

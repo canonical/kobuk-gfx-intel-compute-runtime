@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -93,7 +93,7 @@ bool Device::genericSubDevicesAllowed() {
     deviceBitfield = maxNBitValue(subDeviceCount);
     deviceBitfield &= deviceMask;
     numSubDevices = static_cast<uint32_t>(deviceBitfield.count());
-    if (numSubDevices == 1) {
+    if (numSubDevices == 1 && (executionEnvironment->getDeviceHierarchyMode() != DeviceHierarchyMode::combined || subDeviceCount == 1)) {
         numSubDevices = 0;
     }
 
@@ -130,13 +130,14 @@ bool Device::createSubDevices() {
 }
 
 bool Device::createDeviceImpl() {
-    // init sub devices first
-    if (!createSubDevices()) {
-        return false;
-    }
-
     preemptionMode = PreemptionHelper::getDefaultPreemptionMode(getHardwareInfo());
+
     if (!isSubDevice()) {
+        // init sub devices first
+        if (!createSubDevices()) {
+            return false;
+        }
+
         // initialize common resources once
         initializeCommonResources();
     }
@@ -208,6 +209,19 @@ void Device::initializeCommonResources() {
         deviceBitfields.emplace(getRootDeviceIndex(), getDeviceBitfield());
         deviceUsmMemAllocPoolsManager.reset(new UsmMemAllocPoolsManager(getMemoryManager(), rootDeviceIndices, deviceBitfields, this, InternalMemoryType::deviceUnifiedMemory));
     }
+    initUsmReuseMaxSize();
+}
+
+void Device::initUsmReuseMaxSize() {
+    const bool usmDeviceAllocationsCacheEnabled = NEO::ApiSpecificConfig::isDeviceAllocationCacheEnabled() && this->getProductHelper().isDeviceUsmAllocationReuseSupported();
+    auto ailConfiguration = this->getAilConfigurationHelper();
+    const bool limitDeviceMemoryForReuse = ailConfiguration && ailConfiguration->limitAmountOfDeviceMemoryForRecycling();
+    auto fractionOfTotalMemoryForRecycling = (limitDeviceMemoryForReuse || !usmDeviceAllocationsCacheEnabled) ? 0 : 0.08;
+    if (debugManager.flags.ExperimentalEnableDeviceAllocationCache.get() != -1) {
+        fractionOfTotalMemoryForRecycling = 0.01 * std::min(100, debugManager.flags.ExperimentalEnableDeviceAllocationCache.get());
+    }
+    const auto totalDeviceMemory = this->getGlobalMemorySize(static_cast<uint32_t>(this->getDeviceBitfield().to_ulong()));
+    this->maxAllocationsSavedForReuseSize = static_cast<uint64_t>(fractionOfTotalMemoryForRecycling * totalDeviceMemory);
 }
 
 bool Device::initDeviceFully() {
@@ -476,7 +490,7 @@ bool Device::createEngine(EngineTypeUsage engineTypeUsage) {
     commandStreamReceiver->setupContext(*osContext);
 
     if (osContext->isImmediateContextInitializationEnabled(isDefaultEngine)) {
-        if (!commandStreamReceiver->initializeResources(false)) {
+        if (!commandStreamReceiver->initializeResources(false, this->getPreemptionMode())) {
             return false;
         }
     }
@@ -486,10 +500,6 @@ bool Device::createEngine(EngineTypeUsage engineTypeUsage) {
     }
 
     if (!commandStreamReceiver->createGlobalFenceAllocation()) {
-        return false;
-    }
-
-    if (preemptionMode == PreemptionMode::MidThread && !commandStreamReceiver->createPreemptionAllocation()) {
         return false;
     }
 
@@ -533,7 +543,7 @@ bool Device::initializeEngines() {
         bool initializeDevice = (engine.osContext->isPartOfContextGroup() || isHeaplessStateInit) && !firstSubmissionDone;
 
         if (initializeDevice) {
-            engine.commandStreamReceiver->initializeResources(false);
+            engine.commandStreamReceiver->initializeResources(false, this->getPreemptionMode());
 
             if (debugManager.flags.DeferStateInitSubmissionToFirstRegularUsage.get() != 1) {
                 engine.commandStreamReceiver->initializeDeviceWithFirstSubmission(*this);
@@ -603,7 +613,7 @@ EngineControl *Device::getSecondaryEngineCsr(EngineTypeUsage engineTypeUsage, bo
 
             EngineDescriptor engineDescriptor(engineTypeUsage, getDeviceBitfield(), preemptionMode, false);
 
-            if (!commandStreamReceiver->initializeResources(allocateInterrupt)) {
+            if (!commandStreamReceiver->initializeResources(allocateInterrupt, this->getPreemptionMode())) {
                 return nullptr;
             }
 

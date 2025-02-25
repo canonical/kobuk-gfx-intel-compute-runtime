@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -83,13 +83,14 @@ EncodeDispatchKernelArgs CommandEncodeStatesFixture::createDefaultDispatchKernel
 }
 
 EncodeWalkerArgs CommandEncodeStatesFixture::createDefaultEncodeWalkerArgs(const KernelDescriptor &kernelDescriptor) {
+
     EncodeWalkerArgs args{
-        kernelDescriptor,                      // kernelDescriptor
-        NEO::KernelExecutionType::defaultType, // kernelExecutionType
-        NEO::RequiredDispatchWalkOrder::none,  // requiredDispatchWalkOrder
-        0,                                     // localRegionSize
-        0,                                     // maxFrontEndThreads
-        false};                                // requiredSystemFence
+        .kernelExecutionType = KernelExecutionType::defaultType,
+        .requiredDispatchWalkOrder = RequiredDispatchWalkOrder::none,
+        .localRegionSize = 0,
+        .maxFrontEndThreads = 0,
+        .requiredSystemFence = false,
+        .hasSample = kernelDescriptor.kernelAttributes.flags.hasSample};
 
     return args;
 }

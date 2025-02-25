@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -86,7 +86,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     idd.setNumberOfThreadsInGpgpuThreadGroup(numThreadsPerThreadGroup);
 
     EncodeDispatchKernel<Family>::programBarrierEnable(idd,
-                                                       kernelDescriptor.kernelAttributes.barrierCount,
+                                                       kernelDescriptor,
                                                        hwInfo);
     auto slmSize = EncodeDispatchKernel<Family>::computeSlmValues(hwInfo, args.dispatchInterface->getSlmTotalSize());
     idd.setSharedLocalMemorySize(slmSize);
@@ -279,15 +279,16 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(idd, *args.device, hwInfo, threadGroupDims, threadGroupCount, kernelDescriptor.kernelAttributes.numGrfRequired, numThreadsPerThreadGroup, cmd);
 
     EncodeWalkerArgs walkerArgs{
-        kernelDescriptor,                                // kernelDescriptor
-        KernelExecutionType::defaultType,                // kernelExecutionType
-        args.requiredDispatchWalkOrder,                  // requiredDispatchWalkOrder
-        args.localRegionSize,                            // localRegionSize
-        args.device->getDeviceInfo().maxFrontEndThreads, // maxFrontEndThreads
-        args.requiresSystemMemoryFence()};               // requiredSystemFence
+        .kernelExecutionType = KernelExecutionType::defaultType,
+        .requiredDispatchWalkOrder = args.requiredDispatchWalkOrder,
+        .localRegionSize = args.localRegionSize,
+        .maxFrontEndThreads = args.device->getDeviceInfo().maxFrontEndThreads,
+        .requiredSystemFence = args.requiresSystemMemoryFence(),
+        .hasSample = false};
+
     EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(rootDeviceEnvironment, cmd, walkerArgs);
     EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(cmd, walkerArgs);
-    EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(cmd, walkerArgs);
+    EncodeDispatchKernel<Family>::template encodeComputeDispatchAllWalker<WalkerType, INTERFACE_DESCRIPTOR_DATA>(cmd, nullptr, rootDeviceEnvironment, walkerArgs);
 
     memcpy_s(iddPtr, sizeof(idd), &idd, sizeof(idd));
 
@@ -405,9 +406,9 @@ void EncodeDispatchKernel<Family>::encodeThreadData(WalkerType &walkerCmd,
 template <typename Family>
 template <typename InterfaceDescriptorType>
 void EncodeDispatchKernel<Family>::programBarrierEnable(InterfaceDescriptorType &interfaceDescriptor,
-                                                        uint32_t value,
+                                                        const KernelDescriptor &kernelDescriptor,
                                                         const HardwareInfo &hwInfo) {
-    interfaceDescriptor.setBarrierEnable(value);
+    interfaceDescriptor.setBarrierEnable(kernelDescriptor.kernelAttributes.barrierCount);
 }
 
 template <typename Family>
@@ -419,8 +420,8 @@ template <typename WalkerType>
 inline void EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
 
 template <typename Family>
-template <typename WalkerType>
-inline void EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
+template <typename WalkerType, typename InterfaceDescriptorType>
+inline void EncodeDispatchKernel<Family>::encodeComputeDispatchAllWalker(WalkerType &walkerCmd, const InterfaceDescriptorType *idd, const RootDeviceEnvironment &rootDeviceEnvironment, const EncodeWalkerArgs &walkerArgs) {}
 
 template <typename Family>
 template <typename InterfaceDescriptorType>
@@ -683,7 +684,7 @@ void EncodeDispatchKernel<Family>::encodeEuSchedulingPolicy(InterfaceDescriptorT
 
 template <typename Family>
 template <typename WalkerType>
-void EncodeDispatchKernel<Family>::setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder) {}
+void EncodeDispatchKernel<Family>::setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t threadGroupCount, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder) {}
 
 template <typename Family>
 template <typename WalkerType>

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -59,10 +59,6 @@ BMGTEST_F(BmgProductHelperLinux, givenProductHelperWhenAskedIsPageFaultSupported
 
 BMGTEST_F(BmgProductHelperLinux, givenProductHelperWhenAskedIsKmdMigrationSupportedThenReturnFalse) {
     EXPECT_FALSE(productHelper->isKmdMigrationSupported());
-}
-
-BMGTEST_F(BmgProductHelperLinux, givenProductHelperWhenAskedIsDisableScratchPagesSupportedThenReturnFalse) {
-    EXPECT_FALSE(productHelper->isDisableScratchPagesSupported());
 }
 
 BMGTEST_F(BmgProductHelperLinux, WhenGtIsSetupThenGtSystemInfoIsCorrect) {

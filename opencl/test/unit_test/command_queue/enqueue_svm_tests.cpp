@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -2448,6 +2448,7 @@ HWTEST_F(StagingBufferTest, givenInOrderCmdQueueWhenEnqueueStagingBufferMemcpyNo
     auto pEvent = (Event *)event;
     auto numOfStagingBuffers = svmManager->getNumAllocs() - initialUsmAllocs;
     EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_TRUE(myCmdQ.flushCalled);
     EXPECT_EQ(1u, numOfStagingBuffers);
     EXPECT_EQ(expectedNumOfCopies, myCmdQ.enqueueSVMMemcpyCalledCount);
     EXPECT_EQ(0u, myCmdQ.finishCalledCount);
@@ -2514,7 +2515,7 @@ HWTEST_F(StagingBufferTest, givenOutOfOrderCmdQueueWhenEnqueueStagingBufferMemcp
 HWTEST_F(StagingBufferTest, givenEnqueueStagingBufferMemcpyWhenTaskCountNotReadyThenCopySucessfullAndBuffersNotReused) {
     MockCommandQueueHw<FamilyType> myCmdQ(context, pClDevice, 0);
     auto initialUsmAllocs = svmManager->getNumAllocs();
-    auto &csr = pCmdQ->getGpgpuCommandStreamReceiver();
+    auto &csr = myCmdQ.getGpgpuCommandStreamReceiver();
     *csr.getTagAddress() = csr.peekTaskCount();
     retVal = myCmdQ.enqueueStagingBufferMemcpy(
         false,    // cl_bool blocking_copy

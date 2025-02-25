@@ -1,15 +1,15 @@
 #
-# Copyright (C) 2018-2024 Intel Corporation
+# Copyright (C) 2018-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
 
-set(NEO_OCL_VERSION_MAJOR 24)
-set(NEO_OCL_VERSION_MINOR 52)
+set(NEO_OCL_VERSION_MAJOR 25)
+set(NEO_OCL_VERSION_MINOR 05)
 
 if(NOT DEFINED NEO_VERSION_BUILD)
-  set(NEO_VERSION_BUILD 032224)
-  set(NEO_REVISION 032224)
+  set(NEO_VERSION_BUILD 032567)
+  set(NEO_REVISION 032567)
 else()
   set(NEO_REVISION ${NEO_VERSION_BUILD})
 endif()

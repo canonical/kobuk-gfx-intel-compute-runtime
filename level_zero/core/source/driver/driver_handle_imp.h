@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -25,12 +25,8 @@ class HostPointerManager;
 struct FabricVertex;
 struct FabricEdge;
 struct Image;
+class ExternalSemaphoreController;
 
-enum L0DeviceHierarchyMode {
-    L0_DEVICE_HIERARCHY_COMPOSITE,
-    L0_DEVICE_HIERARCHY_FLAT,
-    L0_DEVICE_HIERARCHY_COMBINED
-};
 #pragma pack(1)
 struct IpcMemoryData {
     uint64_t handle = 0;
@@ -125,7 +121,6 @@ struct DriverHandleImp : public DriverHandle {
     ze_result_t createRTASParallelOperation(ze_rtas_parallel_operation_exp_handle_t *phParallelOperation) override;
     ze_result_t formatRTASCompatibilityCheck(ze_rtas_format_exp_t rtasFormatA, ze_rtas_format_exp_t rtasFormatB) override;
 
-    ze_result_t parseAffinityMaskCombined(uint32_t *pCount, ze_device_handle_t *phDevices);
     std::map<uint64_t, IpcHandleTracking *> &getIPCHandleMap() { return this->ipcHandles; };
     [[nodiscard]] std::unique_lock<std::mutex> lockIPCHandleMap() { return std::unique_lock<std::mutex>(this->ipcHandleMapMutex); };
     void initHostUsmAllocPool();
@@ -155,6 +150,9 @@ struct DriverHandleImp : public DriverHandle {
     std::unique_ptr<NEO::OsLibrary> rtasLibraryHandle;
     bool rtasLibraryUnavailable = false;
 
+    std::unique_ptr<ExternalSemaphoreController> externalSemaphoreController;
+    std::mutex externalSemaphoreControllerMutex;
+
     uint32_t numDevices = 0;
 
     std::map<uint64_t, IpcHandleTracking *> ipcHandles;
@@ -169,7 +167,6 @@ struct DriverHandleImp : public DriverHandle {
     bool enableSysman = false;
     bool enablePciIdDeviceOrder = false;
     uint8_t powerHint = 0;
-    L0DeviceHierarchyMode deviceHierarchyMode = L0_DEVICE_HIERARCHY_COMPOSITE;
 
     // Error messages per thread, variable initialized / destoryed per thread,
     // not based on the lifetime of the object of a class.

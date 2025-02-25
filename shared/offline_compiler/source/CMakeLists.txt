@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020-2024 Intel Corporation
+# Copyright (C) 2020-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -19,7 +19,8 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/ail/ail_configuration.h
     ${NEO_SHARED_DIRECTORY}/ail/ail_configuration.cpp
     ${NEO_SHARED_DIRECTORY}/ail${BRANCH_DIR_SUFFIX}ail_configuration_extra.cpp
-    ${NEO_SHARED_DIRECTORY}/ail//ail_configuration_base.inl
+    ${NEO_SHARED_DIRECTORY}/ail/ail_configuration_base.inl
+    ${NEO_SHARED_DIRECTORY}/ail/ail_ov_comp_wa.h
     ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_options.cpp
     ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_options.h
     ${NEO_SHARED_DIRECTORY}/compiler_interface/compiler_options_extra.h
@@ -50,7 +51,7 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/zebin_decoder.h
     ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/zeinfo_decoder.cpp
     ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/zeinfo_decoder.h
-    ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/${BRANCH_DIR_SUFFIX}zeinfo_extra.cpp
+    ${NEO_SHARED_DIRECTORY}/device_binary_format/zebin/${BRANCH_DIR_SUFFIX}zeinfo_decoder_ext.cpp
     ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}devices.inl
     ${NEO_SHARED_DIRECTORY}/dll/devices/devices_base.inl
     ${NEO_SHARED_DIRECTORY}/dll/devices${BRANCH_DIR_SUFFIX}/product_config.inl
@@ -65,7 +66,7 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_options_parser.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/compiler_options_parser.h
     ${NEO_SHARED_DIRECTORY}/helpers/cache_policy.h
-    ${NEO_SHARED_DIRECTORY}/helpers/cache_policy_bdw_and_later.inl
+    ${NEO_SHARED_DIRECTORY}/helpers/cache_policy_tgllp_and_later.inl
     ${NEO_SHARED_DIRECTORY}/helpers/cache_policy_dg2_and_later.inl
     ${NEO_SHARED_DIRECTORY}/helpers/debug_helpers.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/hw_info.cpp
@@ -75,6 +76,7 @@ set(CLOC_LIB_SRCS_LIB
     ${NEO_SHARED_DIRECTORY}/helpers/path.h
     ${NEO_SHARED_DIRECTORY}/helpers/product_config_helper.cpp
     ${NEO_SHARED_DIRECTORY}/helpers/product_config_helper.h
+    ${NEO_SHARED_DIRECTORY}/kernel/${BRANCH_DIR_SUFFIX}kernel_descriptor_ext.cpp
     ${NEO_SHARED_DIRECTORY}/os_interface/os_library.cpp
     ${NEO_SHARED_DIRECTORY}/os_interface/os_library.h
     ${NEO_SHARED_DIRECTORY}/sku_info/definitions${BRANCH_DIR_SUFFIX}sku_info.cpp
@@ -152,6 +154,7 @@ if(WIN32)
        ${NEO_SHARED_DIRECTORY}/helpers/windows/path.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/windows/sys_calls.cpp
        ${NEO_SHARED_DIRECTORY}/utilities/windows/directory.cpp
+       ${NEO_SHARED_DIRECTORY}/ail/windows${BRANCH_DIR_SUFFIX}/ail_ov_comp_wa_windows.cpp
        ${OCLOC_DIRECTORY}/source/windows/ocloc_supported_devices_helper_windows.cpp
   )
 else()
@@ -167,6 +170,7 @@ else()
        ${NEO_SHARED_DIRECTORY}/helpers/linux/path.cpp
        ${NEO_SHARED_DIRECTORY}/os_interface/linux/sys_calls_linux.cpp
        ${NEO_SHARED_DIRECTORY}/utilities/linux/directory.cpp
+       ${NEO_SHARED_DIRECTORY}/ail/linux/ail_ov_comp_wa_linux.cpp
        ${OCLOC_DIRECTORY}/source/linux/os_library_ocloc_helper.cpp
        ${OCLOC_DIRECTORY}/source/linux/ocloc_supported_devices_helper_linux.cpp
   )
@@ -465,7 +469,9 @@ elseif(UNIX)
     set(NEO_OCLOC_FORMER_LIB_NAME ${CMAKE_SHARED_LIBRARY_PREFIX}${OCLOC_NAME}${NEO__LEGACY_NAME_SUFFIX}${CMAKE_SHARED_LIBRARY_SUFFIX})
   endif()
 
-  set(OCLOC_OUTPUT_NAME_SUFFIX "-${NEO_OCL_VERSION_MAJOR}.${NEO_OCL_VERSION_MINOR}.${NEO_OCLOC_VERSION_MODE}")
+  if(NOT NEO_BUILD_UNVERSIONED_OCLOC)
+    set(OCLOC_OUTPUT_NAME_SUFFIX "-${NEO_OCL_VERSION_MAJOR}.${NEO_OCL_VERSION_MINOR}.${NEO_OCLOC_VERSION_MODE}")
+  endif()
 endif()
 set_target_properties(${OCLOC_NAME} PROPERTIES OUTPUT_NAME ${OCLOC_NAME}${OCLOC_OUTPUT_NAME_SUFFIX})
 set_target_properties(${OCLOC_NAME}_lib PROPERTIES OUTPUT_NAME ${OCLOC_NAME}${LIBOCLOC_OUTPUT_NAME_SUFFIX})

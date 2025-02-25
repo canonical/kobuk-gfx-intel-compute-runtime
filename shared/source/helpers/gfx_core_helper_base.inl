@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -681,8 +681,8 @@ uint32_t GfxCoreHelperHw<GfxFamily>::calculateNumThreadsPerThreadGroup(uint32_t 
 }
 
 template <typename GfxFamily>
-char const *GfxCoreHelperHw<GfxFamily>::getDefaultDeviceHierarchy() const {
-    return deviceHierarchyComposite;
+DeviceHierarchyMode GfxCoreHelperHw<GfxFamily>::getDefaultDeviceHierarchy() const {
+    return DeviceHierarchyMode::composite;
 }
 
 template <typename GfxFamily>
@@ -725,6 +725,11 @@ aub_stream::EngineType GfxCoreHelperHw<GfxFamily>::getDefaultHpCopyEngine(const 
 template <typename GfxFamily>
 void GfxCoreHelperHw<GfxFamily>::initializeDefaultHpCopyEngine(const HardwareInfo &hwInfo) {
     hpCopyEngineType = aub_stream::EngineType::NUM_ENGINES;
+}
+
+template <typename GfxFamily>
+void GfxCoreHelperHw<GfxFamily>::initializeFromProductHelper(const ProductHelper &productHelper) {
+    secondaryContextsEnabled = productHelper.areSecondaryContextsSupported();
 }
 
 template <typename GfxFamily>

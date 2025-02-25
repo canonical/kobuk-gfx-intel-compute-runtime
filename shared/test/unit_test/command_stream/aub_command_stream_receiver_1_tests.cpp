@@ -74,7 +74,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenDebugFlagSetWhenCreatingContextThen
     aubCsr->aubManager = &mockAubManager;
 
     aubCsr->setupContext(*pDevice->getDefaultEngine().osContext);
-    EXPECT_EQ(0x123u, mockAubManager.contextFlags);
+    EXPECT_EQ(0x123u, mockAubManager.contextFlags & 0x123);
 }
 
 TEST_F(AubCommandStreamReceiverTests, givenAubCommandStreamReceiverWhenItIsCreatedWithWrongGfxCoreFamilyThenNullPointerShouldBeReturned) {
@@ -350,6 +350,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCsrAndResidentAllocationWhenProc
 
     auto commandStreamReceiver = std::make_unique<MockAubCsr<FamilyType>>("", true, *pDevice->getExecutionEnvironment(), 0, pDevice->getDeviceBitfield());
 
+    pDevice->getExecutionEnvironment()->memoryManager->reInitLatestContextId();
     auto osContext = pDevice->getExecutionEnvironment()->memoryManager->createAndRegisterOsContext(commandStreamReceiver.get(),
                                                                                                    EngineDescriptorHelper::getDefaultDescriptor({getChosenEngineType(*defaultHwInfo), EngineUsage::regular},
                                                                                                                                                 PreemptionHelper::getDefaultPreemptionMode(*defaultHwInfo)));
@@ -362,7 +363,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenAubCsrAndResidentAllocationWhenProc
 
     MockGraphicsAllocation allocation2(reinterpret_cast<void *>(0x5000), 0x5000, 0x1000);
     GraphicsAllocation *allocPtr = &allocation2;
-    memoryOperationsHandler->makeResident(pDevice, ArrayRef<GraphicsAllocation *>(&allocPtr, 1), false);
+    memoryOperationsHandler->makeResident(pDevice, ArrayRef<GraphicsAllocation *>(&allocPtr, 1), false, false);
     EXPECT_TRUE(mockManager->writeMemory2Called);
 
     mockManager->storeAllocationParams = true;
@@ -1223,7 +1224,7 @@ HWTEST_F(AubCommandStreamReceiverTests, WhenBlitBufferIsCalledThenCounterIsCorre
     BlitProperties blitProperties = BlitProperties::constructPropertiesForCopy(&allocation, &allocation, 0, 0, 0, 0, 0, 0, 0, aubCsr->getClearColorAllocation());
     BlitPropertiesContainer blitPropertiesContainer;
     blitPropertiesContainer.push_back(blitProperties);
-    aubCsr->flushBcsTask(blitPropertiesContainer, true, false, *pDevice);
+    aubCsr->flushBcsTask(blitPropertiesContainer, true, *pDevice);
     EXPECT_EQ(1u, aubCsr->blitBufferCalled);
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -84,6 +84,7 @@ struct RootDeviceEnvironment : NonCopyableClass {
     void initHelpers();
     void initGfxCoreHelper();
     void initializeGfxCoreHelperFromHwInfo();
+    void initializeGfxCoreHelperFromProductHelper();
     void initApiGfxCoreHelper();
     void initCompilerProductHelper();
     void initReleaseHelper();

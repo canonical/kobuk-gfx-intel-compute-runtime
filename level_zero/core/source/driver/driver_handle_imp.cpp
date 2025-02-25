@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,6 +34,7 @@
 #include "level_zero/core/source/fabric/fabric.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/source/image/image.h"
+#include "level_zero/core/source/semaphore/external_semaphore_imp.h"
 #include "level_zero/driver_experimental/zex_common.h"
 
 #include "driver_version.h"
@@ -183,10 +184,14 @@ ze_result_t DriverHandleImp::getExtensionProperties(uint32_t *pCount,
 }
 
 DriverHandleImp::~DriverHandleImp() {
+    if (this->externalSemaphoreController) {
+        this->externalSemaphoreController.reset();
+    }
+
     if (memoryManager != nullptr) {
         memoryManager->peekExecutionEnvironment().prepareForCleanup();
         if (this->svmAllocsManager) {
-            this->svmAllocsManager->trimUSMDeviceAllocCache();
+            this->svmAllocsManager->cleanupUSMAllocCaches();
             this->usmHostMemAllocPool.cleanup();
         }
     }
@@ -214,7 +219,6 @@ DriverHandleImp::~DriverHandleImp() {
     this->fabricIndirectEdges.clear();
 
     if (this->svmAllocsManager) {
-        this->svmAllocsManager->trimUSMDeviceAllocCache();
         delete this->svmAllocsManager;
         this->svmAllocsManager = nullptr;
     }
@@ -232,9 +236,6 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
 
     for (auto &neoDevice : neoDevices) {
         ze_result_t returnValue = ZE_RESULT_SUCCESS;
-        if (!neoDevice->getHardwareInfo().capabilityTable.levelZeroSupported) {
-            continue;
-        }
 
         if (this->memoryManager == nullptr) {
             this->memoryManager = neoDevice->getMemoryManager();
@@ -295,17 +296,7 @@ DriverHandle *DriverHandle::create(std::vector<std::unique_ptr<NEO::Device>> dev
     driverHandle->enableProgramDebugging = static_cast<NEO::DebuggingMode>(envVariables.programDebugging);
     driverHandle->enableSysman = envVariables.sysman;
     driverHandle->enablePciIdDeviceOrder = envVariables.pciIdDeviceOrder;
-    char const *preferredDeviceHierarchy = envVariables.deviceHierarchyMode.c_str();
-    if ((strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyUnk) == 0) || ((strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyComposite) != 0) && (strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyFlat) != 0) && (strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyCombined) != 0))) {
-        preferredDeviceHierarchy = devices[0]->getGfxCoreHelper().getDefaultDeviceHierarchy();
-    }
-    if (strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyComposite) == 0) {
-        driverHandle->deviceHierarchyMode = L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_COMPOSITE;
-    } else if (strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyFlat) == 0) {
-        driverHandle->deviceHierarchyMode = L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT;
-    } else if (strcmp(preferredDeviceHierarchy, NEO::deviceHierarchyCombined) == 0) {
-        driverHandle->deviceHierarchyMode = L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_COMBINED;
-    }
+
     ze_result_t res = driverHandle->initialize(std::move(devices));
     if (res != ZE_RESULT_SUCCESS) {
         delete driverHandle;
@@ -318,80 +309,6 @@ DriverHandle *DriverHandle::create(std::vector<std::unique_ptr<NEO::Device>> dev
     driverHandle->getMemoryManager()->setForceNonSvmForExternalHostPtr(true);
 
     return driverHandle;
-}
-
-ze_result_t DriverHandleImp::parseAffinityMaskCombined(uint32_t *pCount, ze_device_handle_t *phDevices) {
-    const auto &affinityMaskString = NEO::debugManager.flags.ZE_AFFINITY_MASK.get();
-
-    uint32_t totalNumDevices = 0u;
-    for (auto &device : this->devices) {
-        auto deviceImpl = static_cast<DeviceImp *>(device);
-        totalNumDevices += (deviceImpl->numSubDevices > 0 ? deviceImpl->numSubDevices : 1u);
-    }
-
-    auto affinityMaskEntries = StringHelpers::split(affinityMaskString, ",");
-
-    bool retrieveCount = false;
-    if (*pCount == 0) {
-        retrieveCount = true;
-    }
-
-    if (phDevices == nullptr && !retrieveCount) {
-        return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-    }
-
-    uint32_t deviceIndex = 0;
-    for (const auto &entry : affinityMaskEntries) {
-        auto subEntries = StringHelpers::split(entry, ".");
-        uint32_t affinityIndex = StringHelpers::toUint32t(subEntries[0]);
-
-        if (affinityIndex > totalNumDevices) {
-            continue;
-        }
-
-        // Combined Device Hierarchy
-        // so ignore X.Y
-        if (subEntries.size() > 1) {
-            continue;
-        }
-
-        uint32_t actualIndex = 0;
-        for (auto device : devices) {
-            auto deviceImpl = static_cast<DeviceImp *>(device);
-            if (deviceImpl->numSubDevices > 0) {
-                for (auto subdevice : deviceImpl->subDevices) {
-                    if (affinityIndex == actualIndex) {
-                        if (retrieveCount) {
-                            *pCount += 1;
-                        } else {
-                            phDevices[deviceIndex++] = subdevice;
-                        }
-                    }
-                    actualIndex++;
-                    if (!retrieveCount) {
-                        if (deviceIndex == *pCount) {
-                            return ZE_RESULT_SUCCESS;
-                        }
-                    }
-                }
-            } else {
-                if (affinityIndex == actualIndex) {
-                    if (retrieveCount) {
-                        *pCount += 1;
-                    } else {
-                        phDevices[deviceIndex++] = device;
-                    }
-                }
-                actualIndex++;
-                if (!retrieveCount) {
-                    if (deviceIndex == *pCount) {
-                        return ZE_RESULT_SUCCESS;
-                    }
-                }
-            }
-        }
-    }
-    return ZE_RESULT_SUCCESS;
 }
 
 void DriverHandleImp::initHostUsmAllocPool() {
@@ -409,24 +326,10 @@ void DriverHandleImp::initHostUsmAllocPool() {
 }
 
 ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phDevices) {
-    bool exposeSubDevices = false;
 
-    // If the user has requested FLAT device hierarchy model, then report all the sub devices as devices.
-    if (this->deviceHierarchyMode == L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT || this->deviceHierarchyMode == L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_COMBINED) {
-        exposeSubDevices = true;
-    }
+    // If the user has requested FLAT or COMBINED device hierarchy model, then report all the sub devices as devices.
+    bool exposeSubDevices = (this->devices.size() && this->devices[0]->getNEODevice()->getExecutionEnvironment()->getDeviceHierarchyMode() != NEO::DeviceHierarchyMode::composite);
 
-    const auto &affinityMaskString = NEO::debugManager.flags.ZE_AFFINITY_MASK.get();
-
-    bool affinitySet = true;
-    if (affinityMaskString.compare("default") == 0 ||
-        affinityMaskString.empty()) {
-        affinitySet = false;
-    }
-
-    if (this->deviceHierarchyMode == L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_COMBINED && affinitySet) {
-        return parseAffinityMaskCombined(pCount, phDevices);
-    }
     uint32_t numDevices = 0;
     if (exposeSubDevices) {
         for (auto &device : this->devices) {
@@ -953,10 +856,7 @@ ze_result_t DriverHandleImp::fabricVertexGetExp(uint32_t *pCount, ze_fabric_vert
         this->initializeVertexes();
     }
 
-    bool exposeSubDevices = false;
-    if (deviceHierarchyMode == L0::L0DeviceHierarchyMode::L0_DEVICE_HIERARCHY_FLAT) {
-        exposeSubDevices = true;
-    }
+    bool exposeSubDevices = this->devices[0]->getNEODevice()->getExecutionEnvironment()->getDeviceHierarchyMode() != NEO::DeviceHierarchyMode::composite;
 
     if (*pCount == 0) {
         if (exposeSubDevices) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -132,6 +132,34 @@ class StagingBufferManagerFixture : public DeviceFixture {
         delete[] imageData;
     }
 
+    void bufferTransferThroughStagingBuffers(size_t copySize, size_t expectedChunks, size_t expectedAllocations, CommandStreamReceiver *csr) {
+        auto buffer = new unsigned char[copySize];
+        auto nonUsmBuffer = new unsigned char[copySize];
+
+        size_t chunkCounter = 0;
+        memset(buffer, 0, copySize);
+        memset(nonUsmBuffer, 0xFF, copySize);
+
+        ChunkTransferBufferFunc chunkCopy = [&](void *stagingBuffer, size_t offset, size_t size) {
+            chunkCounter++;
+            memcpy(buffer + offset, stagingBuffer, size);
+            reinterpret_cast<MockCommandStreamReceiver *>(csr)->taskCount++;
+            return 0;
+        };
+        auto initialNumOfUsmAllocations = svmAllocsManager->svmAllocs.getNumAllocs();
+        auto ret = stagingBufferManager->performBufferTransfer(nonUsmBuffer, 0, copySize, chunkCopy, csr, false);
+        auto newUsmAllocations = svmAllocsManager->svmAllocs.getNumAllocs() - initialNumOfUsmAllocations;
+
+        EXPECT_EQ(0, ret.chunkCopyStatus);
+        EXPECT_EQ(WaitStatus::ready, ret.waitStatus);
+        EXPECT_EQ(0, memcmp(buffer, nonUsmBuffer, copySize));
+        EXPECT_EQ(expectedChunks, chunkCounter);
+        EXPECT_EQ(expectedAllocations, newUsmAllocations);
+
+        delete[] buffer;
+        delete[] nonUsmBuffer;
+    }
+
     constexpr static size_t stagingBufferSize = MemoryConstants::megaByte * 2;
     DebugManagerStateRestore restorer;
     std::unique_ptr<MockSVMAllocsManager> svmAllocsManager;
@@ -198,16 +226,16 @@ TEST_F(StagingBufferManagerTest, givenStagingBufferEnabledWhenValidForImageWrite
         {nonUsmBuffer, true, false},
     };
     for (auto i = 0; i < 4; i++) {
-        auto actualValid = stagingBufferManager->isValidForStagingTransferImage(*pDevice, copyParamsStruct[i].ptr, copyParamsStruct[i].hasDependencies);
+        auto actualValid = stagingBufferManager->isValidForStagingTransfer(*pDevice, copyParamsStruct[i].ptr, copyParamsStruct[i].hasDependencies);
         EXPECT_EQ(actualValid, copyParamsStruct[i].expectValid);
     }
 
     debugManager.flags.EnableCopyWithStagingBuffers.set(0);
-    EXPECT_FALSE(stagingBufferManager->isValidForStagingTransferImage(*pDevice, nonUsmBuffer, false));
+    EXPECT_FALSE(stagingBufferManager->isValidForStagingTransfer(*pDevice, nonUsmBuffer, false));
 
     debugManager.flags.EnableCopyWithStagingBuffers.set(-1);
     auto isStaingBuffersEnabled = pDevice->getProductHelper().isStagingBuffersEnabled();
-    EXPECT_EQ(isStaingBuffersEnabled, stagingBufferManager->isValidForStagingTransferImage(*pDevice, nonUsmBuffer, false));
+    EXPECT_EQ(isStaingBuffersEnabled, stagingBufferManager->isValidForStagingTransfer(*pDevice, nonUsmBuffer, false));
     svmAllocsManager->freeSVMAlloc(usmBuffer);
 }
 
@@ -570,6 +598,57 @@ TEST_F(StagingBufferManagerTest, givenStagingBufferWhenFailedChunkImageWriteWith
         return 0;
     };
     auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, MemoryConstants::megaByte, chunkWrite, csr, false);
+    EXPECT_EQ(expectedErrorCode, ret.chunkCopyStatus);
+    EXPECT_EQ(WaitStatus::ready, ret.waitStatus);
+    EXPECT_EQ(remainderCounter, chunkCounter);
+    delete[] ptr;
+}
+
+TEST_F(StagingBufferManagerTest, givenStagingBufferWhenPerformBufferTransferThenCopyData) {
+    constexpr size_t numOfChunkCopies = 8;
+    constexpr size_t remainder = 1024;
+    constexpr size_t totalCopySize = stagingBufferSize * numOfChunkCopies + remainder;
+    bufferTransferThroughStagingBuffers(totalCopySize, numOfChunkCopies + 1, 1, csr);
+}
+
+TEST_F(StagingBufferManagerTest, givenStagingBufferWhenPerformBufferTransferWithoutRemainderThenNoRemainderCalled) {
+    constexpr size_t numOfChunkCopies = 8;
+    constexpr size_t totalCopySize = stagingBufferSize * numOfChunkCopies;
+    bufferTransferThroughStagingBuffers(totalCopySize, numOfChunkCopies, 1, csr);
+}
+
+TEST_F(StagingBufferManagerTest, givenStagingBufferWhenFailedChunkBufferWriteThenEarlyReturnWithFailure) {
+    size_t expectedChunks = 4;
+    constexpr int expectedErrorCode = 1;
+    auto ptr = new unsigned char[stagingBufferSize * expectedChunks];
+
+    size_t chunkCounter = 0;
+    ChunkTransferBufferFunc chunkWrite = [&](void *stagingBuffer, size_t offset, size_t size) -> int32_t {
+        ++chunkCounter;
+        return expectedErrorCode;
+    };
+    auto ret = stagingBufferManager->performBufferTransfer(ptr, 0, stagingBufferSize * expectedChunks, chunkWrite, csr, false);
+    EXPECT_EQ(expectedErrorCode, ret.chunkCopyStatus);
+    EXPECT_EQ(WaitStatus::ready, ret.waitStatus);
+    EXPECT_EQ(1u, chunkCounter);
+    delete[] ptr;
+}
+
+TEST_F(StagingBufferManagerTest, givenStagingBufferWhenFailedChunkBufferWriteWithRemainderThenReturnWithFailure) {
+    size_t expectedChunks = 2;
+    constexpr int expectedErrorCode = 1;
+    auto ptr = new unsigned char[stagingBufferSize * expectedChunks + 512];
+
+    size_t chunkCounter = 0;
+    size_t remainderCounter = expectedChunks + 1;
+    ChunkTransferBufferFunc chunkWrite = [&](void *stagingBuffer, size_t offset, size_t size) -> int32_t {
+        ++chunkCounter;
+        if (chunkCounter == remainderCounter) {
+            return expectedErrorCode;
+        }
+        return 0;
+    };
+    auto ret = stagingBufferManager->performBufferTransfer(ptr, 0, stagingBufferSize * expectedChunks + 512, chunkWrite, csr, false);
     EXPECT_EQ(expectedErrorCode, ret.chunkCopyStatus);
     EXPECT_EQ(WaitStatus::ready, ret.waitStatus);
     EXPECT_EQ(remainderCounter, chunkCounter);

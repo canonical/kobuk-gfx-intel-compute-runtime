@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -221,7 +221,7 @@ CommandList *CommandList::createImmediate(uint32_t productFamily, Device *device
             bool enabledCmdListSharing = !NEO::EngineHelper::isCopyOnlyEngineType(engineGroupType) && commandList->isFlushTaskSubmissionEnabled;
             commandList->immediateCmdListHeapSharing = L0GfxCoreHelper::enableImmediateCmdListHeapSharing(rootDeviceEnvironment, enabledCmdListSharing);
         }
-        csr->initializeResources(false);
+        csr->initializeResources(false, device->getDevicePreemptionMode());
         csr->initDirectSubmission();
 
         auto commandQueue = CommandQueue::create(productFamily, device, csr, &cmdQdesc, NEO::EngineHelper::isCopyOnlyEngineType(engineGroupType), internalUsage, true, returnValue);
@@ -292,7 +292,7 @@ void CommandListImp::enableCopyOperationOffload(uint32_t productFamily, Device *
 
 void CommandListImp::setStreamPropertiesDefaultSettings(NEO::StreamProperties &streamProperties) {
     if (this->stateComputeModeTracking) {
-        streamProperties.stateComputeMode.setPropertiesCoherencyDevicePreemption(cmdListDefaultCoherency, this->commandListPreemptionMode, true);
+        streamProperties.stateComputeMode.setPropertiesPerContext(cmdListDefaultCoherency, this->commandListPreemptionMode, true);
     }
 
     streamProperties.frontEndState.setPropertiesDisableOverdispatch(cmdListDefaultDisableOverdispatch, true);
@@ -329,7 +329,7 @@ void CommandListImp::storeReferenceTsToMappedEvents(bool isClearEnabled) {
 }
 
 void CommandListImp::addToMappedEventList(Event *event) {
-    if (event && event->hasKerneMappedTsCapability) {
+    if (event && event->hasKernelMappedTsCapability) {
         if (std::find(mappedTsEventList.begin(), mappedTsEventList.end(), event) == mappedTsEventList.end()) {
             mappedTsEventList.push_back(event);
         }

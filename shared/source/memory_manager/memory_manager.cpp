@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -83,9 +83,11 @@ MemoryManager::MemoryManager(ExecutionEnvironment &executionEnvironment) : execu
         localMemAllocsSize[rootDeviceIndex].store(0u);
     }
 
-    if (anyLocalMemorySupported) {
-        pageFaultManager = PageFaultManager::create();
-        prefetchManager = PrefetchManager::create();
+    if (anyLocalMemorySupported || debugManager.isTbxPageFaultManagerEnabled()) {
+        pageFaultManager = CpuPageFaultManager::create();
+        if (anyLocalMemorySupported) {
+            prefetchManager = PrefetchManager::create();
+        }
     }
 
     if (debugManager.flags.EnableMultiStorageResources.get() != -1) {
@@ -324,6 +326,7 @@ void MemoryManager::checkGpuUsageAndDestroyGraphicsAllocations(GraphicsAllocatio
             auto osContextId = engine.osContext->getContextId();
             auto allocationTaskCount = gfxAllocation->getTaskCount(osContextId);
             if (gfxAllocation->isUsedByOsContext(osContextId) &&
+                engine.commandStreamReceiver->getTagAllocation() != nullptr &&
                 allocationTaskCount > *engine.commandStreamReceiver->getTagAddress()) {
                 engine.commandStreamReceiver->getInternalAllocationStorage()->storeAllocation(std::unique_ptr<GraphicsAllocation>(gfxAllocation),
                                                                                               DEFERRED_DEALLOCATION);

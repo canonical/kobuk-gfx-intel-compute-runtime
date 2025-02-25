@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -71,6 +71,7 @@ class ProductHelperHw : public ProductHelper {
     bool blitEnqueuePreferred(bool isWriteToImageFromBuffer) const override;
     bool isKmdMigrationSupported() const override;
     bool isDisableScratchPagesSupported() const override;
+    bool areSecondaryContextsSupported() const override;
     bool isTile64With3DSurfaceOnBCSSupported(const HardwareInfo &hwInfo) const override;
     bool isDcFlushAllowed() const override;
     bool isDcFlushMitigated() const override;
@@ -88,8 +89,10 @@ class ProductHelperHw : public ProductHelper {
     bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const override;
     uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const override;
+    void adjustScratchSize(size_t &requiredScratchSize) const override;
     size_t getSvmCpuAlignment() const override;
     bool isComputeDispatchAllWalkerEnableInCfeStateRequired(const HardwareInfo &hwInfo) const override;
+    bool adjustDispatchAllRequired(const HardwareInfo &hwInfo) const override;
     bool isVmBindPatIndexProgrammingSupported() const override;
     bool isIpSamplingSupported(const HardwareInfo &hwInfo) const override;
     bool isGrfNumReportedWithScm() const override;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -175,7 +175,7 @@ class MockCommandStreamReceiver : public CommandStreamReceiver {
         return WaitStatus::ready;
     }
 
-    TaskCountType flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override { return taskCount; };
+    TaskCountType flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, Device &device) override { return taskCount; };
 
     CommandStreamReceiverType getType() const override {
         return commandStreamReceiverType;
@@ -314,6 +314,15 @@ class MockCommandStreamReceiverWithFailingFlush : public MockCommandStreamReceiv
     }
 };
 
+template <bool isRelaxedOrderingEnabled>
+class MockCommandStreamReceiverWithDirectSubmissionRelaxedOrdering : public MockCommandStreamReceiver {
+  public:
+    using MockCommandStreamReceiver::MockCommandStreamReceiver;
+    bool directSubmissionRelaxedOrderingEnabled() const override {
+        return isRelaxedOrderingEnabled;
+    }
+};
+
 template <typename GfxFamily>
 class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
   public:
@@ -323,6 +332,7 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiverHw<GfxFamily>::postInitFlagsSetup;
     using CommandStreamReceiverHw<GfxFamily>::programL3;
     using CommandStreamReceiverHw<GfxFamily>::programVFEState;
+    using CommandStreamReceiverHw<GfxFamily>::directSubmission;
     using CommandStreamReceiver::activePartitions;
     using CommandStreamReceiver::activePartitionsConfig;
     using CommandStreamReceiver::clearColorAllocation;
@@ -404,9 +414,9 @@ class MockCsrHw2 : public CommandStreamReceiverHw<GfxFamily> {
         return completionStamp;
     }
 
-    TaskCountType flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, bool profilingEnabled, Device &device) override {
+    TaskCountType flushBcsTask(const BlitPropertiesContainer &blitPropertiesContainer, bool blocking, Device &device) override {
         if (!skipBlitCalls) {
-            return CommandStreamReceiverHw<GfxFamily>::flushBcsTask(blitPropertiesContainer, blocking, profilingEnabled, device);
+            return CommandStreamReceiverHw<GfxFamily>::flushBcsTask(blitPropertiesContainer, blocking, device);
         }
         return taskCount;
     }

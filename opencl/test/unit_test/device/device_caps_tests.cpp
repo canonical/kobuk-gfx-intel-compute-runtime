@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -42,6 +42,7 @@ using namespace NEO;
 
 struct DeviceGetCapsTest : public ::testing::Test {
     void SetUp() override {
+        debugManager.flags.ContextGroupSize.set(0);
         MockSipData::clearUseFlags();
         backupSipInitType = std::make_unique<VariableBackup<bool>>(&MockSipData::useMockSip, true);
     }
@@ -130,6 +131,7 @@ struct DeviceGetCapsTest : public ::testing::Test {
         EXPECT_EQ(clDevice.getDeviceInfo().openclCFeatures.end(), ++openclCFeatureIterator);
     }
 
+    DebugManagerStateRestore restorer;
     std::unique_ptr<VariableBackup<bool>> backupSipInitType;
 };
 
@@ -858,6 +860,13 @@ TEST_F(DeviceGetCapsTest, WhenDeviceIsCreatedThenCreateCommandQueueExtensionIsRe
     const auto &caps = device->getDeviceInfo();
 
     EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_khr_create_command_queue")));
+}
+
+TEST_F(DeviceGetCapsTest, WhenDeviceIsCreatedThenExpectAssumeExtensionIsReported) {
+    auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    const auto &caps = device->getDeviceInfo();
+
+    EXPECT_TRUE(hasSubstr(caps.deviceExtensions, std::string("cl_khr_expect_assume")));
 }
 
 TEST_F(DeviceGetCapsTest, WhenDeviceIsCreatedThenExtendedBitOpsExtensionIsReported) {
