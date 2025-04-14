@@ -115,7 +115,8 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingMemoryCapabilitiesThenC
             }
         }
 
-        auto singleDeviceSharedMemCapabilities = productHelper->getSingleDeviceSharedMemCapabilities();
+        constexpr bool isKmdMigrationAvailable{false};
+        auto singleDeviceSharedMemCapabilities = productHelper->getSingleDeviceSharedMemCapabilities(isKmdMigrationAvailable);
         if (singleDeviceSharedMemCapabilities > 0) {
             if (capabilityBitset.test(static_cast<uint32_t>(UsmAccessCapabilities::sharedSingleDevice))) {
                 EXPECT_TRUE(UnifiedSharedMemoryFlags::concurrentAccess & singleDeviceSharedMemCapabilities);
@@ -142,11 +143,20 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingMemoryCapabilitiesThenC
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperAndSingleDeviceSharedMemAccessConcurrentAtomicEnabledIfKmdMigrationEnabled) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.EnableUsmConcurrentAccessSupport.set(0);
 
-    auto singleDeviceSharedMemCapabilities = productHelper->getSingleDeviceSharedMemCapabilities();
-    if ((singleDeviceSharedMemCapabilities > 0) && (productHelper->isKmdMigrationSupported())) {
-        EXPECT_TRUE(UnifiedSharedMemoryFlags::concurrentAccess & singleDeviceSharedMemCapabilities);
-        EXPECT_TRUE(UnifiedSharedMemoryFlags::concurrentAtomicAccess & singleDeviceSharedMemCapabilities);
+    for (const bool isKmdMigrationAvailable : std::array<bool, 2>{false, true}) {
+        auto singleDeviceSharedMemCapabilities = productHelper->getSingleDeviceSharedMemCapabilities(isKmdMigrationAvailable);
+        EXPECT_EQ((singleDeviceSharedMemCapabilities & UnifiedSharedMemoryFlags::access), UnifiedSharedMemoryFlags::access);
+        EXPECT_EQ((singleDeviceSharedMemCapabilities & UnifiedSharedMemoryFlags::atomicAccess), UnifiedSharedMemoryFlags::atomicAccess);
+        if (isKmdMigrationAvailable) {
+            EXPECT_EQ((singleDeviceSharedMemCapabilities & UnifiedSharedMemoryFlags::concurrentAccess), UnifiedSharedMemoryFlags::concurrentAccess);
+            EXPECT_EQ((singleDeviceSharedMemCapabilities & UnifiedSharedMemoryFlags::concurrentAtomicAccess), UnifiedSharedMemoryFlags::concurrentAtomicAccess);
+        } else {
+            EXPECT_EQ((singleDeviceSharedMemCapabilities & UnifiedSharedMemoryFlags::concurrentAccess), 0UL);
+            EXPECT_EQ((singleDeviceSharedMemCapabilities & UnifiedSharedMemoryFlags::concurrentAtomicAccess), 0UL);
+        }
     }
 }
 
@@ -459,6 +469,10 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfKmdMigrationIsSupported
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsSupportedThenReturnFalse, IsBeforeXeHpcCore) {
     EXPECT_FALSE(productHelper->isDisableScratchPagesSupported());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsSupportedForDebuggerThenReturnTrue, IsNotDG2) {
+    EXPECT_TRUE(productHelper->isDisableScratchPagesRequiredForDebugger());
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenCheckBlitEnqueuePreferredThenReturnTrue) {
@@ -796,16 +810,28 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsBufferPoolAllocator
     EXPECT_TRUE(productHelper->isBufferPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
-    EXPECT_FALSE(productHelper->isUsmPoolAllocatorSupported());
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
+    EXPECT_FALSE(productHelper->isHostUsmPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
-    EXPECT_FALSE(productHelper->isUsmPoolAllocatorSupported());
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
+    EXPECT_FALSE(productHelper->isDeviceUsmPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
-    EXPECT_TRUE(productHelper->isUsmPoolAllocatorSupported());
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
+    EXPECT_FALSE(productHelper->isHostUsmPoolAllocatorSupported());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
+    EXPECT_FALSE(productHelper->isDeviceUsmPoolAllocatorSupported());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
+    EXPECT_TRUE(productHelper->isHostUsmPoolAllocatorSupported());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
+    EXPECT_TRUE(productHelper->isDeviceUsmPoolAllocatorSupported());
 }
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsAtMostDg2) {
@@ -1034,6 +1060,10 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskingForReadOnlyResourceSuppo
     EXPECT_FALSE(productHelper->supportReadOnlyAllocations());
 }
 
+HWTEST_F(ProductHelperTest, givenProductHelperWhenAskingForSharingWith3dOrMediaSupportThenTrueReturned) {
+    EXPECT_TRUE(productHelper->isSharingWith3dOrMediaAllowed());
+}
+
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskingForDeviceToHostCopySignalingFenceFalseReturned) {
     EXPECT_FALSE(productHelper->isDeviceToHostCopySignalingFenceRequired());
 }
@@ -1103,4 +1133,13 @@ HWTEST_F(ProductHelperTest, whenAdjustScratchSizeThenSizeIsNotChanged) {
     size_t scratchSize = initialScratchSize;
     productHelper->adjustScratchSize(scratchSize);
     EXPECT_EQ(initialScratchSize, scratchSize);
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWhenCheckingIs2MBLocalMemAlignmentEnabledThenCorrectValueIsReturned) {
+    EXPECT_FALSE(productHelper->is2MBLocalMemAlignmentEnabled());
+}
+
+HWTEST2_F(ProductHelperTest, WhenCheckAssignEngineRoundRobinSupportedThenReturnFalse, IsAtMostXe3Core) {
+    auto hwInfo = *defaultHwInfo;
+    EXPECT_EQ(0u, productHelper->getMaxLocalSubRegionSize(hwInfo));
 }

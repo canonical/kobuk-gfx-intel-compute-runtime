@@ -13,6 +13,7 @@
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/preamble.h"
 #include "shared/source/helpers/ray_tracing_helper.h"
+#include "shared/source/os_interface/linux/hw_device_id.h"
 #include "shared/source/os_interface/os_inc_base.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/product_helper.h"
@@ -980,7 +981,7 @@ TEST_F(DeviceTest, whenCreatingDeviceThenCreateInOrderCounterAllocatorOnDemandAn
     }
 }
 
-HWTEST_F(DeviceTest, givenTsAllocatorWhenGettingNewTagThenDontInitialize) {
+HWTEST_F(DeviceTest, givenTsAllocatorWhenGettingNewTagThenDoInitialize) {
     using TimestampPacketType = typename FamilyType::TimestampPacketType;
     using TimestampPacketsT = NEO::TimestampPackets<TimestampPacketType, 1>;
 
@@ -1008,10 +1009,10 @@ HWTEST_F(DeviceTest, givenTsAllocatorWhenGettingNewTagThenDontInitialize) {
     auto tag2 = static_cast<NEO::TagNode<TimestampPacketsT> *>(allocator->getTag());
     EXPECT_EQ(tag, tag2);
 
-    EXPECT_EQ(data[0], tag->tagForCpuAccess->getContextStartValue(0));
-    EXPECT_EQ(data[1], tag->tagForCpuAccess->getGlobalStartValue(0));
-    EXPECT_EQ(data[2], tag->tagForCpuAccess->getContextEndValue(0));
-    EXPECT_EQ(data[3], tag->tagForCpuAccess->getGlobalEndValue(0));
+    EXPECT_EQ(static_cast<uint32_t>(Event::STATE_INITIAL), tag->tagForCpuAccess->getContextStartValue(0));
+    EXPECT_EQ(static_cast<uint32_t>(Event::STATE_INITIAL), tag->tagForCpuAccess->getGlobalStartValue(0));
+    EXPECT_EQ(static_cast<uint32_t>(Event::STATE_INITIAL), tag->tagForCpuAccess->getContextEndValue(0));
+    EXPECT_EQ(static_cast<uint32_t>(Event::STATE_INITIAL), tag->tagForCpuAccess->getGlobalEndValue(0));
 
     auto tag3 = static_cast<NEO::TagNode<TimestampPacketsT> *>(allocator->getTag());
 
@@ -2801,7 +2802,8 @@ TEST_F(DeviceTests, WhenGettingMemoryAccessPropertiesThenSuccessIsReturned) {
     auto expectedDeviceAllocCapabilities = static_cast<ze_memory_access_cap_flags_t>(productHelper.getDeviceMemCapabilities());
     EXPECT_EQ(expectedDeviceAllocCapabilities, properties.deviceAllocCapabilities);
 
-    auto expectedSharedSingleDeviceAllocCapabilities = static_cast<ze_memory_access_cap_flags_t>(productHelper.getSingleDeviceSharedMemCapabilities());
+    bool isKmdMigrationSupported{false};
+    auto expectedSharedSingleDeviceAllocCapabilities = static_cast<ze_memory_access_cap_flags_t>(productHelper.getSingleDeviceSharedMemCapabilities(isKmdMigrationSupported));
     EXPECT_EQ(expectedSharedSingleDeviceAllocCapabilities, properties.sharedSingleDeviceAllocCapabilities);
 
     auto expectedSharedSystemAllocCapabilities = static_cast<ze_memory_access_cap_flags_t>(productHelper.getSharedSystemMemCapabilities(&hwInfo));

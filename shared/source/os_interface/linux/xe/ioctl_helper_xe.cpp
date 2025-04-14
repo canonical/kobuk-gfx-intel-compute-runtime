@@ -968,9 +968,8 @@ int IoctlHelperXe::queryDistances(std::vector<QueryItem> &queryItems, std::vecto
 
 bool IoctlHelperXe::isPageFaultSupported() {
     xeLog(" -> IoctlHelperXe::%s %d\n", __FUNCTION__, false);
-
     return false;
-};
+}
 
 uint32_t IoctlHelperXe::getEuStallFdParameter() {
     xeLog(" -> IoctlHelperXe::%s\n", __FUNCTION__);
@@ -985,7 +984,8 @@ std::unique_ptr<uint8_t[]> IoctlHelperXe::createVmControlExtRegion(const std::op
 uint32_t IoctlHelperXe::getFlagsForVmCreate(bool disableScratch, bool enablePageFault, bool useVmBind) {
     xeLog(" -> IoctlHelperXe::%s %d,%d,%d\n", __FUNCTION__, disableScratch, enablePageFault, useVmBind);
     uint32_t flags = DRM_XE_VM_CREATE_FLAG_LR_MODE;
-    if (enablePageFault) {
+    bool debuggingEnabled = drm.getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled();
+    if (enablePageFault || debuggingEnabled) {
         flags |= DRM_XE_VM_CREATE_FLAG_FAULT_MODE;
     }
     if (!disableScratch) {
@@ -1319,7 +1319,7 @@ int IoctlHelperXe::createDrmContext(Drm &drm, OsContextLinux &osContext, uint32_
     std::array<drm_xe_ext_set_property, maxContextSetProperties> extProperties{};
     uint32_t extPropertyIndex{0U};
     setOptionalContextProperties(drm, &extProperties, extPropertyIndex);
-    setContextProperties(osContext, &extProperties, extPropertyIndex);
+    setContextProperties(osContext, deviceIndex, &extProperties, extPropertyIndex);
 
     drm_xe_exec_queue_create create{};
     create.width = 1;
@@ -1647,13 +1647,13 @@ void IoctlHelperXe::setOptionalContextProperties(Drm &drm, void *extProperties, 
             ext[extIndexInOut].base.next_extension = 0;
             ext[extIndexInOut].base.name = DRM_XE_EXEC_QUEUE_EXTENSION_SET_PROPERTY;
             ext[extIndexInOut].property = getEudebugExtProperty();
-            ext[extIndexInOut].value = 1;
+            ext[extIndexInOut].value = getEudebugExtPropertyValue();
             extIndexInOut++;
         }
     }
 }
 
-void IoctlHelperXe::setContextProperties(const OsContextLinux &osContext, void *extProperties, uint32_t &extIndexInOut) {
+void IoctlHelperXe::setContextProperties(const OsContextLinux &osContext, uint32_t deviceIndex, void *extProperties, uint32_t &extIndexInOut) {
 
     auto &ext = *reinterpret_cast<std::array<drm_xe_ext_set_property, maxContextSetProperties> *>(extProperties);
 

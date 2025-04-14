@@ -24,7 +24,7 @@ class ProductHelperHw : public ProductHelper {
     void adjustSamplerState(void *sampler, const HardwareInfo &hwInfo) const override;
     uint64_t getHostMemCapabilities(const HardwareInfo *hwInfo) const override;
     uint64_t getDeviceMemCapabilities() const override;
-    uint64_t getSingleDeviceSharedMemCapabilities() const override;
+    uint64_t getSingleDeviceSharedMemCapabilities(bool isKmdMigrationAvailable) const override;
     uint64_t getCrossDeviceSharedMemCapabilities() const override;
     uint64_t getSharedSystemMemCapabilities(const HardwareInfo *hwInfo) const override;
     std::vector<int32_t> getKernelSupportedThreadArbitrationPolicies() const override;
@@ -71,6 +71,7 @@ class ProductHelperHw : public ProductHelper {
     bool blitEnqueuePreferred(bool isWriteToImageFromBuffer) const override;
     bool isKmdMigrationSupported() const override;
     bool isDisableScratchPagesSupported() const override;
+    bool isDisableScratchPagesRequiredForDebugger() const override;
     bool areSecondaryContextsSupported() const override;
     bool isTile64With3DSurfaceOnBCSSupported(const HardwareInfo &hwInfo) const override;
     bool isDcFlushAllowed() const override;
@@ -121,7 +122,8 @@ class ProductHelperHw : public ProductHelper {
     bool isNonBlockingGpuSubmissionSupported() const override;
     bool isResolveDependenciesByPipeControlsSupported(const HardwareInfo &hwInfo, bool isOOQ, TaskCountType queueTaskCount, const CommandStreamReceiver &queueCsr) const override;
     bool isBufferPoolAllocatorSupported() const override;
-    bool isUsmPoolAllocatorSupported() const override;
+    bool isHostUsmPoolAllocatorSupported() const override;
+    bool isDeviceUsmPoolAllocatorSupported() const override;
     bool isDeviceUsmAllocationReuseSupported() const override;
     bool isHostUsmAllocationReuseSupported() const override;
     bool useLocalPreferredForCacheableBuffers() const override;
@@ -136,6 +138,7 @@ class ProductHelperHw : public ProductHelper {
     uint32_t getCommandBuffersPreallocatedPerCommandQueue() const override;
     uint32_t getInternalHeapsPreallocated() const override;
     bool overrideAllocationCacheable(const AllocationData &allocationData) const override;
+    bool is2MBLocalMemAlignmentEnabled() const override;
 
     bool getFrontEndPropertyScratchSizeSupport() const override;
     bool getFrontEndPropertyPrivateScratchSizeSupport() const override;
@@ -183,6 +186,7 @@ class ProductHelperHw : public ProductHelper {
     bool supportReadOnlyAllocations() const override;
     const std::vector<uint32_t> getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const override;
     uint32_t getMaxLocalRegionSize(const HardwareInfo &hwInfo) const override;
+    uint32_t getMaxLocalSubRegionSize(const HardwareInfo &hwInfo) const override;
     bool localDispatchSizeQuerySupported() const override;
     bool isDeviceToHostCopySignalingFenceRequired() const override;
     size_t getMaxFillPaternSizeForCopyEngine() const override;
@@ -194,6 +198,7 @@ class ProductHelperHw : public ProductHelper {
     bool supports2DBlockLoad() const override;
     uint32_t getNumCacheRegions() const override;
     uint64_t getPatIndex(CacheRegion cacheRegion, CachePolicy cachePolicy) const override;
+    bool isSharingWith3dOrMediaAllowed() const override;
 
     ~ProductHelperHw() override = default;
 

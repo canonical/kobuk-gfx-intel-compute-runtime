@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,7 +21,7 @@ struct EventHandler {
     uint32_t requestId;
 };
 
-class WddmEventsImp : public OsEvents, NEO::NonCopyableOrMovableClass {
+class WddmEventsImp : public OsEvents, NEO::NonCopyableAndNonMovableClass {
   public:
     bool eventListen(zes_event_type_flags_t &pEvent, uint64_t timeout) override;
     ze_result_t eventRegister(zes_event_type_flags_t events) override;
@@ -29,10 +29,6 @@ class WddmEventsImp : public OsEvents, NEO::NonCopyableOrMovableClass {
     ~WddmEventsImp() {
         CloseHandle(exitHandle);
     }
-
-    // Don't allow copies of the WddmEventsImp object
-    WddmEventsImp(const WddmEventsImp &obj) = delete;
-    WddmEventsImp &operator=(const WddmEventsImp &obj) = delete;
 
   private:
     void registerEvents(zes_event_type_flags_t eventId, uint32_t requestId);
@@ -43,5 +39,7 @@ class WddmEventsImp : public OsEvents, NEO::NonCopyableOrMovableClass {
     KmdSysManager *pKmdSysManager = nullptr;
     std::vector<EventHandler> eventList;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<WddmEventsImp>);
 
 } // namespace L0

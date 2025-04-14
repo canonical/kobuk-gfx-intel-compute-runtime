@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -64,7 +64,7 @@ ze_result_t OaMetricSourceImp::getTimestampValidBits(uint64_t &validBits) {
         return retVal;
     }
 
-    uint64_t maxTimeStamp = maxNanoSeconds * timerFreqquency / nsecPerSec;
+    uint64_t maxTimeStamp = maxNanoSeconds * timerFreqquency / CommonConstants::nsecPerSec;
 
     auto bits = std::bitset<64>(maxTimeStamp);
     validBits = bits.count();
@@ -208,7 +208,11 @@ ze_result_t OaMetricSourceImp::handleMetricGroupExtendedProperties(zet_metric_gr
     while (pNext) {
         auto extendedProperties = reinterpret_cast<zet_base_properties_t *>(pNext);
 
-        if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GLOBAL_TIMESTAMPS_RESOLUTION_EXP) {
+        if (extendedProperties->stype == ZET_INTEL_STRUCTURE_TYPE_METRIC_SOURCE_ID_EXP) {
+
+            getMetricGroupSourceIdProperty(extendedProperties);
+            retVal = ZE_RESULT_SUCCESS;
+        } else if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GLOBAL_TIMESTAMPS_RESOLUTION_EXP) {
 
             zet_metric_global_timestamps_resolution_exp_t *metricsTimestampProperties =
                 reinterpret_cast<zet_metric_global_timestamps_resolution_exp_t *>(extendedProperties);
@@ -226,9 +230,7 @@ ze_result_t OaMetricSourceImp::handleMetricGroupExtendedProperties(zet_metric_gr
                 metricsTimestampProperties->timestampValidBits = 0;
                 return retVal;
             }
-        }
-
-        if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP) {
+        } else if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP) {
             zet_metric_group_type_exp_t *groupType = reinterpret_cast<zet_metric_group_type_exp_t *>(extendedProperties);
             groupType->type = ZET_METRIC_GROUP_TYPE_EXP_FLAG_OTHER;
             retVal = ZE_RESULT_SUCCESS;

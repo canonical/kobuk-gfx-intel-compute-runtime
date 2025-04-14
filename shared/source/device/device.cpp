@@ -200,7 +200,7 @@ void Device::initializeCommonResources() {
     }
 
     if (ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
-        getProductHelper().isUsmPoolAllocatorSupported() &&
+        getProductHelper().isDeviceUsmPoolAllocatorSupported() &&
         NEO::debugManager.flags.ExperimentalUSMAllocationReuseVersion.get() == 2) {
 
         RootDeviceIndicesContainer rootDeviceIndices;
@@ -260,7 +260,7 @@ bool Device::initDeviceFully() {
         }
     }
 
-    executionEnvironment->memoryManager->setForce32BitAllocations(getDeviceInfo().force32BitAddressess);
+    executionEnvironment->memoryManager->setForce32BitAllocations(getDeviceInfo().force32BitAddresses);
 
     if (debugManager.flags.EnableSWTags.get() && !getRootDeviceEnvironment().tagsManager->isInitialized()) {
         getRootDeviceEnvironment().tagsManager->initialize(*this);
@@ -326,15 +326,22 @@ bool Device::createEngines() {
                 highPriorityContextCount = static_cast<uint32_t>(debugManager.flags.OverrideNumHighPriorityContexts.get());
             }
 
-            if (engineGroupType == EngineGroupType::compute && hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled > 1) {
-                contextCount = contextCount / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
-                highPriorityContextCount = highPriorityContextCount / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
-            }
+            if (getRootDeviceEnvironment().osInterface && getRootDeviceEnvironment().osInterface->getAggregatedProcessCount() > 1) {
+                const auto numProcesses = getRootDeviceEnvironment().osInterface->getAggregatedProcessCount();
 
-            if (engineGroupType == EngineGroupType::copy || engineGroupType == EngineGroupType::linkedCopy) {
-                gfxCoreHelper.adjustCopyEngineRegularContextCount(engineGroup->engines.size(), contextCount);
-            }
+                contextCount = std::max(contextCount / numProcesses, 2u);
+                highPriorityContextCount = std::max(contextCount / 2, 1u);
 
+            } else {
+                if (engineGroupType == EngineGroupType::compute && hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled > 1) {
+                    contextCount = contextCount / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+                    highPriorityContextCount = highPriorityContextCount / hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled;
+                }
+
+                if (engineGroupType == EngineGroupType::copy || engineGroupType == EngineGroupType::linkedCopy) {
+                    gfxCoreHelper.adjustCopyEngineRegularContextCount(engineGroup->engines.size(), contextCount);
+                }
+            }
             for (uint32_t engineIndex = 0; engineIndex < static_cast<uint32_t>(engineGroup->engines.size()); engineIndex++) {
                 auto engineType = engineGroup->engines[engineIndex].getEngineType();
 
@@ -471,11 +478,6 @@ bool Device::createEngine(EngineTypeUsage engineTypeUsage) {
         return false;
     }
 
-    bool internalUsage = (engineUsage == EngineUsage::internal);
-    if (internalUsage) {
-        commandStreamReceiver->initializeDefaultsForInternalEngine();
-    }
-
     if (commandStreamReceiver->needsPageTableManager()) {
         commandStreamReceiver->createPageTableManager();
     }
@@ -555,15 +557,9 @@ bool Device::initializeEngines() {
 }
 
 bool Device::createSecondaryEngine(CommandStreamReceiver *primaryCsr, EngineTypeUsage engineTypeUsage) {
-    auto engineUsage = engineTypeUsage.second;
     std::unique_ptr<CommandStreamReceiver> commandStreamReceiver = createCommandStreamReceiver();
     if (!commandStreamReceiver) {
         return false;
-    }
-
-    bool internalUsage = (engineUsage == EngineUsage::internal);
-    if (internalUsage) {
-        commandStreamReceiver->initializeDefaultsForInternalEngine();
     }
 
     EngineDescriptor engineDescriptor(engineTypeUsage, getDeviceBitfield(), preemptionMode, false);
@@ -1068,13 +1064,14 @@ void Device::stopDirectSubmissionAndWaitForCompletion() {
     }
 }
 
-bool Device::isAnyDirectSubmissionEnabled() {
-    bool enabled = false;
-    for (auto &engine : allEngines) {
-        auto csr = engine.commandStreamReceiver;
-        enabled |= csr->isAnyDirectSubmissionEnabled();
+bool Device::isAnyDirectSubmissionEnabled(bool light) const {
+    for (const auto &engine : allEngines) {
+        auto enabled = light ? engine.osContext->isDirectSubmissionLightActive() : engine.commandStreamReceiver->isAnyDirectSubmissionEnabled();
+        if (enabled) {
+            return true;
+        }
     }
-    return enabled;
+    return false;
 }
 
 void Device::allocateRTDispatchGlobals(uint32_t maxBvhLevels) {
@@ -1261,6 +1258,32 @@ void Device::stopDirectSubmissionForCopyEngine() {
         auto lock = regularBcs->obtainUniqueOwnership();
         regularBcs->stopDirectSubmission(false);
     }
+}
+
+std::vector<DeviceVector> Device::groupDevices(DeviceVector devices) {
+    std::map<PRODUCT_FAMILY, size_t> productsMap;
+    std::vector<DeviceVector> outDevices;
+    for (auto &device : devices) {
+        if (device) {
+            auto productFamily = device->getHardwareInfo().platform.eProductFamily;
+            auto result = productsMap.find(productFamily);
+            if (result == productsMap.end()) {
+                productsMap.insert({productFamily, productsMap.size()});
+                outDevices.push_back(DeviceVector{});
+            }
+            auto productId = productsMap[productFamily];
+            outDevices[productId].push_back(std::move(device));
+        }
+    }
+    std::sort(outDevices.begin(), outDevices.end(), [](DeviceVector &lhs, DeviceVector &rhs) -> bool {
+        auto &leftHwInfo = lhs[0]->getHardwareInfo();  // NOLINT(clang-analyzer-cplusplus.Move) - MSVC assumes usage of moved vector
+        auto &rightHwInfo = rhs[0]->getHardwareInfo(); // NOLINT(clang-analyzer-cplusplus.Move)
+        if (leftHwInfo.capabilityTable.isIntegratedDevice != rightHwInfo.capabilityTable.isIntegratedDevice) {
+            return rightHwInfo.capabilityTable.isIntegratedDevice;
+        }
+        return leftHwInfo.platform.eProductFamily > rightHwInfo.platform.eProductFamily;
+    });
+    return outDevices;
 }
 
 } // namespace NEO

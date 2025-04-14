@@ -650,7 +650,11 @@ bool Wddm::freeGpuVirtualAddress(D3DGPU_VIRTUAL_ADDRESS &gpuPtr, uint64_t size) 
     return status == STATUS_SUCCESS;
 }
 
-NTSTATUS Wddm::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, D3DKMT_HANDLE &outResourceHandle, uint64_t *outSharedHandle) {
+bool Wddm::isReadOnlyFlagFallbackAvailable(const D3DKMT_CREATEALLOCATION &createAllocation) const {
+    return isReadOnlyFlagFallbackSupported() && createAllocation.pAllocationInfo2->pSystemMem && !createAllocation.Flags.ReadOnly;
+}
+
+NTSTATUS Wddm::createAllocation(const void *cpuPtr, const Gmm *gmm, D3DKMT_HANDLE &outHandle, D3DKMT_HANDLE &outResourceHandle, uint64_t *outSharedHandle) {
     NTSTATUS status = STATUS_UNSUCCESSFUL;
     D3DDDI_ALLOCATIONINFO2 allocationInfo = {};
     D3DKMT_CREATEALLOCATION createAllocation = {};
@@ -658,13 +662,14 @@ NTSTATUS Wddm::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKM
     if (gmm == nullptr)
         return false;
 
-    allocationInfo.pSystemMem = alignedCpuPtr;
+    allocationInfo.pSystemMem = gmm->gmmResourceInfo->getSystemMemPointer();
     allocationInfo.pPrivateDriverData = gmm->gmmResourceInfo->peekHandle();
     allocationInfo.PrivateDriverDataSize = static_cast<uint32_t>(gmm->gmmResourceInfo->peekHandleSize());
     createAllocation.NumAllocations = 1;
     createAllocation.Flags.CreateShared = outSharedHandle ? TRUE : FALSE;
     createAllocation.Flags.NtSecuritySharing = outSharedHandle ? TRUE : FALSE;
     createAllocation.Flags.CreateResource = outSharedHandle ? TRUE : FALSE;
+    createAllocation.Flags.ReadOnly = getReadOnlyFlagValue(cpuPtr);
     createAllocation.pAllocationInfo2 = &allocationInfo;
     createAllocation.hDevice = device;
 
@@ -677,11 +682,9 @@ NTSTATUS Wddm::createAllocation(const void *alignedCpuPtr, const Gmm *gmm, D3DKM
     }
 
     status = getGdi()->createAllocation2(&createAllocation);
-    if (status != STATUS_SUCCESS) {
-        if (isReadOnlyMemory(alignedCpuPtr)) {
-            createAllocation.Flags.ReadOnly = true;
-            status = getGdi()->createAllocation2(&createAllocation);
-        }
+    if (status != STATUS_SUCCESS && isReadOnlyFlagFallbackAvailable(createAllocation)) {
+        createAllocation.Flags.ReadOnly = TRUE;
+        status = getGdi()->createAllocation2(&createAllocation);
     }
     if (status != STATUS_SUCCESS) {
         DEBUG_BREAK_IF(true);
@@ -777,17 +780,15 @@ NTSTATUS Wddm::createAllocationsAndMapGpuVa(OsHandleStorage &osHandles) {
     createAllocation.Flags.CreateShared = FALSE;
     createAllocation.Flags.RestrictSharedAccess = FALSE;
     createAllocation.Flags.CreateResource = FALSE;
+    createAllocation.Flags.ReadOnly = getReadOnlyFlagValue(allocationInfo[0].pSystemMem);
     createAllocation.pAllocationInfo2 = allocationInfo;
     createAllocation.hDevice = device;
 
     while (status == STATUS_UNSUCCESSFUL) {
         status = getGdi()->createAllocation2(&createAllocation);
-
-        if (status != STATUS_SUCCESS) {
-            if (isReadOnlyMemory(allocationInfo[0].pSystemMem)) {
-                createAllocation.Flags.ReadOnly = true;
-                status = getGdi()->createAllocation2(&createAllocation);
-            }
+        if (status != STATUS_SUCCESS && isReadOnlyFlagFallbackAvailable(createAllocation)) {
+            createAllocation.Flags.ReadOnly = TRUE;
+            status = getGdi()->createAllocation2(&createAllocation);
         }
 
         if (status != STATUS_SUCCESS) {
@@ -1017,6 +1018,7 @@ bool Wddm::createContext(OsContextWin &osContext) {
     privateData.ProcessID = NEO::SysCalls::getProcessId();
     privateData.pHwContextId = &hwContextId;
     privateData.NoRingFlushes = debugManager.flags.UseNoRingFlushesKmdMode.get();
+    privateData.DummyPageBackingEnabled = debugManager.flags.DummyPageBackingEnabled.get();
 
     applyAdditionalContextFlags(privateData, osContext);
 

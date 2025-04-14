@@ -57,16 +57,12 @@ const RuntimeCapabilityTable DG1::capabilityTable{
     false,                                         // ftrSupports64BitMath
     true,                                          // ftrSvm
     false,                                         // ftrSupportsCoherency
-    false,                                         // ftrSupportsVmeAvcTextureSampler
-    false,                                         // ftrSupportsVmeAvcPreemption
     false,                                         // ftrRenderCompressedBuffers
     false,                                         // ftrRenderCompressedImages
     true,                                          // ftr64KBpages
     true,                                          // instrumentationEnabled
-    false,                                         // supportsVme
     true,                                          // supportCacheFlushAfterWalker
     true,                                          // supportsImages,
-    false,                                         // supportsDeviceEnqueue
     false,                                         // supportsPipes
     true,                                          // supportsOcl21Features
     false,                                         // supportsOnDemandPageFaults

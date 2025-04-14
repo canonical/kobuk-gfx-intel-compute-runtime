@@ -190,8 +190,8 @@ class Drm : public DriverModel {
         return systemInfo.get();
     }
 
-    CacheInfo *getL3CacheInfo() const {
-        return l3CacheInfo.get();
+    CacheInfo *getCacheInfo() const {
+        return cacheInfo.get();
     }
 
     MemoryInfo *getMemoryInfo() const {
@@ -269,6 +269,7 @@ class Drm : public DriverModel {
     template <typename DataType>
     std::vector<DataType> query(uint32_t queryId, uint32_t queryItemFlags);
     static std::string getDrmVersion(int fileDescriptor);
+    MOCKABLE_VIRTUAL uint32_t getAggregatedProcessCount() const;
 
   protected:
     Drm(std::unique_ptr<HwDeviceIdDrm> &&hwDeviceIdIn, RootDeviceEnvironment &rootDeviceEnvironment);
@@ -333,7 +334,7 @@ class Drm : public DriverModel {
     std::unique_ptr<HwDeviceIdDrm> hwDeviceId;
     std::unique_ptr<IoctlHelper> ioctlHelper;
     std::unique_ptr<SystemInfo> systemInfo;
-    std::unique_ptr<CacheInfo> l3CacheInfo;
+    std::unique_ptr<CacheInfo> cacheInfo;
     std::unique_ptr<EngineInfo> engineInfo;
     std::unique_ptr<MemoryInfo> memoryInfo;
 

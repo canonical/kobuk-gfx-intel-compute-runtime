@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -62,6 +62,16 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
     RETURN_FUNC_PTR_IF_EXIST(zeIntelCommandListAppendWaitExternalSemaphoresExp);
     RETURN_FUNC_PTR_IF_EXIST(zeIntelCommandListAppendSignalExternalSemaphoresExp);
     RETURN_FUNC_PTR_IF_EXIST(zeIntelDeviceReleaseExternalSemaphoreExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelCommandListAppendMarkerExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerCreateExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerDestroyExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerEnableExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerDisableExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerReadDataExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricDecoderCreateExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricDecoderDestroyExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricDecoderGetDecodableMetricsExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerDecodeExp);
 
 #undef RETURN_FUNC_PTR_IF_EXIST
 

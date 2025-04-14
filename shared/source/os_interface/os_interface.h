@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -117,6 +117,9 @@ class OSInterface : public NonCopyableClass {
 
     MOCKABLE_VIRTUAL bool isDebugAttachAvailable() const;
     MOCKABLE_VIRTUAL bool isLockablePointer(bool isLockable) const;
+    MOCKABLE_VIRTUAL bool isSizeWithinThresholdForStaging(size_t size, bool isIGPU) const;
+    MOCKABLE_VIRTUAL uint32_t getAggregatedProcessCount() const;
+
     static bool osEnabled64kbPages;
     static bool osEnableLocalMemory;
     static bool are64kbPagesEnabled();

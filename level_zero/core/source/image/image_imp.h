@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,7 +17,7 @@
 
 namespace L0 {
 
-struct ImageImp : public Image, NEO::NonCopyableOrMovableClass {
+struct ImageImp : public Image, NEO::NonCopyableAndNonMovableClass {
     ze_result_t destroy() override;
     ze_result_t destroyPeerImages(const void *ptr, Device *device) override;
 
@@ -73,4 +73,7 @@ struct ImageImp : public Image, NEO::NonCopyableOrMovableClass {
     bool sampledImage = false;
     bool mimickedImagefor3Ch = false;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<ImageImp>);
+
 } // namespace L0

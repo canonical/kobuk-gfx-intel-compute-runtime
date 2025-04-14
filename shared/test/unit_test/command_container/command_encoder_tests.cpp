@@ -62,14 +62,14 @@ HWTEST_F(CommandEncoderTests, givenDifferentInputParamsWhenCreatingStandaloneInO
     uint64_t *hostAddress = &counterValue;
     uint64_t gpuAddress = castToUint64(ptrOffset(&counterValue, 64));
 
-    MockGraphicsAllocation alloc(nullptr, gpuAddress, 1);
+    MockGraphicsAllocation deviceAlloc(nullptr, gpuAddress, 1);
 
-    auto inOrderExecInfo = InOrderExecInfo::createFromExternalAllocation(mockDevice, &alloc, gpuAddress, nullptr, hostAddress, counterValue, 2, 3);
+    auto inOrderExecInfo = InOrderExecInfo::createFromExternalAllocation(mockDevice, &deviceAlloc, gpuAddress, nullptr, hostAddress, counterValue, 2, 3);
 
     EXPECT_EQ(counterValue, inOrderExecInfo->getCounterValue());
     EXPECT_EQ(hostAddress, inOrderExecInfo->getBaseHostAddress());
     EXPECT_EQ(gpuAddress, inOrderExecInfo->getBaseDeviceAddress());
-    EXPECT_EQ(&alloc, inOrderExecInfo->getDeviceCounterAllocation());
+    EXPECT_EQ(&deviceAlloc, inOrderExecInfo->getDeviceCounterAllocation());
     EXPECT_EQ(nullptr, inOrderExecInfo->getHostCounterAllocation());
     EXPECT_TRUE(inOrderExecInfo->isExternalMemoryExecInfo());
     EXPECT_EQ(2u, inOrderExecInfo->getNumDevicePartitionsToWait());
@@ -78,6 +78,11 @@ HWTEST_F(CommandEncoderTests, givenDifferentInputParamsWhenCreatingStandaloneInO
     inOrderExecInfo->reset();
 
     EXPECT_EQ(0u, inOrderExecInfo->getCounterValue());
+
+    MockGraphicsAllocation hostAlloc(nullptr, castToUint64(hostAddress), 1);
+
+    inOrderExecInfo = InOrderExecInfo::createFromExternalAllocation(mockDevice, &deviceAlloc, gpuAddress, &hostAlloc, hostAddress, counterValue, 2, 3);
+    EXPECT_EQ(&hostAlloc, inOrderExecInfo->getHostCounterAllocation());
 }
 
 HWTEST_F(CommandEncoderTests, givenTsNodesWhenStoringOnTempListThenHandleOwnershipCorrectly) {
@@ -292,6 +297,10 @@ HWTEST_F(CommandEncoderTests, givenInOrderExecutionInfoWhenSetLastCounterValueIs
     EXPECT_FALSE(inOrderExecInfo->isCounterAlreadyDone(2u));
     EXPECT_FALSE(inOrderExecInfo->isCounterAlreadyDone(3u));
     EXPECT_FALSE(inOrderExecInfo->isCounterAlreadyDone(0u));
+
+    inOrderExecInfo = std::make_unique<InOrderExecInfo>(nullptr, nullptr, mockDevice, 2, true, false);
+    inOrderExecInfo->setLastWaitedCounterValue(2);
+    EXPECT_FALSE(inOrderExecInfo->isCounterAlreadyDone(1));
 }
 
 HWTEST_F(CommandEncoderTests, givenInOrderExecutionInfoWhenResetCalledThenUploadToTbx) {
@@ -884,7 +893,8 @@ HWTEST2_F(CommandEncoderTests, whenAskingForImplicitScalingValuesThenAlwaysRetur
     EXPECT_FALSE(ImplicitScalingDispatch<FamilyType>::platformSupportsImplicitScaling(*rootExecEnv));
 }
 
-HWTEST_F(CommandEncoderTests, givenInterfaceDescriptorWhenEncodeEuSchedulingPolicyIsCalledThenNothingIsChanged) {
+HWTEST2_F(CommandEncoderTests, givenInterfaceDescriptorWhenEncodeEuSchedulingPolicyIsCalledThenNothingIsChanged, HeapfulSupportedMatch) {
+
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
 
     INTERFACE_DESCRIPTOR_DATA idd = FamilyType::cmdInitInterfaceDescriptorData;

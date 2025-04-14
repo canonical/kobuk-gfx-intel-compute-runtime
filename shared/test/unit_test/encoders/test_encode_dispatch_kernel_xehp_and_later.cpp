@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,11 +10,13 @@
 #include "shared/source/command_container/walker_partition_xehp_and_later.h"
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/ptr_math.h"
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/product_helper.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
@@ -59,9 +61,11 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenSlmTotalSizeGraterTha
     auto cmd = genCmdCast<DefaultWalkerType *>(*itor);
     auto &idd = cmd->getInterfaceDescriptor();
     auto &gfxcoreHelper = this->getHelper<GfxCoreHelper>();
+    auto releaseHelper = ReleaseHelper::create(pDevice->getHardwareInfo().ipVersion);
+    bool isHeapless = pDevice->getCompilerProductHelper().isHeaplessModeEnabled();
 
     uint32_t expectedValue = static_cast<typename INTERFACE_DESCRIPTOR_DATA::SHARED_LOCAL_MEMORY_SIZE>(
-        gfxcoreHelper.computeSlmValues(pDevice->getHardwareInfo(), slmTotalSize));
+        gfxcoreHelper.computeSlmValues(pDevice->getHardwareInfo(), slmTotalSize, releaseHelper.get(), isHeapless));
 
     EXPECT_EQ(expectedValue, idd.getSharedLocalMemorySize());
 }
@@ -193,7 +197,18 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenOverrideSlmTotalSizeD
     }
 }
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenStatelessBufferAndImageWhenDispatchingKernelThenBindingTableOffsetIsCorrect) {
+struct CommandEncodeStatesTestBindingTableStateMatcher {
+    template <PRODUCT_FAMILY productFamily>
+    static constexpr bool isMatched() {
+        if constexpr (HwMapper<productFamily>::GfxProduct::supportsCmdSet(IGFX_XE_HP_CORE)) {
+            return TestTraits<NEO::ToGfxCoreFamily<productFamily>::get()>::bindingTableStateSupported;
+        }
+        return false;
+    }
+};
+
+HWTEST2_F(CommandEncodeStatesTest, givenStatelessBufferAndImageWhenDispatchingKernelThenBindingTableOffsetIsCorrect, CommandEncodeStatesTestBindingTableStateMatcher) {
+
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
     using COMPUTE_WALKER = typename FamilyType::COMPUTE_WALKER;
     uint32_t numBindingTable = 1;
@@ -231,7 +246,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenStatelessBufferAndIma
     EXPECT_EQ(idd.getBindingTablePointer(), expectedOffset);
 }
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givennumBindingTableOneWhenDispatchingKernelThenBTOffsetIsCorrect) {
+HWTEST2_F(CommandEncodeStatesTest, givennumBindingTableOneWhenDispatchingKernelThenBTOffsetIsCorrect, CommandEncodeStatesTestBindingTableStateMatcher) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
     using COMPUTE_WALKER = typename FamilyType::COMPUTE_WALKER;
     uint32_t numBindingTable = 1;
@@ -267,7 +282,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givennumBindingTableOneWhe
     EXPECT_EQ(idd.getBindingTablePointer(), expectedOffset);
 }
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, giveNumBindingTableZeroWhenDispatchingKernelThenBTOffsetIsZero) {
+HWTEST2_F(CommandEncodeStatesTest, giveNumBindingTableZeroWhenDispatchingKernelThenBTOffsetIsZero, CommandEncodeStatesTestBindingTableStateMatcher) {
     using BINDING_TABLE_STATE = typename FamilyType::BINDING_TABLE_STATE;
     using COMPUTE_WALKER = typename FamilyType::COMPUTE_WALKER;
     uint32_t numBindingTable = 0;
@@ -435,7 +450,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenCleanHeapsWhenDispatc
     ASSERT_EQ(itorPC, commands.end());
 }
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTest, givenForceBtpPrefetchModeDebugFlagWhenDispatchingKernelThenCorrectValuesAreSetUp) {
+HWTEST2_F(CommandEncodeStatesTest, givenForceBtpPrefetchModeDebugFlagWhenDispatchingKernelThenCorrectValuesAreSetUp, CommandEncodeStatesTestBindingTableStateMatcher) {
     using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
     using COMPUTE_WALKER = typename FamilyType::COMPUTE_WALKER;
     using SAMPLER_STATE = typename FamilyType::SAMPLER_STATE;

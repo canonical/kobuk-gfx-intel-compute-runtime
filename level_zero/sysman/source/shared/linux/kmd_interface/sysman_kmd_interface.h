@@ -75,11 +75,11 @@ enum class SysfsName {
     sysfsNameThrottleReasonPL2,
     sysfsNameThrottleReasonPL4,
     sysfsNameThrottleReasonThermal,
-    sysfsNameSustainedPowerLimit,
-    sysfsNameSustainedPowerLimitInterval,
-    sysfsNameEnergyCounterNode,
-    sysfsNameDefaultPowerLimit,
-    sysfsNameCriticalPowerLimit,
+    sysfsNamePackageSustainedPowerLimit,
+    sysfsNamePackageSustainedPowerLimitInterval,
+    sysfsNamePackageEnergyCounterNode,
+    sysfsNamePackageDefaultPowerLimit,
+    sysfsNamePackageCriticalPowerLimit,
     sysfsNameStandbyModeControl,
     sysfsNameMemoryAddressRange,
     sysfsNameMaxMemoryFrequency,
@@ -111,6 +111,7 @@ class SysmanKmdInterface {
     virtual std::string getBasePath(uint32_t subDeviceId) const = 0;
     virtual std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) = 0;
     virtual std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) = 0;
+    virtual std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) = 0;
     virtual int64_t getEngineActivityFd(zes_engine_group_t engineGroup, uint32_t engineInstance, uint32_t subDeviceId, PmuInterface *const &pmuInterface) = 0;
     virtual std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const = 0;
     virtual bool isStandbyModeControlAvailable() const = 0;
@@ -151,6 +152,7 @@ class SysmanKmdInterface {
     virtual ze_result_t getBusyAndTotalTicksConfigs(uint64_t fnNumber, uint64_t engineInstance, uint64_t engineClass, std::pair<uint64_t, uint64_t> &configPair) = 0;
     virtual std::string getGpuBindEntry() const = 0;
     virtual std::string getGpuUnBindEntry() const = 0;
+    virtual std::vector<zes_power_domain_t> getPowerDomains() const = 0;
 
   protected:
     std::unique_ptr<FsAccessInterface> pFsAccess;
@@ -181,6 +183,7 @@ class SysmanKmdInterfaceI915Upstream : public SysmanKmdInterface, SysmanKmdInter
     std::string getBasePath(uint32_t subDeviceId) const override;
     std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
     std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) override;
+    std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) override;
     int64_t getEngineActivityFd(zes_engine_group_t engineGroup, uint32_t engineInstance, uint32_t subDeviceId, PmuInterface *const &pmuInterface) override;
     std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const override;
     bool isStandbyModeControlAvailable() const override { return true; }
@@ -209,6 +212,7 @@ class SysmanKmdInterfaceI915Upstream : public SysmanKmdInterface, SysmanKmdInter
     ze_result_t getBusyAndTotalTicksConfigs(uint64_t fnNumber, uint64_t engineInstance, uint64_t engineClass, std::pair<uint64_t, uint64_t> &configPair) override;
     std::string getGpuBindEntry() const override;
     std::string getGpuUnBindEntry() const override;
+    std::vector<zes_power_domain_t> getPowerDomains() const override { return {ZES_POWER_DOMAIN_PACKAGE}; }
 
   protected:
     std::map<SysfsName, valuePair> sysfsNameToFileMap;
@@ -228,6 +232,7 @@ class SysmanKmdInterfaceI915Prelim : public SysmanKmdInterface, SysmanKmdInterfa
     std::string getBasePath(uint32_t subDeviceId) const override;
     std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
     std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) override;
+    std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) override;
     int64_t getEngineActivityFd(zes_engine_group_t engineGroup, uint32_t engineInstance, uint32_t subDeviceId, PmuInterface *const &pmuInterface) override;
     std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const override;
     bool isStandbyModeControlAvailable() const override { return true; }
@@ -256,6 +261,7 @@ class SysmanKmdInterfaceI915Prelim : public SysmanKmdInterface, SysmanKmdInterfa
     ze_result_t getBusyAndTotalTicksConfigs(uint64_t fnNumber, uint64_t engineInstance, uint64_t engineClass, std::pair<uint64_t, uint64_t> &configPair) override;
     std::string getGpuBindEntry() const override;
     std::string getGpuUnBindEntry() const override;
+    std::vector<zes_power_domain_t> getPowerDomains() const override { return {ZES_POWER_DOMAIN_PACKAGE}; }
 
   protected:
     std::map<SysfsName, valuePair> sysfsNameToFileMap;
@@ -276,6 +282,7 @@ class SysmanKmdInterfaceXe : public SysmanKmdInterface {
     std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
     std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) override;
     std::string getEngineBasePath(uint32_t subDeviceId) const override;
+    std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) override;
     int64_t getEngineActivityFd(zes_engine_group_t engineGroup, uint32_t engineInstance, uint32_t subDeviceId, PmuInterface *const &pmuInterface) override;
     std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const override;
     bool isStandbyModeControlAvailable() const override { return false; }
@@ -295,6 +302,7 @@ class SysmanKmdInterfaceXe : public SysmanKmdInterface {
     bool isBoostFrequencyAvailable() const override { return false; }
     bool isTdpFrequencyAvailable() const override { return false; }
     bool isPhysicalMemorySizeSupported() const override { return true; }
+    std::vector<zes_power_domain_t> getPowerDomains() const override { return {ZES_POWER_DOMAIN_PACKAGE}; }
 
     // Wedged state is not supported in XE.
     void getWedgedStatus(LinuxSysmanImp *pLinuxSysmanImp, zes_device_state_t *pState) override{};

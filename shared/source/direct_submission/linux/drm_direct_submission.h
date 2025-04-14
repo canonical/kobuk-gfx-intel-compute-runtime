@@ -7,6 +7,8 @@
 
 #pragma once
 #include "shared/source/direct_submission/direct_submission_hw.h"
+#include "shared/source/os_interface/linux/drm_buffer_object.h"
+#include "shared/source/os_interface/linux/drm_wrappers.h"
 
 namespace NEO {
 
@@ -24,9 +26,10 @@ class DrmDirectSubmission : public DirectSubmissionHw<GfxFamily, Dispatcher> {
 
   protected:
     bool allocateOsResources() override;
-    bool submit(uint64_t gpuAddress, size_t size) override;
+    bool submit(uint64_t gpuAddress, size_t size, const ResidencyContainer *allocationsForResidency) override;
 
     bool handleResidency() override;
+    void handleRingRestartForUllsLightResidency(const ResidencyContainer *allocationsForResidency) override;
     void handleStopRingBuffer() override;
 
     void ensureRingCompletion() override;
@@ -36,6 +39,7 @@ class DrmDirectSubmission : public DirectSubmissionHw<GfxFamily, Dispatcher> {
     bool isCompleted(uint32_t ringBufferIndex) override;
     bool isCompletionFenceSupported();
     bool isGpuHangDetected(std::chrono::high_resolution_clock::time_point &lastHangCheckTime);
+    MOCKABLE_VIRTUAL std::chrono::steady_clock::time_point getCpuTimePoint();
 
     MOCKABLE_VIRTUAL void wait(TaskCountType taskCountToWait);
 
@@ -43,5 +47,11 @@ class DrmDirectSubmission : public DirectSubmissionHw<GfxFamily, Dispatcher> {
     volatile TagAddressType *tagAddress;
     TaskCountType completionFenceValue{};
     std::chrono::microseconds gpuHangCheckPeriod{CommonConstants::gpuHangCheckTimeInUS};
+
+    constexpr static size_t ullsLightTimeout = 2'000'000;
+    std::chrono::steady_clock::time_point lastUllsLightExecTimestamp{};
+
+    std::vector<BufferObject *> residency{};
+    std::vector<ExecObject> execObjectsStorage{};
 };
 } // namespace NEO

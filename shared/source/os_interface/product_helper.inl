@@ -148,10 +148,10 @@ uint64_t ProductHelperHw<gfxProduct>::getDeviceMemCapabilities() const {
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-uint64_t ProductHelperHw<gfxProduct>::getSingleDeviceSharedMemCapabilities() const {
+uint64_t ProductHelperHw<gfxProduct>::getSingleDeviceSharedMemCapabilities(bool isKmdMigrationAvailable) const {
     uint64_t capabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess;
 
-    if (isKmdMigrationSupported() || getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities::sharedSingleDevice)) {
+    if (isKmdMigrationAvailable || getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities::sharedSingleDevice)) {
         capabilities |= UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess;
     }
 
@@ -220,6 +220,11 @@ uint64_t ProductHelperHw<gfxProduct>::getDeviceMemoryMaxBandWidthInBytesPerSecon
 
 template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::overrideAllocationCacheable(const AllocationData &allocationData) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::is2MBLocalMemAlignmentEnabled() const {
     return false;
 }
 
@@ -434,6 +439,11 @@ bool ProductHelperHw<gfxProduct>::isKmdMigrationSupported() const {
 template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::isDisableScratchPagesSupported() const {
     return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isDisableScratchPagesRequiredForDebugger() const {
+    return true;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -962,6 +972,11 @@ template <PRODUCT_FAMILY gfxProduct>
 uint32_t ProductHelperHw<gfxProduct>::getCacheLineSize() const {
     using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
     return GfxProduct::cacheLineSize;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isSharingWith3dOrMediaAllowed() const {
+    return true;
 }
 
 template <PRODUCT_FAMILY gfxProduct>

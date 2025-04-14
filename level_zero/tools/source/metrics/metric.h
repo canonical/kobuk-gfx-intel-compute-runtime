@@ -1,11 +1,13 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+#include "shared/source/helpers/constants.h"
+
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/tools/source/metrics/os_interface_metric.h"
 #include "level_zero/zet_intel_gpu_metric.h"
@@ -55,8 +57,6 @@ struct CommandList;
 struct MetricStreamer;
 struct MetricProgrammable;
 
-static constexpr uint64_t nsecPerSec = 1000000000ull;
-
 class MetricSource {
   public:
     static constexpr uint32_t metricSourceTypeUndefined = 0u;
@@ -89,9 +89,11 @@ class MetricSource {
                                                       const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION],
                                                       uint32_t *maxMetricGroupCount,
                                                       std::vector<zet_metric_group_handle_t> &metricGroupList) = 0;
+    virtual ze_result_t appendMarker(zet_command_list_handle_t hCommandList, zet_metric_group_handle_t hMetricGroup, uint32_t value) = 0;
 
   protected:
     uint32_t type = MetricSource::metricSourceTypeUndefined;
+    void getMetricGroupSourceIdProperty(zet_base_properties_t *property);
 };
 
 class MultiDomainDeferredActivationTracker {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -62,6 +62,11 @@ TEST_F(OsInterfaceTest, GivenDefaultOsInterfaceThenLocalMemoryEnabled) {
     EXPECT_TRUE(OSInterface::osEnableLocalMemory);
 }
 
+TEST(OsInterfaceSimpleTest, GivenOsInterfaceWhenCallingGetAggregatedProcessCountThenCallReturnsZero) {
+    OSInterface osInterface;
+    EXPECT_EQ(0u, osInterface.getAggregatedProcessCount());
+}
+
 TEST_F(OsInterfaceTest, whenOsInterfaceSetupGmmInputArgsThenArgsAreSet) {
     MockExecutionEnvironment executionEnvironment;
     auto &rootDeviceEnvironment = *executionEnvironment.rootDeviceEnvironments[0];
@@ -119,7 +124,7 @@ TEST_F(OsInterfaceTest, givenEnableFtrTile64OptimizationDebugKeyWhenSetThenPrope
     {
         wddm->gfxFeatureTable->FtrTile64Optimization = 1;
         auto gmmHelper = std::make_unique<GmmHelper>(rootDeviceEnvironment);
-        EXPECT_EQ(1u, passedFtrTable.FtrTile64Optimization);
+        EXPECT_EQ(0u, passedFtrTable.FtrTile64Optimization);
     }
     {
         debugManager.flags.EnableFtrTile64Optimization.set(-1);
@@ -147,4 +152,15 @@ TEST_F(OsInterfaceTest, givenEnableFtrTile64OptimizationDebugKeyWhenSetThenPrope
         auto gmmHelper = std::make_unique<GmmHelper>(rootDeviceEnvironment);
         EXPECT_EQ(1u, passedFtrTable.FtrTile64Optimization);
     }
+}
+
+TEST_F(OsInterfaceTest, whenGetThresholdForStagingCalledThenReturnNoThreshold) {
+    MockExecutionEnvironment executionEnvironment;
+    auto &rootDeviceEnvironment = *executionEnvironment.rootDeviceEnvironments[0];
+    auto wddm = new WddmMock(rootDeviceEnvironment);
+    EXPECT_EQ(nullptr, rootDeviceEnvironment.osInterface.get());
+    wddm->init();
+    EXPECT_NE(nullptr, rootDeviceEnvironment.osInterface.get());
+    EXPECT_TRUE(rootDeviceEnvironment.osInterface->isSizeWithinThresholdForStaging(MemoryConstants::gigaByte, false));
+    EXPECT_TRUE(rootDeviceEnvironment.osInterface->isSizeWithinThresholdForStaging(MemoryConstants::gigaByte, true));
 }

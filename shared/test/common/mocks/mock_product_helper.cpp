@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,6 +27,11 @@ const std::vector<uint32_t> ProductHelperHw<IGFX_UNKNOWN>::getSupportedLocalDisp
 }
 template <>
 uint32_t ProductHelperHw<IGFX_UNKNOWN>::getMaxLocalRegionSize(const HardwareInfo &hwInfo) const {
+    return 0;
+}
+
+template <>
+uint32_t ProductHelperHw<IGFX_UNKNOWN>::getMaxLocalSubRegionSize(const HardwareInfo &hwInfo) const {
     return 0;
 }
 
@@ -59,7 +64,7 @@ uint64_t ProductHelperHw<IGFX_UNKNOWN>::getDeviceMemCapabilities() const {
 }
 
 template <>
-uint64_t ProductHelperHw<IGFX_UNKNOWN>::getSingleDeviceSharedMemCapabilities() const {
+uint64_t ProductHelperHw<IGFX_UNKNOWN>::getSingleDeviceSharedMemCapabilities(bool) const {
     return 0;
 }
 
@@ -433,7 +438,12 @@ bool ProductHelperHw<gfxProduct>::isBufferPoolAllocatorSupported() const {
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isUsmPoolAllocatorSupported() const {
+bool ProductHelperHw<gfxProduct>::isHostUsmPoolAllocatorSupported() const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isDeviceUsmPoolAllocatorSupported() const {
     return false;
 }
 

@@ -33,8 +33,13 @@ inline static int mockStatFailure(const std::string &filePath, struct stat *stat
     return -1;
 }
 
-inline static int mockStatSuccess(const std::string &filePath, struct stat *statbuf) noexcept {
+inline static int mockStatFailure2(const std::string &filePath, struct stat *statbuf) noexcept {
     statbuf->st_mode = S_IWUSR | S_IRUSR;
+    return 0;
+}
+
+inline static int mockStatSuccess(const std::string &filePath, struct stat *statbuf) noexcept {
+    statbuf->st_mode = S_IWUSR | S_IRUSR | S_IFREG;
     return 0;
 }
 
@@ -235,6 +240,7 @@ TEST_F(SysmanDeviceFixture, GivenPublicFsAccessClassWhenCallingCanWriteWithInval
 
 TEST_F(SysmanDeviceFixture, GivenValidPathnameWhenCallingFsAccessExistsThenSuccessIsReturned) {
     VariableBackup<bool> allowFakeDevicePathBackup(&SysCalls::allowFakeDevicePath, true);
+    VariableBackup<decltype(NEO::SysCalls::sysCallsStat)> mockStat(&NEO::SysCalls::sysCallsStat, &mockStatSuccess);
     auto fsAccess = &pLinuxSysmanImp->getFsAccess();
 
     char cwd[PATH_MAX];
@@ -242,11 +248,36 @@ TEST_F(SysmanDeviceFixture, GivenValidPathnameWhenCallingFsAccessExistsThenSucce
     EXPECT_TRUE(fsAccess->fileExists(path));
 }
 
+TEST_F(SysmanDeviceFixture, GivenStatCallFailsWhenCallingFsAccessExistsThenErrorIsReturned) {
+    VariableBackup<decltype(NEO::SysCalls::sysCallsStat)> mockStat(&NEO::SysCalls::sysCallsStat, &mockStatFailure);
+    auto fsAccess = &pLinuxSysmanImp->getSysfsAccess();
+
+    std::string path = "";
+    EXPECT_FALSE(fsAccess->fileExists(path));
+}
+
+TEST_F(SysmanDeviceFixture, GivenPathIsNotOfFileTypeWhenCallingFsAccessExistsThenErrorIsReturned) {
+    VariableBackup<decltype(NEO::SysCalls::sysCallsStat)> mockStat(&NEO::SysCalls::sysCallsStat, &mockStatFailure2);
+    auto fsAccess = &pLinuxSysmanImp->getSysfsAccess();
+
+    std::string path = "";
+    EXPECT_FALSE(fsAccess->fileExists(path));
+}
+
 TEST_F(SysmanDeviceFixture, GivenInvalidPathnameWhenCallingFsAccessExistsThenErrorIsReturned) {
+    VariableBackup<decltype(NEO::SysCalls::sysCallsStat)> mockStat(&NEO::SysCalls::sysCallsStat, &mockStatSuccess);
     auto fsAccess = &pLinuxSysmanImp->getFsAccess();
 
     std::string path = "noSuchFileOrDirectory";
     EXPECT_FALSE(fsAccess->fileExists(path));
+}
+
+TEST_F(SysmanDeviceFixture, GivenInvalidPathnameWhenCallingSysFsAccessScanDirEntriesThenErrorIsReturned) {
+    auto pSysFsAccess = &pLinuxSysmanImp->getSysfsAccess();
+
+    std::string path = "noSuchDirectory";
+    std::vector<std::string> listFiles;
+    EXPECT_EQ(ZE_RESULT_ERROR_NOT_AVAILABLE, pSysFsAccess->scanDirEntries(path, listFiles));
 }
 
 TEST_F(SysmanDeviceFixture, GivenSysfsAccessClassAndIntegerWhenCallingReadOnMultipleFilesThenSuccessIsReturned) {
@@ -409,6 +440,7 @@ TEST_F(SysmanDeviceFixture, GivenSysfsAccessClassAndOpenSysCallFailsWhenCallingR
 }
 
 TEST_F(SysmanDeviceFixture, GivenValidPidWhenCallingProcfsAccessIsAliveThenSuccessIsReturned) {
+    VariableBackup<decltype(NEO::SysCalls::sysCallsStat)> mockStat(&NEO::SysCalls::sysCallsStat, &mockStatSuccess);
     VariableBackup<bool> allowFakeDevicePathBackup(&SysCalls::allowFakeDevicePath, true);
     auto procfsAccess = &pLinuxSysmanImp->getProcfsAccess();
 

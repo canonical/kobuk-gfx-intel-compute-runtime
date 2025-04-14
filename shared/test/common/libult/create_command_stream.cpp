@@ -16,6 +16,7 @@
 #include "shared/source/helpers/hw_info.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/mocks/mock_memory_operations_handler.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/tests_configuration.h"
 
@@ -49,6 +50,21 @@ CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executionEnviro
 
 bool prepareDeviceEnvironments(ExecutionEnvironment &executionEnvironment) {
     auto retVal = true;
+    if (ultHwConfig.sourceExecutionEnvironment && ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc) {
+        if (executionEnvironment.rootDeviceEnvironments.size() < ultHwConfig.sourceExecutionEnvironment->rootDeviceEnvironments.size()) {
+            executionEnvironment.rootDeviceEnvironments.resize(ultHwConfig.sourceExecutionEnvironment->rootDeviceEnvironments.size());
+        }
+        for (uint32_t i = 0; i < ultHwConfig.sourceExecutionEnvironment->rootDeviceEnvironments.size(); i++) {
+            executionEnvironment.rootDeviceEnvironments[i] = std::make_unique<RootDeviceEnvironment>(executionEnvironment);
+            executionEnvironment.rootDeviceEnvironments[i]->setHwInfoAndInitHelpers(defaultHwInfo.get());
+            executionEnvironment.rootDeviceEnvironments[i]->initGmm();
+            executionEnvironment.rootDeviceEnvironments[i]->memoryOperationsInterface = std::make_unique<MockMemoryOperations>();
+
+            executionEnvironment.rootDeviceEnvironments[i]->getMutableHardwareInfo()->platform = ultHwConfig.sourceExecutionEnvironment->rootDeviceEnvironments[i]->getHardwareInfo()->platform;
+            executionEnvironment.rootDeviceEnvironments[i]->getMutableHardwareInfo()->capabilityTable = ultHwConfig.sourceExecutionEnvironment->rootDeviceEnvironments[i]->getHardwareInfo()->capabilityTable;
+        }
+        return ultHwConfig.mockedPrepareDeviceEnvironmentsFuncResult;
+    }
     if (executionEnvironment.rootDeviceEnvironments.size() == 0) {
         executionEnvironment.prepareRootDeviceEnvironments(1u);
     }

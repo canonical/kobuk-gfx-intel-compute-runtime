@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -114,7 +114,7 @@ class BuiltInDispatchBuilderOp {
     static BuiltinDispatchInfoBuilder &getBuiltinDispatchInfoBuilder(EBuiltInOps::Type op, ClDevice &device);
 };
 
-class BuiltInOwnershipWrapper : public NonCopyableOrMovableClass {
+class BuiltInOwnershipWrapper : public NonCopyableAndNonMovableClass {
   public:
     BuiltInOwnershipWrapper() = default;
     BuiltInOwnershipWrapper(BuiltinDispatchInfoBuilder &inputBuilder, Context *context);
@@ -125,5 +125,7 @@ class BuiltInOwnershipWrapper : public NonCopyableOrMovableClass {
   protected:
     BuiltinDispatchInfoBuilder *builder = nullptr;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<BuiltInOwnershipWrapper>);
 
 } // namespace NEO

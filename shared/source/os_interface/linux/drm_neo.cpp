@@ -7,6 +7,7 @@
 
 #include "shared/source/os_interface/linux/drm_neo.h"
 
+#include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/submission_status.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/execution_environment/execution_environment.h"
@@ -253,7 +254,8 @@ bool Drm::checkResetStatus(OsContext &osContext) {
         uint32_t status = 0;
         const auto retVal{ioctlHelper->getResetStats(resetStats, &status, &fault)};
         UNRECOVERABLE_IF(retVal != 0);
-        if (checkToDisableScratchPage() && ioctlHelper->validPageFault(fault.flags)) {
+        auto debuggingEnabled = rootDeviceEnvironment.executionEnvironment.isDebuggingEnabled();
+        if (!debuggingEnabled && checkToDisableScratchPage() && ioctlHelper->validPageFault(fault.flags)) {
             bool banned = ((status & ioctlHelper->getStatusForResetStats(true)) != 0);
             IoFunctions::fprintf(stderr, "Segmentation fault from GPU at 0x%llx, ctx_id: %u (%s) type: %d (%s), level: %d (%s), access: %d (%s), banned: %d, aborting.\n",
                                  fault.addr,
@@ -860,6 +862,18 @@ int Drm::waitHandle(uint32_t waitHandle, int64_t timeout) {
     wait.boHandle = waitHandle;
     wait.timeoutNs = timeout;
 
+    if (this->rootDeviceEnvironment.executionEnvironment.memoryManager) {
+        const auto &mulitEngines = this->rootDeviceEnvironment.executionEnvironment.memoryManager->getRegisteredEngines();
+        for (const auto &engines : mulitEngines) {
+            for (const auto &engine : engines) {
+                if (engine.osContext->isDirectSubmissionLightActive()) {
+                    auto lock = engine.commandStreamReceiver->obtainUniqueOwnership();
+                    engine.commandStreamReceiver->stopDirectSubmission(false);
+                }
+            }
+        }
+    }
+
     int ret = ioctlHelper->ioctl(DrmIoctl::gemWait, &wait);
     if (ret != 0) {
         int err = errno;
@@ -1003,24 +1017,25 @@ void Drm::setupSystemInfo(HardwareInfo *hwInfo, SystemInfo *sysInfo) {
 void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
     auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
 
-    if (debugManager.flags.ClosEnabled.get() == 0 || productHelper.getNumCacheRegions() == 0) {
-        this->l3CacheInfo.reset(new CacheInfo{*ioctlHelper, 0, 0, 0});
-        return;
-    }
+    auto getL3CacheReservationLimits{[&hwInfo, &productHelper]() {
+        CacheReservationParameters out{};
+        if (debugManager.flags.ClosEnabled.get() == 0 || productHelper.getNumCacheRegions() == 0) {
+            return out;
+        }
 
-    auto allocateL3CacheInfo{[&productHelper, &hwInfo, &ioctlHelper = *(this->ioctlHelper)]() {
-        constexpr uint16_t maxNumWays = 32;
+        constexpr uint16_t totalMaxNumWays = 32;
         constexpr uint16_t globalReservationLimit = 16;
         constexpr uint16_t clientReservationLimit = 8;
-        constexpr uint16_t maxReservationNumWays = std::min(globalReservationLimit, clientReservationLimit);
         const size_t totalCacheSize = hwInfo.gtSystemInfo.L3CacheSizeInKb * MemoryConstants::kiloByte;
-        const size_t maxReservationCacheSize = (totalCacheSize * maxReservationNumWays) / maxNumWays;
-        const uint32_t maxReservationNumCacheRegions = productHelper.getNumCacheRegions() - 1;
 
-        return new CacheInfo(ioctlHelper, maxReservationCacheSize, maxReservationNumCacheRegions, maxReservationNumWays);
+        out.maxNumWays = std::min(globalReservationLimit, clientReservationLimit);
+        out.maxSize = (totalCacheSize * out.maxNumWays) / totalMaxNumWays;
+        out.maxNumRegions = productHelper.getNumCacheRegions() - 1;
+
+        return out;
     }};
 
-    this->l3CacheInfo.reset(allocateL3CacheInfo());
+    this->cacheInfo.reset(new CacheInfo(*ioctlHelper, getL3CacheReservationLimits()));
 }
 
 void Drm::getPrelimVersion(std::string &prelimVersion) {
@@ -1154,8 +1169,11 @@ void Drm::configureScratchPagePolicy() {
         return;
     }
     const auto &productHelper = this->getRootDeviceEnvironment().getHelper<ProductHelper>();
-    disableScratch = (productHelper.isDisableScratchPagesSupported() &&
-                      !rootDeviceEnvironment.executionEnvironment.isDebuggingEnabled());
+    if (rootDeviceEnvironment.executionEnvironment.isDebuggingEnabled()) {
+        disableScratch = productHelper.isDisableScratchPagesRequiredForDebugger();
+    } else {
+        disableScratch = productHelper.isDisableScratchPagesSupported();
+    }
 }
 
 void Drm::configureGpuFaultCheckThreshold() {
@@ -1799,6 +1817,10 @@ bool Drm::queryDeviceIdAndRevision() {
         return IoctlHelperXe::queryDeviceIdAndRevision(*this);
     }
     return IoctlHelperI915::queryDeviceIdAndRevision(*this);
+}
+
+uint32_t Drm::getAggregatedProcessCount() const {
+    return ioctlHelper->getNumProcesses();
 }
 
 template std::vector<uint16_t> Drm::query<uint16_t>(uint32_t queryId, uint32_t queryItemFlags);

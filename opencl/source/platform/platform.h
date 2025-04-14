@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -37,9 +37,6 @@ class Platform : public BaseObject<_cl_platform_id> {
     Platform(ExecutionEnvironment &executionEnvironment);
     ~Platform() override;
 
-    Platform(const Platform &) = delete;
-    Platform &operator=(Platform const &) = delete;
-
     cl_int getInfo(cl_platform_info paramName,
                    size_t paramValueSize,
                    void *paramValue,
@@ -57,7 +54,6 @@ class Platform : public BaseObject<_cl_platform_id> {
     ExecutionEnvironment *peekExecutionEnvironment() const { return &executionEnvironment; }
 
     static std::unique_ptr<Platform> (*createFunc)(ExecutionEnvironment &executionEnvironment);
-    static std::vector<DeviceVector> groupDevices(DeviceVector devices);
 
   protected:
     enum {
@@ -73,6 +69,9 @@ class Platform : public BaseObject<_cl_platform_id> {
     std::once_flag initializeExtensionsWithVersionOnce;
     std::once_flag oclInitGTPinOnce;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<BaseObject<_cl_platform_id>>);
+static_assert(NEO::NonCopyableAndNonMovable<Platform>);
 
 extern std::vector<std::unique_ptr<Platform>> *platformsImpl;
 } // namespace NEO

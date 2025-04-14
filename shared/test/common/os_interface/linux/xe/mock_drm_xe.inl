@@ -1,17 +1,16 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
-
-#pragma once
 
 inline constexpr int testValueVmId = 0x5764;
 inline constexpr int testValueMapOff = 0x7788;
 inline constexpr int testValuePrime = 0x4321;
 inline constexpr uint32_t testValueGemCreate = 0x8273;
 struct DrmMockXe : public DrmMockCustom {
+    using Drm::engineInfo;
 
     static std::unique_ptr<DrmMockXe> create(RootDeviceEnvironment &rootDeviceEnvironment);
 

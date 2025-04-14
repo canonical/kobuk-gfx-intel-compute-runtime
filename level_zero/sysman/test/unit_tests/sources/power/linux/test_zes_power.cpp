@@ -42,23 +42,90 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenComponentCountZeroWhenEnumeratingPower
     }
 }
 
-TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerPointerWhenGettingCardPowerDomainWhenhwmonInterfaceExistsAndThenCallSucceeds) {
+TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerPointerWhenGetCardPowerDomainIsCalledThenFailureIsReturned) {
+    zes_pwr_handle_t phPower = {};
+    EXPECT_EQ(zesDeviceGetCardPowerDomain(device->toHandle(), &phPower), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanDevicePowerFixtureI915, GivenInvalidPowerPointerWhenGetCardPowerDomainIsCalledThenFailureIsReturned) {
+    EXPECT_EQ(zesDeviceGetCardPowerDomain(device->toHandle(), nullptr), ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+}
+
+TEST_F(SysmanDevicePowerFixtureI915, GivenPowerHandlesListContainsCardDomainHandleWhenGetCardPowerDomainIsCalledThenCallSucceeds) {
+    Power *pPower = new PowerImp(pOsSysman, false, 0, ZES_POWER_DOMAIN_CARD);
+
+    pSysmanDeviceImp->pPowerHandleContext->handleList.push_back(pPower);
+
     zes_pwr_handle_t phPower = {};
     EXPECT_EQ(zesDeviceGetCardPowerDomain(device->toHandle(), &phPower), ZE_RESULT_SUCCESS);
 }
 
-TEST_F(SysmanDevicePowerFixtureI915, GivenInvalidPowerPointerWhenGettingCardPowerDomainAndThenReturnsFailure) {
-    EXPECT_EQ(zesDeviceGetCardPowerDomain(device->toHandle(), nullptr), ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+TEST_F(SysmanDevicePowerFixtureI915, GivenHwmonDirectoriesDoesNotExistWhenGettingPowerHandlesThenNoHandlesAreReturned) {
+    pSysfsAccess->mockscanDirEntriesResult.clear();
+    pSysfsAccess->mockscanDirEntriesResult.push_back(ZE_RESULT_ERROR_NOT_AVAILABLE);
+    pSysfsAccess->mockscanDirEntriesResult.push_back(ZE_RESULT_ERROR_NOT_AVAILABLE);
+
+    uint32_t count = 0;
+    EXPECT_EQ(zesDeviceEnumPowerDomains(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(count, 0u);
 }
 
-TEST_F(SysmanDevicePowerFixtureI915, GivenUninitializedPowerHandlesAndWhenGettingCardPowerDomainThenReturnsFailure) {
-    for (const auto &handle : pSysmanDeviceImp->pPowerHandleContext->handleList) {
-        delete handle;
-    }
-    pSysmanDeviceImp->pPowerHandleContext->handleList.clear();
+TEST_F(SysmanDevicePowerFixtureI915, GivenHwmonDirectoriesDoesNotContainNameFileWhenGettingPowerHandlesThenNoHandlesAreReturned) {
+    pSysfsAccess->mockReadResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
 
-    zes_pwr_handle_t phPower = {};
-    EXPECT_EQ(zesDeviceGetCardPowerDomain(device->toHandle(), &phPower), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    uint32_t count = 0;
+    EXPECT_EQ(zesDeviceEnumPowerDomains(device->toHandle(), &count, nullptr), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(count, 0u);
+}
+
+TEST_F(SysmanDevicePowerFixtureI915, GivenPowerHandleWithUnknownPowerDomainWhenIsPowerModuleSupportedIsCalledThenFalseValueIsReturned) {
+    uint32_t subdeviceId = 0;
+    ze_bool_t onSubdevice = false;
+    auto pPowerImp = std::make_unique<PublicLinuxPowerImp>(pOsSysman, onSubdevice, subdeviceId, ZES_POWER_DOMAIN_UNKNOWN);
+    pPowerImp->pSysfsAccess = pSysfsAccess;
+    EXPECT_FALSE(pPowerImp->isPowerModuleSupported());
+}
+
+TEST_F(SysmanDevicePowerFixtureI915, GivenTelemetrySupportAndEnergyCounterNodeExistanceStatesWhenIsPowerModuleSupportedIsCalledForSubdeviceHandleThenCorrectSupportStatusIsReturnedForPackageDomain) {
+    // Loop through all combinations of the three boolean flags (false/true) for the file existence
+    for (bool isPackageEnergyCounterFilePresent : {false, true}) {
+        for (bool isTelemetrySupportAvailable : {false, true}) {
+            // Set the file existence flags based on the current combination
+            pSysfsAccess->isEnergyCounterFilePresent = isPackageEnergyCounterFilePresent;
+            auto pPowerImp = std::make_unique<PublicLinuxPowerImp>(pOsSysman, true, 0, ZES_POWER_DOMAIN_PACKAGE);
+            pPowerImp->isTelemetrySupportAvailable = isTelemetrySupportAvailable;
+            // The expected result is true if at least one of the path is present
+            bool expected = (isTelemetrySupportAvailable || isPackageEnergyCounterFilePresent);
+
+            // Verify if the power module is supported as expected
+            EXPECT_EQ(pPowerImp->isPowerModuleSupported(), expected);
+        }
+    }
+}
+
+TEST_F(SysmanDevicePowerFixtureI915, GivenVariousPowerLimitFileExistanceStatesWhenIsPowerModuleSupportedIsCalledForRootDeviceHandleThenCorrectSupportStatusIsReturnedForPackageDomain) {
+    // Loop through all combinations of the three boolean flags (false/true) for the file existence
+    for (bool isPackageEnergyCounterFilePresent : {false, true}) {
+        for (bool isTelemetrySupportAvailable : {false, true}) {
+            for (bool isPackagedSustainedPowerLimitFilePresent : {false, true}) {
+                for (bool isPackageCriticalPowerLimit2Present : {false, true}) {
+                    // Set the file existence flags based on the current combination
+                    pSysfsAccess->isEnergyCounterFilePresent = isPackageEnergyCounterFilePresent;
+                    pSysfsAccess->isSustainedPowerLimitFilePresent = isPackagedSustainedPowerLimitFilePresent;
+                    pSysfsAccess->isCriticalPowerLimitFilePresent = isPackageCriticalPowerLimit2Present;
+
+                    auto pPowerImp = std::make_unique<PublicLinuxPowerImp>(pOsSysman, false, 0, ZES_POWER_DOMAIN_PACKAGE);
+                    pPowerImp->isTelemetrySupportAvailable = isTelemetrySupportAvailable;
+                    // The expected result is true if at least one of the files is present
+                    bool expected = (isTelemetrySupportAvailable || isPackageEnergyCounterFilePresent ||
+                                     isPackagedSustainedPowerLimitFilePresent || isPackageCriticalPowerLimit2Present);
+
+                    // Verify if the power module is supported as expected
+                    EXPECT_EQ(pPowerImp->isPowerModuleSupported(), expected);
+                }
+            }
+        }
+    }
 }
 
 TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenGettingPowerPropertiesWhenhwmonInterfaceExistsThenCallSucceeds) {
@@ -118,7 +185,7 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenGettingPowerProper
         EXPECT_EQ(properties.defaultLimit, (int32_t)(mockDefaultPowerLimitVal / milliFactor));
         EXPECT_EQ(properties.maxLimit, (int32_t)(mockDefaultPowerLimitVal / milliFactor));
         EXPECT_EQ(properties.minLimit, -1);
-        EXPECT_EQ(extProperties.domain, ZES_POWER_DOMAIN_CARD);
+        EXPECT_EQ(extProperties.domain, ZES_POWER_DOMAIN_PACKAGE);
         EXPECT_TRUE(defaultLimit.limitValueLocked);
         EXPECT_TRUE(defaultLimit.enabledStateLocked);
         EXPECT_TRUE(defaultLimit.intervalValueLocked);
@@ -180,7 +247,7 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndPowerSetLimitSuppor
 }
 
 TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenGettingPowerPropertiesAndSysfsReadFailsThenFailureIsReturned) {
-    std::unique_ptr<PublicLinuxPowerImp> pLinuxPowerImp(new PublicLinuxPowerImp(pOsSysman, false, 0, ZES_POWER_DOMAIN_CARD));
+    std::unique_ptr<PublicLinuxPowerImp> pLinuxPowerImp(new PublicLinuxPowerImp(pOsSysman, false, 0, ZES_POWER_DOMAIN_PACKAGE));
     EXPECT_TRUE(pLinuxPowerImp->isPowerModuleSupported());
     pSysfsAccess->mockReadValUnsignedLongResult.push_back(ZE_RESULT_ERROR_NOT_AVAILABLE);
     zes_power_properties_t properties{};
@@ -208,35 +275,6 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndHandleCountZeroWhen
     EXPECT_EQ(count, powerHandleComponentCount);
 }
 
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenSetPowerLimitsWhenGettingPowerLimitsWhenHwmonInterfaceExistThenLimitsSetEarlierAreRetrieved, IsXeHpOrXeHpcOrXeHpgCore) {
-    auto handles = getPowerHandles(powerHandleComponentCount);
-    for (auto handle : handles) {
-        ASSERT_NE(nullptr, handle);
-        zes_power_sustained_limit_t sustainedSet = {};
-        zes_power_sustained_limit_t sustainedGet = {};
-        sustainedSet.enabled = 1;
-        sustainedSet.interval = 10;
-        sustainedSet.power = 300000;
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimits(handle, &sustainedSet, nullptr, nullptr));
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimits(handle, &sustainedGet, nullptr, nullptr));
-        EXPECT_EQ(sustainedGet.power, sustainedSet.power);
-
-        zes_power_burst_limit_t burstGet = {};
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimits(handle, nullptr, nullptr, nullptr));
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimits(handle, nullptr, &burstGet, nullptr));
-        EXPECT_EQ(burstGet.enabled, false);
-        EXPECT_EQ(burstGet.power, -1);
-
-        zes_power_peak_limit_t peakSet = {};
-        zes_power_peak_limit_t peakGet = {};
-        peakSet.powerAC = 300000;
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimits(handle, nullptr, nullptr, &peakSet));
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimits(handle, nullptr, nullptr, &peakGet));
-        EXPECT_EQ(peakGet.powerAC, peakSet.powerAC);
-        EXPECT_EQ(peakGet.powerDC, -1);
-    }
-}
-
 TEST_F(SysmanDevicePowerFixtureI915, GivenDefaultLimitSysfsNodesNotAvailableWhenGettingPowerPropertiesThenApiCallReturnsFailure) {
     auto handles = getPowerHandles(powerHandleComponentCount);
     for (auto handle : handles) {
@@ -262,104 +300,6 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenDefaultLimitSysfsNodesNotAvailableWhen
         pSysfsAccess->mockReadValUnsignedLongResult.push_back(ZE_RESULT_SUCCESS);
         pSysfsAccess->mockReadValUnsignedLongResult.push_back(ZE_RESULT_ERROR_NOT_AVAILABLE);
         EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesPowerGetProperties(handle, &properties));
-    }
-}
-
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandlesWhenCallingSetAndGetPowerLimitExtThenLimitsSetEarlierAreRetrieved, IsPVC) {
-    auto handles = getPowerHandles(powerHandleComponentCount);
-    for (auto handle : handles) {
-        ASSERT_NE(nullptr, handle);
-
-        uint32_t limitCount = 0;
-        const int32_t testLimit = 300000;
-        const int32_t testInterval = 10;
-
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, nullptr));
-        EXPECT_EQ(limitCount, mockLimitCount);
-
-        limitCount++;
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, nullptr));
-        EXPECT_EQ(limitCount, mockLimitCount);
-
-        std::vector<zes_power_limit_ext_desc_t> allLimits(limitCount);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, allLimits.data()));
-        for (uint32_t i = 0; i < limitCount; i++) {
-            if (allLimits[i].level == ZES_POWER_LEVEL_SUSTAINED) {
-                EXPECT_FALSE(allLimits[i].limitValueLocked);
-                EXPECT_TRUE(allLimits[i].enabledStateLocked);
-                EXPECT_FALSE(allLimits[i].intervalValueLocked);
-                EXPECT_EQ(ZES_POWER_SOURCE_ANY, allLimits[i].source);
-                EXPECT_EQ(ZES_LIMIT_UNIT_POWER, allLimits[i].limitUnit);
-                allLimits[i].limit = testLimit;
-                allLimits[i].interval = testInterval;
-            } else if (allLimits[i].level == ZES_POWER_LEVEL_PEAK) {
-                EXPECT_FALSE(allLimits[i].limitValueLocked);
-                EXPECT_TRUE(allLimits[i].enabledStateLocked);
-                EXPECT_TRUE(allLimits[i].intervalValueLocked);
-                EXPECT_EQ(ZES_POWER_SOURCE_ANY, allLimits[i].source);
-                EXPECT_EQ(ZES_LIMIT_UNIT_CURRENT, allLimits[i].limitUnit);
-                allLimits[i].limit = testLimit;
-            }
-        }
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimitsExt(handle, &limitCount, allLimits.data()));
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, allLimits.data()));
-        for (uint32_t i = 0; i < limitCount; i++) {
-            if (allLimits[i].level == ZES_POWER_LEVEL_SUSTAINED) {
-                EXPECT_EQ(testInterval, allLimits[i].interval);
-            } else if (allLimits[i].level == ZES_POWER_LEVEL_PEAK) {
-                EXPECT_EQ(0, allLimits[i].interval);
-            }
-            EXPECT_EQ(testLimit, allLimits[i].limit);
-        }
-    }
-}
-
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandlesWhenCallingSetAndGetPowerLimitExtThenLimitsSetEarlierAreRetrieved, IsDG1) {
-    auto handles = getPowerHandles(powerHandleComponentCount);
-    for (auto handle : handles) {
-        ASSERT_NE(nullptr, handle);
-
-        uint32_t limitCount = 0;
-        const int32_t testLimit = 300000;
-        const int32_t testInterval = 10;
-
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, nullptr));
-        EXPECT_EQ(limitCount, mockLimitCount);
-
-        limitCount++;
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, nullptr));
-        EXPECT_EQ(limitCount, mockLimitCount);
-
-        std::vector<zes_power_limit_ext_desc_t> allLimits(limitCount);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, allLimits.data()));
-        for (uint32_t i = 0; i < limitCount; i++) {
-            if (allLimits[i].level == ZES_POWER_LEVEL_SUSTAINED) {
-                EXPECT_FALSE(allLimits[i].limitValueLocked);
-                EXPECT_TRUE(allLimits[i].enabledStateLocked);
-                EXPECT_FALSE(allLimits[i].intervalValueLocked);
-                EXPECT_EQ(ZES_POWER_SOURCE_ANY, allLimits[i].source);
-                EXPECT_EQ(ZES_LIMIT_UNIT_POWER, allLimits[i].limitUnit);
-                allLimits[i].limit = testLimit;
-                allLimits[i].interval = testInterval;
-            } else if (allLimits[i].level == ZES_POWER_LEVEL_PEAK) {
-                EXPECT_FALSE(allLimits[i].limitValueLocked);
-                EXPECT_TRUE(allLimits[i].enabledStateLocked);
-                EXPECT_TRUE(allLimits[i].intervalValueLocked);
-                EXPECT_EQ(ZES_POWER_SOURCE_ANY, allLimits[i].source);
-                EXPECT_EQ(ZES_LIMIT_UNIT_POWER, allLimits[i].limitUnit);
-                allLimits[i].limit = testLimit;
-            }
-        }
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimitsExt(handle, &limitCount, allLimits.data()));
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, allLimits.data()));
-        for (uint32_t i = 0; i < limitCount; i++) {
-            if (allLimits[i].level == ZES_POWER_LEVEL_SUSTAINED) {
-                EXPECT_EQ(testInterval, allLimits[i].interval);
-            } else if (allLimits[i].level == ZES_POWER_LEVEL_PEAK) {
-                EXPECT_EQ(0, allLimits[i].interval);
-            }
-            EXPECT_EQ(testLimit, allLimits[i].limit);
-        }
     }
 }
 
@@ -425,8 +365,8 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenReadingToSysNodesFailsWhenCallingGetPo
     for (const auto &handle : pSysmanDeviceImp->pPowerHandleContext->handleList) {
         delete handle;
     }
-    pSysfsAccess->mockReadValUnsignedLongResult.push_back(ZE_RESULT_ERROR_NOT_AVAILABLE);
-    pSysfsAccess->mockReadValUnsignedLongResult.push_back(ZE_RESULT_ERROR_NOT_AVAILABLE);
+    pSysfsAccess->isSustainedPowerLimitFilePresent = false;
+    pSysfsAccess->isCriticalPowerLimitFilePresent = false;
     pSysmanDeviceImp->pPowerHandleContext->handleList.clear();
     pSysmanDeviceImp->pPowerHandleContext->init(pLinuxSysmanImp->getSubDeviceCount());
 
@@ -480,7 +420,8 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenSettingBurstPowerL
     }
 }
 
-TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenCallingGetPowerLimitsExtThenProperValuesAreReturned) {
+TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndPeakPowerLimitFileDoesNotExistWhenCallingGetPowerLimitsExtThenOnlySustainedLimitIsReturned) {
+    pSysfsAccess->isCriticalPowerLimitFilePresent = false;
     auto handles = getPowerHandles(powerHandleComponentCount);
 
     for (auto handle : handles) {
@@ -489,47 +430,44 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenCallingGetPowerLim
         uint32_t count = 0;
 
         EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, nullptr));
-        EXPECT_EQ(count, mockLimitCount);
-
-        count = 1;
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, &allLimits));
         EXPECT_EQ(count, 1u);
-        EXPECT_EQ(false, allLimits.limitValueLocked);
-        EXPECT_EQ(true, allLimits.enabledStateLocked);
-        EXPECT_EQ(false, allLimits.intervalValueLocked);
-        EXPECT_EQ(ZES_POWER_SOURCE_ANY, allLimits.source);
-        EXPECT_EQ(ZES_LIMIT_UNIT_POWER, allLimits.limitUnit);
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, &allLimits));
         EXPECT_EQ(ZES_POWER_LEVEL_SUSTAINED, allLimits.level);
     }
 }
 
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndWritingToPeakLimitSysNodesFailsWhenCallingSetPowerLimitsExtThenProperErrorCodesReturned, IsPVC) {
+TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndSustainedPowerLimitFileDoesNotExistWhenCallingGetPowerLimitsExtThenOnlyCriticalLimitIsReturned) {
+    pSysfsAccess->isSustainedPowerLimitFilePresent = false;
     auto handles = getPowerHandles(powerHandleComponentCount);
-
-    pSysfsAccess->mockWritePeakLimitResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
 
     for (auto handle : handles) {
         ASSERT_NE(nullptr, handle);
-        uint32_t count = mockLimitCount;
-        std::vector<zes_power_limit_ext_desc_t> allLimits(mockLimitCount);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, allLimits.data()));
+        zes_power_limit_ext_desc_t allLimits{};
+        uint32_t count = 0;
 
-        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesPowerSetLimitsExt(handle, &count, allLimits.data()));
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, nullptr));
+        EXPECT_EQ(count, 1u);
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, &allLimits));
+        EXPECT_EQ(ZES_POWER_LEVEL_PEAK, allLimits.level);
     }
 }
 
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndWritingToPeakLimitSysNodesFailsWhenCallingSetPowerLimitsExtThenProperErrorCodesReturned, IsDG1) {
+TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenCallingGetPowerLimitsExtThenProperValuesAreReturned) {
     auto handles = getPowerHandles(powerHandleComponentCount);
-
-    pSysfsAccess->mockWritePeakLimitResult = ZE_RESULT_ERROR_NOT_AVAILABLE;
 
     for (auto handle : handles) {
         ASSERT_NE(nullptr, handle);
-        uint32_t count = mockLimitCount;
-        std::vector<zes_power_limit_ext_desc_t> allLimits(mockLimitCount);
-        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &count, allLimits.data()));
+        uint32_t limitCount = 0;
 
-        EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesPowerSetLimitsExt(handle, &count, allLimits.data()));
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, nullptr));
+        EXPECT_EQ(limitCount, mockLimitCount);
+
+        std::vector<zes_power_limit_ext_desc_t> allLimits(limitCount);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimitsExt(handle, &limitCount, allLimits.data()));
+        EXPECT_EQ(ZES_POWER_LEVEL_SUSTAINED, allLimits[0].level);
+        EXPECT_EQ(ZES_POWER_LEVEL_PEAK, allLimits[1].level);
     }
 }
 
@@ -571,19 +509,6 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenReadingpeakPowerNodeReturnErrorWhenGet
     }
 }
 
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleAndPermissionsThenFirstDisableSustainedPowerLimitAndThenEnableItAndCheckSuccesIsReturned, IsXeHpOrXeHpcOrXeHpgCore) {
-    auto handles = getPowerHandles(powerHandleComponentCount);
-    ASSERT_NE(nullptr, handles[0]);
-    zes_power_sustained_limit_t sustainedSet = {};
-    zes_power_sustained_limit_t sustainedGet = {};
-    sustainedSet.enabled = 0;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimits(handles[0], &sustainedSet, nullptr, nullptr));
-    sustainedSet.power = 300000;
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerSetLimits(handles[0], &sustainedSet, nullptr, nullptr));
-    EXPECT_EQ(ZE_RESULT_SUCCESS, zesPowerGetLimits(handles[0], &sustainedGet, nullptr, nullptr));
-    EXPECT_EQ(sustainedGet.power, sustainedSet.power);
-}
-
 TEST_F(SysmanDevicePowerFixtureI915, GivenwritingSustainedPowerNodeReturnErrorWhenSetPowerLimitsForSustainedPowerWhenHwmonInterfaceExistThenProperErrorCodesReturned) {
     auto handles = getPowerHandles(powerHandleComponentCount);
     ASSERT_NE(nullptr, handles[0]);
@@ -606,16 +531,6 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenwritingSustainedPowerIntervalNodeRetur
     sustainedSet.interval = 10;
     sustainedSet.power = 300000;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, zesPowerSetLimits(handles[0], &sustainedSet, nullptr, nullptr));
-}
-
-HWTEST2_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenWritingToSustainedPowerEnableNodeWithoutPermissionsThenValidErrorIsReturned, IsXeHpOrXeHpcOrXeHpgCore) {
-    auto handles = getPowerHandles(powerHandleComponentCount);
-    ASSERT_NE(nullptr, handles[0]);
-
-    pSysfsAccess->mockWriteUnsignedResult.push_back(ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS);
-    zes_power_sustained_limit_t sustainedSet = {};
-    sustainedSet.enabled = 0;
-    EXPECT_EQ(ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS, zesPowerSetLimits(handles[0], &sustainedSet, nullptr, nullptr));
 }
 
 TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenGettingPowerPropertiesThenCallSucceeds) {
@@ -667,10 +582,10 @@ TEST_F(SysmanDevicePowerFixtureI915, GivenValidPowerHandleWhenSettingPowerEnergy
 
 TEST_F(SysmanDevicePowerFixtureXe, GivenKmdInterfaceWhenGettingSysFsFilenamesForPowerForXeVersionThenProperPathsAreReturned) {
     auto pSysmanKmdInterface = std::make_unique<SysmanKmdInterfaceXe>(pLinuxSysmanImp->getSysmanProductHelper());
-    EXPECT_STREQ("energy1_input", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameEnergyCounterNode, 0, false).c_str());
-    EXPECT_STREQ("power1_rated_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameDefaultPowerLimit, 0, false).c_str());
-    EXPECT_STREQ("power1_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameSustainedPowerLimit, 0, false).c_str());
-    EXPECT_STREQ("power1_max_interval", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameSustainedPowerLimitInterval, 0, false).c_str());
+    EXPECT_STREQ("energy1_input", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageEnergyCounterNode, 0, false).c_str());
+    EXPECT_STREQ("power1_rated_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageDefaultPowerLimit, 0, false).c_str());
+    EXPECT_STREQ("power1_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageSustainedPowerLimit, 0, false).c_str());
+    EXPECT_STREQ("power1_max_interval", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageSustainedPowerLimitInterval, 0, false).c_str());
 }
 
 } // namespace ult

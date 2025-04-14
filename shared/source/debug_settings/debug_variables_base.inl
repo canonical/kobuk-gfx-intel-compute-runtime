@@ -41,7 +41,7 @@ DECLARE_DEBUG_VARIABLE(bool, AUBDumpAllocsOnEnqueueSVMMemcpyOnly, false, "Force 
 DECLARE_DEBUG_VARIABLE(bool, AUBDumpForceAllToLocalMemory, false, "Force placing every allocation in local memory address space")
 DECLARE_DEBUG_VARIABLE(bool, GenerateAubFilePerProcessId, true, "Generate aub file with process id")
 DECLARE_DEBUG_VARIABLE(bool, SetBufferHostMemoryAlwaysAubWritable, false, "Make buffer host memory allocation always uploaded to AUB/TBX")
-DECLARE_DEBUG_VARIABLE(bool, EnableTbxPageFaultManager, false, "Enables experiemental page fault manager for host buffer types, improves upon SetBufferHostMemoryAlwaysAubWritable")
+DECLARE_DEBUG_VARIABLE(bool, EnableTbxPageFaultManager, false, "Enables experimental page fault manager for host buffers and some other alloc types, replaces SetBufferHostMemoryAlwaysAubWritable")
 
 /*DEBUG FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, EnableSWTags, false, "Enable software tagging in batch buffer")
@@ -91,6 +91,7 @@ DECLARE_DEBUG_VARIABLE(bool, SkipInOrderNonWalkerSignalingAllowed, false, "Allow
 DECLARE_DEBUG_VARIABLE(bool, PipelinedPipelineSelect, false, "Restore usage of default pipeline select command")
 DECLARE_DEBUG_VARIABLE(bool, AbortHostSyncOnNonHostVisibleEvent, false, "Aborts execution when user calls zeEventHostSynchronize on event without host signal scope")
 DECLARE_DEBUG_VARIABLE(bool, IgnoreProductSpecificIoctlHelper, false, "When set then product specific ioctl helper is not created even if available, generic one is used")
+DECLARE_DEBUG_VARIABLE(bool, EnableDdiHandlesExtension, false, "Enable L0 Driver Direct Device Interface (DDI) Handles Extension")
 DECLARE_DEBUG_VARIABLE(std::string, ForceDeviceId, std::string("unk"), "Override device id in AUB/TBX mode")
 DECLARE_DEBUG_VARIABLE(std::string, FilterDeviceId, std::string("unk"), "Device id filter, adapter matching device id will be opened; ignored when unk")
 DECLARE_DEBUG_VARIABLE(std::string, FilterBdfPath, std::string("unk"), "Linux-only, BDF path filter, only matching paths will be opened; ignored when unk")
@@ -380,6 +381,7 @@ DECLARE_DEBUG_VARIABLE(bool, ForceNonCoherentModeForTimestamps, false, "When act
 DECLARE_DEBUG_VARIABLE(bool, SetAssumeNotInUse, true, "Set AssumeNotInUse flag in d3d destroy allocation.")
 DECLARE_DEBUG_VARIABLE(bool, MitigateHostVisibleSignal, false, "Reset host visible signal in CB events, flush L3 when synchronize")
 DECLARE_DEBUG_VARIABLE(bool, ForceZeroCopyForUseHostPtr, false, "When active all buffer allocations created with CL_MEM_USE_HOST_PTR flag will use share memory with CPU.")
+DECLARE_DEBUG_VARIABLE(bool, DummyPageBackingEnabled, false, "When true, pass page backing flag to KMD to recover from page faults. Windows only.");
 DECLARE_DEBUG_VARIABLE(int32_t, EnableReusingGpuTimestamps, -1, "Reuse GPU timestamp for next device time requests. -1: os-specific, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, AllowZeroCopyWithoutCoherency, -1, "Use cacheline flush instead of memory copy for map/unmap mem object")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableHostPtrTracking, -1, "Enable host ptr tracking: -1 - default platform setting, 0 - disabled, 1 - enabled")
@@ -494,8 +496,6 @@ DECLARE_DEBUG_VARIABLE(int32_t, EnableKernelTunning, -1, "Perform a tunning of e
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBOMmapCreate, -1, "Create BOs using mmap, -1:default, 0:disable(GEM_USERPTR), 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableGemCloseWorker, -1, "Use asynchronous gem object closing, -1:default, 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableHostPtrValidation, -1, "Validate BO from GEM_USERPTR, -1:default(enable), 0:disable, 1:enable")
-DECLARE_DEBUG_VARIABLE(int32_t, EnableIntelVme, -1, "-1: default, 0: disabled, 1: Enables cl_intel_motion_estimation extension")
-DECLARE_DEBUG_VARIABLE(int32_t, EnableIntelAdvancedVme, -1, "-1: default, 0: disabled, 1: Enables cl_intel_advanced_motion_estimation extension")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBlitterOperationsSupport, -1, "-1: default, 0: disable, 1: enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBlitterForEnqueueOperations, -1, "Use Blitter engine for enqueue operations. -1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBlitterForEnqueueImageOperations, -1, "Use Blitter engine for read/write/copy image operations. -1: default, 0: disabled, 1: enabled")
@@ -561,7 +561,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, SignalAllEventPackets, -1, "All packets of event
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBcsSwControlWa, -1, "Enable BCS WA via BCSSWCONTROL MMIO. -1: default, 0: disabled, 1: if src in system mem, 2: if dst in system mem, 3: if src and dst in system mem, 4: always")
 DECLARE_DEBUG_VARIABLE(bool, EnableHostAllocationMemPolicy, false, "Enables Memory Policy for host allocation")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideHostAllocationMemPolicyMode, -1, "Override Memory Policy mode for host allocation -1: default (use the system configuration), 0: MPOL_DEFAULT, 1: MPOL_PREFERRED, 2: MPOL_BIND, 3: MPOL_INTERLEAVED, 4: MPOL_LOCAL, 5: MPOL_PREFERRED_MANY")
-DECLARE_DEBUG_VARIABLE(int32_t, EnableFtrTile64Optimization, -1, "Control feature Tile64 Optimization flag passed to gmmlib. -1: pass as-is, 0: disable flag(default due to NEO-10623), 1: enable flag");
+DECLARE_DEBUG_VARIABLE(int32_t, EnableFtrTile64Optimization, 0, "Control feature Tile64 Optimization flag passed to gmmlib. -1: pass as-is, 0: disable flag(default due to NEO-10623), 1: enable flag");
 DECLARE_DEBUG_VARIABLE(int32_t, ForceTheMaximumNumberOfOutstandingRayqueriesPerSs, -1, "Set the maximum number of outstanding RayQueries per SS, -1: default, 0: 128, 1: 256, 2: 512, 3: 1024")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceDispatchTimeoutCounter, -1, "Set timeout for Synchronous Ray Tracing, -1: default, 0: 64, 1: 128, 2: 192, 3: 256, 4: 512, 5: 1024, 6: 2048, 7: 4096")
 DECLARE_DEBUG_VARIABLE(int32_t, Enable10ThreadsPerEu, -1, "Enable 10 threads per EU  HSD-18022695913, -1: default, 0: disabled, 1: enabled")

@@ -26,6 +26,7 @@ struct KmdNotifyProperties;
 struct AllocationData;
 class CommandStreamReceiver;
 class Device;
+class Drm;
 enum class LocalMemoryAccessMode;
 struct FrontEndPropertiesSupport;
 struct HardwareInfo;
@@ -82,7 +83,7 @@ class ProductHelper {
     virtual void adjustSamplerState(void *sampler, const HardwareInfo &hwInfo) const = 0;
     virtual uint64_t getHostMemCapabilities(const HardwareInfo *hwInfo) const = 0;
     virtual uint64_t getDeviceMemCapabilities() const = 0;
-    virtual uint64_t getSingleDeviceSharedMemCapabilities() const = 0;
+    virtual uint64_t getSingleDeviceSharedMemCapabilities(bool isKmdMigrationAvailable) const = 0;
     virtual uint64_t getCrossDeviceSharedMemCapabilities() const = 0;
     virtual uint64_t getSharedSystemMemCapabilities(const HardwareInfo *hwInfo) const = 0;
     virtual std::vector<int32_t> getKernelSupportedThreadArbitrationPolicies() const = 0;
@@ -128,6 +129,7 @@ class ProductHelper {
     virtual bool isPageFaultSupported() const = 0;
     virtual bool isKmdMigrationSupported() const = 0;
     virtual bool isDisableScratchPagesSupported() const = 0;
+    virtual bool isDisableScratchPagesRequiredForDebugger() const = 0;
     virtual bool areSecondaryContextsSupported() const = 0;
     virtual bool isTile64With3DSurfaceOnBCSSupported(const HardwareInfo &hwInfo) const = 0;
     virtual bool isDcFlushAllowed() const = 0;
@@ -178,7 +180,8 @@ class ProductHelper {
     virtual bool isNonBlockingGpuSubmissionSupported() const = 0;
     virtual bool isResolveDependenciesByPipeControlsSupported(const HardwareInfo &hwInfo, bool isOOQ, TaskCountType queueTaskCount, const CommandStreamReceiver &queueCsr) const = 0;
     virtual bool isBufferPoolAllocatorSupported() const = 0;
-    virtual bool isUsmPoolAllocatorSupported() const = 0;
+    virtual bool isHostUsmPoolAllocatorSupported() const = 0;
+    virtual bool isDeviceUsmPoolAllocatorSupported() const = 0;
     virtual bool isDeviceUsmAllocationReuseSupported() const = 0;
     virtual bool isHostUsmAllocationReuseSupported() const = 0;
     virtual bool useLocalPreferredForCacheableBuffers() const = 0;
@@ -193,6 +196,7 @@ class ProductHelper {
     virtual uint32_t getCommandBuffersPreallocatedPerCommandQueue() const = 0;
     virtual uint32_t getInternalHeapsPreallocated() const = 0;
     virtual bool overrideAllocationCacheable(const AllocationData &allocationData) const = 0;
+    virtual bool is2MBLocalMemAlignmentEnabled() const = 0;
 
     virtual bool getFrontEndPropertyScratchSizeSupport() const = 0;
     virtual bool getFrontEndPropertyPrivateScratchSizeSupport() const = 0;
@@ -240,6 +244,7 @@ class ProductHelper {
     virtual bool deferMOCSToPatIndex() const = 0;
     virtual const std::vector<uint32_t> getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getMaxLocalRegionSize(const HardwareInfo &hwInfo) const = 0;
+    virtual uint32_t getMaxLocalSubRegionSize(const HardwareInfo &hwInfo) const = 0;
     virtual bool localDispatchSizeQuerySupported() const = 0;
     virtual bool supportReadOnlyAllocations() const = 0;
     virtual bool isDeviceToHostCopySignalingFenceRequired() const = 0;
@@ -252,6 +257,7 @@ class ProductHelper {
     virtual bool supports2DBlockLoad() const = 0;
     virtual uint32_t getNumCacheRegions() const = 0;
     virtual uint64_t getPatIndex(CacheRegion cacheRegion, CachePolicy cachePolicy) const = 0;
+    virtual bool isSharingWith3dOrMediaAllowed() const = 0;
 
     virtual ~ProductHelper() = default;
 

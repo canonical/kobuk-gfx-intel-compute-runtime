@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -699,38 +699,6 @@ TEST_F(MinimumProgramFixture, givenEmptyAilWhenCreateProgramWithSourcesThenSourc
     ASSERT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_STREQ(sources[0], pProgram->sourceCode.c_str());
-    pProgram->release();
-}
-
-TEST_F(MinimumProgramFixture, givenAILReturningTrueForFallbackRequirementWhenBuildingProgramThenMarkContextAsNonZebin) {
-    class MockAIL : public MockAILConfiguration {
-      public:
-        bool isFallbackToPatchtokensRequired() override {
-            return true;
-        }
-    };
-    auto pDevice = pContext->getDevice(0);
-    auto rootDeviceEnvironment = pDevice->getExecutionEnvironment()->rootDeviceEnvironments[rootDeviceIndex].get();
-    rootDeviceEnvironment->ailConfiguration.reset(new MockAIL());
-
-    ASSERT_FALSE(pContext->checkIfContextIsNonZebin());
-
-    const char *kernelSources[] = {"some source code"};
-    size_t knownSourceSize = strlen(kernelSources[0]);
-    MockProgram *pProgram = nullptr;
-    pProgram = Program::create<SucceedingGenBinaryProgram>(
-        pContext,
-        1,
-        kernelSources,
-        &knownSourceSize,
-        retVal);
-
-    ASSERT_NE(nullptr, pProgram);
-    ASSERT_EQ(CL_SUCCESS, retVal);
-
-    retVal = pProgram->build(pProgram->getDevices(), "");
-    EXPECT_EQ(CL_SUCCESS, retVal);
-    EXPECT_TRUE(pContext->checkIfContextIsNonZebin());
     pProgram->release();
 }
 
@@ -1511,37 +1479,6 @@ TEST_F(PatchTokenTests, WhenBuildingProgramThenConstantKernelArgsAreAvailable) {
     delete pKernel;
 }
 
-TEST_F(PatchTokenTests, GivenVmeKernelWhenBuildingKernelThenArgAvailable) {
-    if (!pDevice->getHardwareInfo().capabilityTable.supportsVme) {
-        GTEST_SKIP();
-    }
-    // PATCH_TOKEN_INLINE_VME_SAMPLER_INFO token indicates a VME kernel.
-
-    createProgramFromBinary(pContext, pContext->getDevices(), "vme_kernels");
-
-    ASSERT_NE(nullptr, pProgram);
-    retVal = pProgram->build(
-        pProgram->getDevices(),
-        nullptr);
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
-
-    auto pKernelInfo = pProgram->getKernelInfo("device_side_block_motion_estimate_intel", rootDeviceIndex);
-    ASSERT_NE(nullptr, pKernelInfo);
-    EXPECT_EQ(true, pKernelInfo->kernelDescriptor.kernelAttributes.flags.usesVme);
-
-    auto pKernel = Kernel::create(
-        pProgram,
-        *pKernelInfo,
-        *pClDevice,
-        retVal);
-
-    EXPECT_EQ(CL_SUCCESS, retVal);
-    ASSERT_NE(nullptr, pKernel);
-
-    delete pKernel;
-}
-
 class ProgramPatchTokenFromBinaryTest : public ProgramSimpleFixture {
   public:
     void setUp() {
@@ -1759,12 +1696,12 @@ TEST_F(ProgramTests, WhenCreatingProgramThenBindlessIsEnabledOnlyIfDebugFlagIsEn
     }
 }
 
-TEST_F(ProgramTests, GivenForce32BitAddressessWhenProgramIsCreatedThenGreaterThan4gbBuffersRequiredIsCorrectlySet) {
+TEST_F(ProgramTests, GivenForce32BitAddressesWhenProgramIsCreatedThenGreaterThan4gbBuffersRequiredIsCorrectlySet) {
     DebugManagerStateRestore dbgRestorer;
     cl_int retVal = CL_DEVICE_NOT_FOUND;
     debugManager.flags.DisableStatelessToStatefulOptimization.set(false);
     if (pDevice) {
-        const_cast<DeviceInfo *>(&pDevice->getDeviceInfo())->force32BitAddressess = true;
+        const_cast<DeviceInfo *>(&pDevice->getDeviceInfo())->force32BitAddresses = true;
         MockProgram program(pContext, false, toClDeviceVector(*pClDevice));
         auto internalOptions = program.getInternalOptions();
         const auto &compilerProductHelper = pDevice->getRootDeviceEnvironment().getHelper<CompilerProductHelper>();
@@ -1806,10 +1743,10 @@ TEST_F(ProgramTests, givenProgramWhenItIsCompiledThenItAlwaysHavePreserveVec3Typ
     EXPECT_TRUE(CompilerOptions::contains(internalOptions, CompilerOptions::preserveVec3Type)) << internalOptions;
 }
 
-TEST_F(ProgramTests, Force32BitAddressessWhenProgramIsCreatedThenGreaterThan4gbBuffersRequiredIsCorrectlySet) {
+TEST_F(ProgramTests, Force32BitAddressesWhenProgramIsCreatedThenGreaterThan4gbBuffersRequiredIsCorrectlySet) {
     DebugManagerStateRestore dbgRestorer;
     debugManager.flags.DisableStatelessToStatefulOptimization.set(false);
-    const_cast<DeviceInfo *>(&pDevice->getDeviceInfo())->force32BitAddressess = true;
+    const_cast<DeviceInfo *>(&pDevice->getDeviceInfo())->force32BitAddresses = true;
     std::unique_ptr<MockProgram> program{Program::createBuiltInFromSource<MockProgram>("", pContext, pContext->getDevices(), nullptr)};
     auto internalOptions = program->getInternalOptions();
     const auto &compilerProductHelper = pDevice->getRootDeviceEnvironment().getHelper<CompilerProductHelper>();
@@ -2115,8 +2052,13 @@ TEST_F(ProgramTests, whenCreatingFromZebinThenDontAppendEnableZebinFlagToBuildOp
         GTEST_SKIP();
     }
 
+    auto copyHwInfo = *defaultHwInfo;
+    MockExecutionEnvironment mockExecutionEnvironment{};
+    auto &compilerProductHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<CompilerProductHelper>();
+    compilerProductHelper.adjustHwInfoForIgc(copyHwInfo);
+
     ZebinTestData::ValidEmptyProgram zebin;
-    zebin.elfHeader->machine = defaultHwInfo->platform.eProductFamily;
+    zebin.elfHeader->machine = copyHwInfo.platform.eProductFamily;
 
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr, mockRootDeviceIndex));
     auto program = std::make_unique<MockProgram>(toClDeviceVector(*device));

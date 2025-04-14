@@ -768,21 +768,23 @@ ze_result_t DeviceImp::getMemoryProperties(uint32_t *pCount, ze_device_memory_pr
 ze_result_t DeviceImp::getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) {
     auto &hwInfo = this->getHwInfo();
     auto &productHelper = this->getProductHelper();
+
     pMemAccessProperties->hostAllocCapabilities =
         static_cast<ze_memory_access_cap_flags_t>(productHelper.getHostMemCapabilities(&hwInfo));
 
     pMemAccessProperties->deviceAllocCapabilities =
         static_cast<ze_memory_access_cap_flags_t>(productHelper.getDeviceMemCapabilities());
 
+    auto memoryManager{this->getDriverHandle()->getMemoryManager()};
+    const bool isKmdMigrationAvailable{memoryManager->isKmdMigrationAvailable(this->getRootDeviceIndex())};
     pMemAccessProperties->sharedSingleDeviceAllocCapabilities =
-        static_cast<ze_memory_access_cap_flags_t>(productHelper.getSingleDeviceSharedMemCapabilities());
+        static_cast<ze_memory_access_cap_flags_t>(productHelper.getSingleDeviceSharedMemCapabilities(isKmdMigrationAvailable));
 
     pMemAccessProperties->sharedCrossDeviceAllocCapabilities = {};
     if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported) {
         pMemAccessProperties->sharedCrossDeviceAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW;
 
-        auto memoryManager = this->getDriverHandle()->getMemoryManager();
-        if (memoryManager->isKmdMigrationAvailable(this->getRootDeviceIndex()) &&
+        if (isKmdMigrationAvailable &&
             memoryManager->hasPageFaultsEnabled(*this->getNEODevice()) &&
             NEO::debugManager.flags.EnableConcurrentSharedCrossP2PDeviceAccess.get() == 1) {
             pMemAccessProperties->sharedCrossDeviceAllocCapabilities |= ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT;
@@ -1237,8 +1239,9 @@ ze_result_t DeviceImp::getCacheProperties(uint32_t *pCount, ze_device_cache_prop
     if (pCacheProperties->pNext) {
         auto extendedProperties = reinterpret_cast<ze_device_cache_properties_t *>(pCacheProperties->pNext);
         if (extendedProperties->stype == ZE_STRUCTURE_TYPE_CACHE_RESERVATION_EXT_DESC) {
+            constexpr size_t cacheLevel{3U};
             auto cacheReservationProperties = reinterpret_cast<ze_cache_reservation_ext_desc_t *>(extendedProperties);
-            cacheReservationProperties->maxCacheReservationSize = cacheReservation->getMaxCacheReservationSize();
+            cacheReservationProperties->maxCacheReservationSize = cacheReservation->getMaxCacheReservationSize(cacheLevel);
         } else {
             return ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION;
         }
@@ -1253,12 +1256,16 @@ ze_result_t DeviceImp::reserveCache(size_t cacheLevel, size_t cacheReservationSi
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
-    if (cacheReservation->getMaxCacheReservationSize() == 0) {
+    if (cacheLevel == 0U) {
+        cacheLevel = 3U;
+    }
+
+    if (cacheLevel != 3U) {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
-    if (cacheLevel == 0) {
-        cacheLevel = 3;
+    if (cacheReservation->getMaxCacheReservationSize(cacheLevel) == 0U) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
     auto result = cacheReservation->reserveCache(cacheLevel, cacheReservationSize);
@@ -1275,12 +1282,22 @@ ze_result_t DeviceImp::setCacheAdvice(void *ptr, size_t regionSize, ze_cache_ext
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
-    if (cacheReservation->getMaxCacheReservationSize() == 0) {
-        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    if (cacheRegion == ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_DEFAULT) {
+        cacheRegion = ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_NON_RESERVED;
     }
 
-    if (cacheRegion == ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_ZE_CACHE_REGION_DEFAULT) {
-        cacheRegion = ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_ZE_CACHE_NON_RESERVED_REGION;
+    const auto cacheLevel{[cacheRegion]() {
+        switch (cacheRegion) {
+        case ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_RESERVED:
+        case ze_cache_ext_region_t::ZE_CACHE_EXT_REGION_NON_RESERVED:
+            return 3U;
+        default:
+            UNRECOVERABLE_IF(true);
+        }
+    }()};
+
+    if (cacheReservation->getMaxCacheReservationSize(cacheLevel) == 0) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
     auto result = cacheReservation->setCacheAdvice(ptr, regionSize, cacheRegion);
@@ -1342,23 +1359,23 @@ ze_result_t DeviceImp::getDeviceImageProperties(ze_device_image_properties_t *pD
 
 ze_result_t DeviceImp::getDebugProperties(zet_device_debug_properties_t *pDebugProperties) {
     bool isDebugAttachAvailable = getOsInterface() ? getOsInterface()->isDebugAttachAvailable() : false;
-    auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*this->getNEODevice()).getStateSaveAreaHeader();
-
-    if (stateSaveAreaHeader.size() == 0) {
-        PRINT_DEBUGGER_INFO_LOG("Context state save area header missing", "");
-        isDebugAttachAvailable = false;
-    }
+    pDebugProperties->flags = 0;
 
     auto &hwInfo = neoDevice->getHardwareInfo();
     if (!hwInfo.capabilityTable.l0DebuggerSupported) {
         isDebugAttachAvailable = false;
     }
-
-    bool tileAttach = NEO::debugManager.flags.ExperimentalEnableTileAttach.get();
-    pDebugProperties->flags = 0;
     if (isDebugAttachAvailable) {
-        if ((isSubdevice && tileAttach) || !isSubdevice) {
-            pDebugProperties->flags = zet_device_debug_property_flag_t::ZET_DEVICE_DEBUG_PROPERTY_FLAG_ATTACH;
+        auto &stateSaveAreaHeader = NEO::SipKernel::getDebugSipKernel(*this->getNEODevice()).getStateSaveAreaHeader();
+
+        if (stateSaveAreaHeader.size() == 0) {
+            PRINT_DEBUGGER_INFO_LOG("Context state save area header missing", "");
+        } else {
+            bool tileAttach = NEO::debugManager.flags.ExperimentalEnableTileAttach.get();
+
+            if ((isSubdevice && tileAttach) || !isSubdevice) {
+                pDebugProperties->flags = zet_device_debug_property_flag_t::ZET_DEVICE_DEBUG_PROPERTY_FLAG_ATTACH;
+            }
         }
     }
     return ZE_RESULT_SUCCESS;

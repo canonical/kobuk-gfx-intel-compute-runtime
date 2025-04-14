@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -64,10 +64,10 @@ Program::Program(Context *context, bool isBuiltIn, const ClDeviceVector &clDevic
 
 std::string Program::getInternalOptions() const {
     auto pClDevice = clDevices[0];
-    auto force32BitAddressess = pClDevice->getSharedDeviceInfo().force32BitAddressess;
+    auto force32BitAddresses = pClDevice->getSharedDeviceInfo().force32BitAddresses;
     auto internalOptions = getOclVersionCompilerInternalOption(pClDevice->getEnabledClVersion());
 
-    if (force32BitAddressess && !isBuiltIn) {
+    if (force32BitAddresses && !isBuiltIn) {
         CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::arch32bit);
     }
 
@@ -109,7 +109,7 @@ std::string Program::getInternalOptions() const {
     CompilerOptions::concatenateAppend(internalOptions, CompilerOptions::preserveVec3Type);
     auto isDebuggerActive = pClDevice->getDevice().getDebugger() != nullptr;
     CompilerOptions::concatenateAppend(internalOptions, compilerProductHelper.getCachingPolicyOptions(isDebuggerActive));
-    CompilerOptions::applyExtraInternalOptions(internalOptions, compilerProductHelper);
+    CompilerOptions::applyExtraInternalOptions(internalOptions, compilerProductHelper, NEO::CompilerOptions::HeaplessMode::defaultMode);
 
     return internalOptions;
 }

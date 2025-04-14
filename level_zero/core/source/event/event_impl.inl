@@ -11,6 +11,7 @@
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/sub_device.h"
 #include "shared/source/helpers/basic_math.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/memory_manager/memory_operations_handler.h"
@@ -188,7 +189,13 @@ ze_result_t EventImp<TagSizeT>::calculateProfilingData() {
 
     for (uint32_t kernelId = 0; kernelId < kernelCount; kernelId++) {
         const auto &eventCompletion = kernelEventCompletionData[kernelId];
-        for (auto packetId = 0u; packetId < eventCompletion.getPacketsUsed(); packetId++) {
+
+        auto numPackets = eventCompletion.getPacketsUsed();
+        if (inOrderIncrementValue > 0) {
+            numPackets *= static_cast<uint32_t>(inOrderTimestampNode.size());
+        }
+
+        for (auto packetId = 0u; packetId < numPackets; packetId++) {
             if (this->l3FlushAppliedOnKernel.test(kernelId) && ((packetId % skipL3EventPacketIndex) != 0)) {
                 continue;
             }
@@ -212,11 +219,37 @@ ze_result_t EventImp<TagSizeT>::calculateProfilingData() {
 }
 
 template <typename TagSizeT>
+void EventImp<TagSizeT>::clearLatestInOrderTimestampData(uint32_t partitionCount) {
+    auto node = inOrderTimestampNode.back();
+    auto hostAddress = node->getCpuBase();
+    auto deviceAddress = node->getGpuAddress();
+
+    const std::array<TagSizeT, 4> data = {Event::STATE_INITIAL, Event::STATE_INITIAL, Event::STATE_INITIAL, Event::STATE_INITIAL};
+    constexpr size_t copySize = data.size() * sizeof(TagSizeT);
+
+    for (uint32_t i = 0; i < partitionCount; i++) {
+        copyDataToEventAlloc(hostAddress, deviceAddress, copySize, data.data());
+
+        hostAddress = ptrOffset(hostAddress, singlePacketSize);
+        deviceAddress += singlePacketSize;
+    }
+}
+
+template <typename TagSizeT>
 void EventImp<TagSizeT>::assignKernelEventCompletionData(void *address) {
     for (uint32_t i = 0; i < kernelCount; i++) {
-        uint32_t packetsToCopy = 0;
-        packetsToCopy = kernelEventCompletionData[i].getPacketsUsed();
+        uint32_t packetsToCopy = kernelEventCompletionData[i].getPacketsUsed();
+        if (inOrderIncrementValue > 0) {
+            packetsToCopy *= static_cast<uint32_t>(inOrderTimestampNode.size());
+        }
+
+        uint32_t nodeId = 0;
+
         for (uint32_t packetId = 0; packetId < packetsToCopy; packetId++) {
+            if (inOrderIncrementValue > 0 && (packetId % kernelEventCompletionData[i].getPacketsUsed() == 0)) {
+                address = inOrderTimestampNode[nodeId++]->getCpuBase();
+            }
+
             kernelEventCompletionData[i].assignDataToAllTimestamps(packetId, address);
             address = ptrOffset(address, singlePacketSize);
         }
@@ -540,7 +573,7 @@ void EventImp<TagSizeT>::copyDataToEventAlloc(void *dstHostAddr, uint64_t dstGpu
 
 template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::hostEventSetValue(Event::State eventState) {
-    if (!hostAddressFromPool && !this->inOrderTimestampNode) {
+    if (!hostAddressFromPool && this->inOrderTimestampNode.empty()) {
         return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
     }
 
@@ -665,7 +698,7 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
     }
 
     TaskCountType taskCountToWaitForL3Flush = 0;
-    if (this->mitigateHostVisibleSignal && this->device->getProductHelper().isDcFlushAllowed()) {
+    if (((this->isCounterBased() && !this->inOrderTimestampNode.empty()) || this->mitigateHostVisibleSignal) && this->device->getProductHelper().isDcFlushAllowed() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled()) {
         auto lock = this->csrs[0]->obtainUniqueOwnership();
         this->csrs[0]->flushTagUpdate();
         taskCountToWaitForL3Flush = this->csrs[0]->peekLatestFlushedTaskCount();
@@ -677,10 +710,19 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
     const bool fenceWait = isKmdWaitModeEnabled() && isCounterBased() && csrs[0]->waitUserFenceSupported();
 
     do {
-        if (fenceWait) {
-            ret = waitForUserFence(timeout);
+        if (this->isCounterBased() && !this->inOrderTimestampNode.empty() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled()) {
+            synchronizeTimestampCompletionWithTimeout();
+            if (this->isTimestampPopulated()) {
+                inOrderExecInfo->setLastWaitedCounterValue(getInOrderExecSignalValueWithSubmissionCounter());
+                handleSuccessfulHostSynchronization();
+                ret = ZE_RESULT_SUCCESS;
+            }
         } else {
-            ret = queryStatus();
+            if (fenceWait) {
+                ret = waitForUserFence(timeout);
+            } else {
+                ret = queryStatus();
+            }
         }
         if (ret == ZE_RESULT_SUCCESS) {
             if (this->getKernelWithPrintfDeviceMutex() != nullptr) {
@@ -790,8 +832,10 @@ template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::queryKernelTimestamp(ze_kernel_timestamp_result_t *dstptr) {
     ze_kernel_timestamp_result_t &result = *dstptr;
 
-    if (queryStatus() != ZE_RESULT_SUCCESS) {
-        return ZE_RESULT_NOT_READY;
+    if (!this->isCounterBased() || this->inOrderTimestampNode.empty()) {
+        if (queryStatus() != ZE_RESULT_SUCCESS) {
+            return ZE_RESULT_NOT_READY;
+        }
     }
 
     assignKernelEventCompletionData(getHostAddress());
@@ -799,6 +843,11 @@ ze_result_t EventImp<TagSizeT>::queryKernelTimestamp(ze_kernel_timestamp_result_
 
     if (!isTimestampPopulated()) {
         synchronizeTimestampCompletionWithTimeout();
+        if (!this->inOrderTimestampNode.empty()) {
+            if (!isTimestampPopulated()) {
+                return ZE_RESULT_NOT_READY;
+            }
+        }
     }
 
     auto eventTsSetFunc = [&](uint64_t &timestampFieldToCopy, uint64_t &timestampFieldForWriting) {

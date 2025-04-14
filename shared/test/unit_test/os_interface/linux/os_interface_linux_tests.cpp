@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -55,6 +55,18 @@ TEST(OsInterfaceTest, GivenLinuxOsInterfaceWhenCallingIsDebugAttachAvailableThen
     EXPECT_FALSE(osInterface.isDebugAttachAvailable());
 }
 
+TEST(OsInterfaceTest, GivenLinuxOsInterfaceWhenCallingGetAggregatedProcessCountThenCallRedirectedToDriverModel) {
+    OSInterface osInterface;
+    EXPECT_EQ(0u, osInterface.getAggregatedProcessCount());
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    DrmMock *drm = new DrmMock(*executionEnvironment->rootDeviceEnvironments[0]);
+    osInterface.setDriverModel(std::unique_ptr<DriverModel>(drm));
+    drm->mockProcessCount = 5;
+    EXPECT_EQ(5u, osInterface.getAggregatedProcessCount());
+}
+
 TEST(OsInterfaceTest, whenOsInterfaceSetupGmmInputArgsThenArgsAreSet) {
     MockExecutionEnvironment executionEnvironment{};
     auto &rootDeviceEnvironment = *executionEnvironment.rootDeviceEnvironments[0];
@@ -80,6 +92,17 @@ TEST(OsInterfaceTest, whenOsInterfaceSetupGmmInputArgsThenArgsAreSet) {
     EXPECT_EQ(0, memcmp(&expectedFtrTable, &passedFtrTable, sizeof(SKU_FEATURE_TABLE)));
     EXPECT_EQ(0, memcmp(&expectedWaTable, &passedWaTable, sizeof(WA_TABLE)));
     EXPECT_EQ(GMM_CLIENT::GMM_OCL_VISTA, passedInputArgs.ClientType);
+}
+
+TEST(OsInterfaceTest, GivenLinuxOsInterfaceWhenGetThresholdForStagingCalledThenReturnThresholdForIntegratedDevices) {
+    OSInterface osInterface;
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    DrmMock *drm = new DrmMock(*executionEnvironment->rootDeviceEnvironments[0]);
+
+    osInterface.setDriverModel(std::unique_ptr<DriverModel>(drm));
+    EXPECT_TRUE(osInterface.isSizeWithinThresholdForStaging(MemoryConstants::gigaByte, false));
+    EXPECT_FALSE(osInterface.isSizeWithinThresholdForStaging(MemoryConstants::gigaByte, true));
 }
 
 } // namespace NEO

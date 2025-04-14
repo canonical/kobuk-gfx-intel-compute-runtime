@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,7 +8,9 @@
 #pragma once
 
 #include "shared/offline_compiler/source/ocloc_api.h"
+#include "shared/source/compiler_interface/compiler_options.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/utilities/arrayref.h"
 #include "shared/source/utilities/const_stringref.h"
 
@@ -44,7 +46,7 @@ static_assert(sizeof(NameVersionPair) == sizeof(ocloc_name_version));
 
 const HardwareInfo *getHwInfoForDeprecatedAcronym(const std::string &deviceName);
 
-class OfflineCompiler {
+class OfflineCompiler : NEO::NonCopyableAndNonMovableClass {
   public:
     static std::vector<NameVersionPair> getExtensions(ConstStringRef product, bool needVersions, OclocArgHelper *helper);
     static std::vector<NameVersionPair> getOpenCLCVersions(ConstStringRef product, OclocArgHelper *helper);
@@ -110,8 +112,6 @@ that correspond to the given name.
 All supported acronyms: %s.
 )OCLOC_HELP";
 
-    OfflineCompiler &operator=(const OfflineCompiler &) = delete;
-    OfflineCompiler(const OfflineCompiler &) = delete;
     MOCKABLE_VIRTUAL ~OfflineCompiler();
 
     bool isQuiet() const {
@@ -200,6 +200,7 @@ All supported acronyms: %s.
     std::string internalOptionsReadFromFile = "";
     std::string formatToEnforce = "";
     std::string addressingMode = "default";
+    CompilerOptions::HeaplessMode heaplessMode = CompilerOptions::HeaplessMode::defaultMode;
     std::string irHash, genHash, dbgHash, elfHash;
     std::string cacheDir;
 
@@ -242,5 +243,7 @@ All supported acronyms: %s.
 
     OclocArgHelper *argHelper = nullptr;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<OfflineCompiler>);
 
 } // namespace NEO

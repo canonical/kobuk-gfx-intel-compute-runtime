@@ -1,9 +1,14 @@
 components:
+  aub_configs:
+    branch: aub_configs
+    dest_dir: aub_configs
+    revision: c61eb321f2751d50e890a900d9301f9e995ffdcd
+    type: git
   aub_stream:
     branch: master
     dest_dir: aub_stream
     repository: https://github.com/intel/aubstream
-    revision: 14253792bee629f51b00085dea3f91b7b44a2e5e
+    revision: f76c02c6980dd88b7aaeeba736df85a2f6ec3479
     type: git
   gmmlib:
     asset_name: gmmlib
@@ -16,8 +21,8 @@ components:
     asset_name: igc
     dest_dir: igc
     type: git
-    branch: releases/2.7.x
-    revision: v2.7.11
+    branch: releases/2.8.x
+    revision: v2.8.4
     repository: https://github.com/intel/intelgraphicscompiler
   igsc:
     asset_name: igsc
@@ -26,7 +31,7 @@ components:
     branch: master
     revision: V0.9.5
     repository: https://github.com/intel/igsc.git
-    component_version: 296
+    component_version: 301
   internal:
     branch: master
     dest_dir: internal
@@ -36,7 +41,7 @@ components:
     dest_dir: kernels_bin
     type: git
     branch: kernels_bin
-    revision: 3292-3638
+    revision: 3326-3860
   kmdaf:
     branch: kmdaf
     dest_dir: kmdaf
@@ -47,7 +52,7 @@ components:
     dest_dir: level_zero
     type: git
     branch: master
-    revision: v1.20.2
+    revision: v1.20.6
     repository: https://github.com/oneapi-src/level-zero
   libva:
     asset_name: libva
@@ -79,13 +84,13 @@ components:
     dest_dir: wdk
     type: git
     branch: wdk
-    revision: a60dfa22769763c4b029c5e7746b91924066f6e9-3278
+    revision: ab182b834cc760c8ef9c5d6b776f1bd8df3bf1c5-3315
   wsl:
     branch: wsl
     dest_dir: wsl
     revision: 56430997dac34ca0e9e18c177636234cac26ad54
     type: git
-converter: M-3292
+converter: M-3326
 include:
 - infra.yml
 version: '1'

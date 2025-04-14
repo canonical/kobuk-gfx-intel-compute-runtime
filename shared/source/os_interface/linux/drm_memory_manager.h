@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -119,7 +119,6 @@ class DrmMemoryManager : public MemoryManager {
     uint32_t getNumMediaEncoders(uint32_t rootDeviceIndex) const override;
 
     bool isCompressionSupportedForShareable(bool isShareable) override;
-    bool usmCompressionSupported(Device *device) override;
     MOCKABLE_VIRTUAL SubmissionStatus emitPinningRequestForBoContainer(BufferObject **bo, uint32_t boCount, uint32_t rootDeviceIndex) const;
 
     void getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) override;
@@ -129,6 +128,9 @@ class DrmMemoryManager : public MemoryManager {
 
     BufferObject *allocUserptr(uintptr_t address, size_t size, uint32_t rootDeviceIndex);
     size_t getUserptrAlignment();
+
+    void drainGemCloseWorker() const override;
+    void disableForcePin();
 
     decltype(&mmap) mmapFunction = mmap;
     decltype(&munmap) munmapFunction = munmap;
@@ -179,7 +181,7 @@ class DrmMemoryManager : public MemoryManager {
     void cleanupBeforeReturn(const AllocationData &allocationData, GfxPartition *gfxPartition, DrmAllocation *drmAllocation, GraphicsAllocation *graphicsAllocation, uint64_t &gpuAddress, size_t &sizeAllocated);
     GraphicsAllocation *allocateGraphicsMemoryInDevicePool(const AllocationData &allocationData, AllocationStatus &status) override;
     bool createDrmChunkedAllocation(Drm *drm, DrmAllocation *allocation, uint64_t boAddress, size_t boSize, size_t maxOsContextCount);
-    bool createDrmAllocation(Drm *drm, DrmAllocation *allocation, uint64_t gpuAddress, size_t maxOsContextCount);
+    bool createDrmAllocation(Drm *drm, DrmAllocation *allocation, uint64_t gpuAddress, size_t maxOsContextCount, size_t preferredAlignment);
     void registerAllocationInOs(GraphicsAllocation *allocation) override;
     void waitOnCompletionFence(GraphicsAllocation *allocation);
     bool allocationTypeForCompletionFence(AllocationType allocationType);

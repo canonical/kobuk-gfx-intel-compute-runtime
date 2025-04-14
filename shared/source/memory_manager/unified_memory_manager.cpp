@@ -126,6 +126,7 @@ void *SVMAllocsManager::SvmAllocationCache::get(size_t size, const UnifiedMemory
                 memoryManager->recordHostAllocationGetFromReuse(allocationIter->allocationSize);
             }
             allocations.erase(allocationIter);
+            svmData->size = size;
             return allocationPtr;
         }
     }
@@ -178,6 +179,7 @@ void SVMAllocsManager::SvmAllocationCache::trimOldAllocs(std::chrono::high_resol
         }
         svmAllocsManager->freeSVMAllocImpl(allocationIter->allocation, FreePolicyType::defer, svmData);
         allocationIter = allocations.erase(allocationIter);
+        return;
     }
 }
 
@@ -767,7 +769,9 @@ void *SVMAllocsManager::createUnifiedAllocationWithDeviceStorage(size_t size, co
     gpuProperties.alignment = alignment;
     auto compressionSupported = false;
     if (unifiedMemoryProperties.device) {
-        compressionSupported = memoryManager->usmCompressionSupported(unifiedMemoryProperties.device);
+        auto &gfxCoreHelper = unifiedMemoryProperties.device->getGfxCoreHelper();
+        auto &hwInfo = unifiedMemoryProperties.device->getHardwareInfo();
+        compressionSupported = gfxCoreHelper.usmCompressionSupported(hwInfo);
         compressionSupported &= memoryManager->isCompressionSupportedForShareable(unifiedMemoryProperties.allocationFlags.flags.shareable);
     }
     gpuProperties.flags.preferCompressed = compressionSupported;
@@ -841,7 +845,9 @@ void SVMAllocsManager::initUsmAllocationsCaches(Device &device) {
         this->usmDeviceAllocationsCacheEnabled = !!debugManager.flags.ExperimentalEnableDeviceAllocationCache.get();
     }
     if (this->usmDeviceAllocationsCacheEnabled) {
-        device.getExecutionEnvironment()->initializeUnifiedMemoryReuseCleaner();
+        if (!device.isAnyDirectSubmissionEnabled(true)) {
+            device.getExecutionEnvironment()->initializeUnifiedMemoryReuseCleaner();
+        }
         this->initUsmDeviceAllocationsCache(device);
     }
 
@@ -850,7 +856,9 @@ void SVMAllocsManager::initUsmAllocationsCaches(Device &device) {
         this->usmHostAllocationsCacheEnabled = !!debugManager.flags.ExperimentalEnableHostAllocationCache.get();
     }
     if (this->usmHostAllocationsCacheEnabled) {
-        device.getExecutionEnvironment()->initializeUnifiedMemoryReuseCleaner();
+        if (!device.isAnyDirectSubmissionEnabled(true)) {
+            device.getExecutionEnvironment()->initializeUnifiedMemoryReuseCleaner();
+        }
         this->initUsmHostAllocationsCache();
     }
 }
@@ -960,7 +968,9 @@ AllocationType SVMAllocsManager::getGraphicsAllocationTypeAndCompressionPreferen
             allocationType = AllocationType::writeCombined;
         } else {
             UNRECOVERABLE_IF(nullptr == unifiedMemoryProperties.device);
-            if (CompressionSelector::allowStatelessCompression() || memoryManager->usmCompressionSupported(unifiedMemoryProperties.device)) {
+            auto &gfxCoreHelper = unifiedMemoryProperties.device->getGfxCoreHelper();
+            auto &hwInfo = unifiedMemoryProperties.device->getHardwareInfo();
+            if (CompressionSelector::allowStatelessCompression() || gfxCoreHelper.usmCompressionSupported(hwInfo)) {
                 compressionEnabled = true;
             }
             if (unifiedMemoryProperties.requestedAllocationType != AllocationType::unknown) {

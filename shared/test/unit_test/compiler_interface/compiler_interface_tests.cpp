@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -768,7 +768,7 @@ TEST_F(CompilerInterfaceTest, givenUpdatedSpecConstValuesWhenBuildProgramThenPro
     auto err = pCompilerInterface->build(*pDevice, inputArgs, translationOutput);
 
     EXPECT_EQ(TranslationOutput::ErrorCode::success, err);
-}
+} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks), NEO-14033
 
 TEST_F(CompilerInterfaceTest, GivenRequestForNewFclTranslationCtxWhenDeviceCtxIsNotAvailableThenCreateNewDeviceCtxAndUseItToReturnValidTranslationCtx) {
     auto device = this->pDevice;
@@ -1194,6 +1194,8 @@ TEST_F(CompilerInterfaceTest, givenCompilerInterfacewhenGettingIgcFeaturesAndWor
 
 TEST_F(CompilerInterfaceTest, GivenRequestForNewFclTranslationCtxWhenInterfaceVersionAbove4ThenPopulatePlatformInfo) {
     auto device = this->pDevice;
+    auto hwInfo = device->getHardwareInfo();
+    device->getCompilerProductHelper().adjustHwInfoForIgc(hwInfo);
 
     auto prevDebugVars = getFclDebugVars();
 
@@ -1207,7 +1209,7 @@ TEST_F(CompilerInterfaceTest, GivenRequestForNewFclTranslationCtxWhenInterfaceVe
     ASSERT_EQ(1U, pCompilerInterface->fclDeviceContexts.size());
     auto platform = pCompilerInterface->fclDeviceContexts.begin()->second->GetPlatformHandle();
     ASSERT_NE(nullptr, platform);
-    EXPECT_EQ(device->getHardwareInfo().platform.eProductFamily, platform->GetProductFamily());
+    EXPECT_EQ(hwInfo.platform.eProductFamily, platform->GetProductFamily());
 
     setFclDebugVars(prevDebugVars);
 }

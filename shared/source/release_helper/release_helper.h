@@ -58,11 +58,12 @@ class ReleaseHelper {
     virtual uint32_t getAdditionalExtraCaps() const = 0;
     virtual uint32_t getStackSizePerRay() const = 0;
     virtual bool isLocalOnlyAllowed() const = 0;
-    virtual bool isDisablingMsaaRequired() const = 0;
     virtual bool isDummyBlitWaRequired() const = 0;
+    virtual bool isDirectSubmissionLightSupported() const = 0;
     virtual const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const = 0;
     virtual bool isNumRtStacksPerDssFixedValue() const = 0;
     virtual bool getFtrXe2Compression() const = 0;
+    virtual uint32_t computeSlmValues(uint32_t slmSize, bool isHeapless) const = 0;
 
   protected:
     ReleaseHelper(HardwareIpVersion hardwareIpVersion) : hardwareIpVersion(hardwareIpVersion) {}
@@ -100,11 +101,12 @@ class ReleaseHelperHw : public ReleaseHelper {
     uint32_t getAdditionalExtraCaps() const override;
     uint32_t getStackSizePerRay() const override;
     bool isLocalOnlyAllowed() const override;
-    bool isDisablingMsaaRequired() const override;
     bool isDummyBlitWaRequired() const override;
+    bool isDirectSubmissionLightSupported() const override;
     const SizeToPreferredSlmValueArray &getSizeToPreferredSlmValue(bool isHeapless) const override;
     bool isNumRtStacksPerDssFixedValue() const override;
     bool getFtrXe2Compression() const override;
+    uint32_t computeSlmValues(uint32_t slmSize, bool isHeapless) const override;
 
   protected:
     ReleaseHelperHw(HardwareIpVersion hardwareIpVersion) : ReleaseHelper(hardwareIpVersion) {}

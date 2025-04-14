@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,6 +22,7 @@
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
+#include "shared/test/unit_test/fixtures/command_container_fixture.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 #include "level_zero/core/source/event/event.h"
@@ -30,6 +31,8 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
+
+#include "test_traits_common.h"
 
 namespace L0 {
 namespace ult {
@@ -147,7 +150,14 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithThreadArbitrationPolicySe
     delete (pHint);
 }
 
-HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithThreadArbitrationPolicySetUsingSchedulingHintExtensionAndOverrideThreadArbitrationPolicyThenTheLatterIsUsedToSetCmdListThreadArbitrationPolicy) {
+struct CommandListAppendLaunchKernelNonHeapless {
+    template <PRODUCT_FAMILY productFamily>
+    static constexpr bool isMatched() {
+        return !(TestTraits<NEO::ToGfxCoreFamily<productFamily>::get()>::heaplessRequired);
+    }
+};
+
+HWTEST2_F(CommandListAppendLaunchKernel, givenKernelWithThreadArbitrationPolicySetUsingSchedulingHintExtensionAndOverrideThreadArbitrationPolicyThenTheLatterIsUsedToSetCmdListThreadArbitrationPolicy, CommandListAppendLaunchKernelNonHeapless) {
     createKernel();
     ze_scheduling_hint_exp_desc_t *pHint = new ze_scheduling_hint_exp_desc_t;
     pHint->pNext = nullptr;
@@ -195,46 +205,9 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenNotEnoughSpaceInCommandStreamWhenA
 
     const uint32_t threadGroupDimensions[3] = {1, 1, 1};
 
-    NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
-        0,                                        // eventAddress
-        0,                                        // postSyncImmValue
-        0,                                        // inOrderCounterValue
-        device->getNEODevice(),                   // device
-        nullptr,                                  // inOrderExecInfo
-        kernel.get(),                             // dispatchInterface
-        nullptr,                                  // surfaceStateHeap
-        nullptr,                                  // dynamicStateHeap
-        threadGroupDimensions,                    // threadGroupDimensions
-        nullptr,                                  // outWalkerPtr
-        nullptr,                                  // cpuWalkerBuffer
-        nullptr,                                  // cpuPayloadBuffer
-        nullptr,                                  // outImplicitArgsPtr
-        nullptr,                                  // additionalCommands
-        PreemptionMode::MidBatch,                 // preemptionMode
-        NEO::RequiredPartitionDim::none,          // requiredPartitionDim
-        NEO::RequiredDispatchWalkOrder::none,     // requiredDispatchWalkOrder
-        NEO::localRegionSizeParamNotSet,          // localRegionSize
-        0,                                        // partitionCount
-        0,                                        // reserveExtraPayloadSpace
-        1,                                        // maxWgCountPerTile
-        NEO::ThreadArbitrationPolicy::NotPresent, // defaultPipelinedThreadArbitrationPolicy
-        false,                                    // isIndirect
-        false,                                    // isPredicate
-        false,                                    // isTimestampEvent
-        false,                                    // requiresUncachedMocs
-        false,                                    // isInternal
-        false,                                    // isCooperative
-        false,                                    // isHostScopeSignalEvent
-        false,                                    // isKernelUsingSystemAllocation
-        false,                                    // isKernelDispatchedFromImmediateCmdList
-        false,                                    // isRcs
-        commandList->getDcFlushRequired(true),    // dcFlushEnable
-        false,                                    // isHeaplessModeEnabled
-        false,                                    // isHeaplessStateInitEnabled
-        false,                                    // interruptEvent
-        false,                                    // immediateScratchAddressPatching
-        false,                                    // makeCommandView
-    };
+    auto dispatchKernelArgs = CommandEncodeStatesFixture::createDefaultDispatchKernelArgs(device->getNEODevice(), kernel.get(), threadGroupDimensions, false);
+    dispatchKernelArgs.dcFlushEnable = commandList->getDcFlushRequired(true);
+
     NEO::EncodeDispatchKernel<FamilyType>::template encode<DefaultWalkerType>(commandContainer, dispatchKernelArgs);
 
     auto usedSpaceAfter = commandContainer.getCommandStream()->getUsed();
@@ -845,6 +818,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfAndEventAppendedToI
 HWTEST_F(CommandListAppendLaunchKernel, WhenAppendingMultipleTimesThenSshIsNotDepletedButReallocated) {
     DebugManagerStateRestore dbgRestorer;
     debugManager.flags.UseBindlessMode.set(0);
+    UnitTestSetter::disableHeapless(dbgRestorer);
     debugManager.flags.UseExternalAllocatorForSshAndDsh.set(0);
     neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->bindlessHeapsHelper.reset();
 

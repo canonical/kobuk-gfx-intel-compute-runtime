@@ -29,6 +29,7 @@ class GmmHelper;
 class IndirectHeap;
 class InOrderExecInfo;
 class ProductHelper;
+class ReleaseHelper;
 
 struct DeviceInfo;
 struct DispatchKernelEncoderI;
@@ -44,11 +45,14 @@ struct RootDeviceEnvironment;
 struct StateBaseAddressProperties;
 struct StateComputeModeProperties;
 struct ImplicitArgs;
+struct EncodeKernelArgsExt;
 
 struct EncodeDispatchKernelArgs {
     uint64_t eventAddress = 0;
     uint64_t postSyncImmValue = 0;
     uint64_t inOrderCounterValue = 0;
+    uint64_t inOrderIncrementGpuAddress = 0;
+    uint64_t inOrderIncrementValue = 0;
     Device *device = nullptr;
     NEO::InOrderExecInfo *inOrderExecInfo = nullptr;
     DispatchKernelEncoderI *dispatchInterface = nullptr;
@@ -60,6 +64,7 @@ struct EncodeDispatchKernelArgs {
     void *cpuPayloadBuffer = nullptr;
     void *outImplicitArgsPtr = nullptr;
     std::list<void *> *additionalCommands = nullptr;
+    EncodeKernelArgsExt *extendedArgs = nullptr;
     PreemptionMode preemptionMode = PreemptionMode::Initial;
     NEO::RequiredPartitionDim requiredPartitionDim = NEO::RequiredPartitionDim::none;
     NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder = NEO::RequiredDispatchWalkOrder::none;
@@ -104,6 +109,7 @@ enum class CompareOperation : uint32_t {
 };
 
 struct EncodeWalkerArgs {
+    EncodeKernelArgsExt *argsExtended = nullptr;
     KernelExecutionType kernelExecutionType = KernelExecutionType::defaultType;
     NEO::RequiredDispatchWalkOrder requiredDispatchWalkOrder = NEO::RequiredDispatchWalkOrder::none;
     uint32_t localRegionSize = NEO::localRegionSizeParamNotSet;
@@ -224,7 +230,7 @@ struct EncodeDispatchKernel {
     static void forceComputeWalkerPostSyncFlushWithWrite(WalkerType &walkerCmd);
 
     static uint32_t alignSlmSize(uint32_t slmSize);
-    static uint32_t computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize);
+    static uint32_t computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize, ReleaseHelper *releaseHelper, bool isHeapless);
 
     static bool singleTileExecImplicitScalingRequired(bool cooperativeKernel);
 

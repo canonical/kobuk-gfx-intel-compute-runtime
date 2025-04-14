@@ -13,6 +13,7 @@
 #include "shared/test/common/mocks/linux/mock_drm_allocation.h"
 #include "shared/test/common/mocks/linux/mock_drm_wrappers.h"
 #include "shared/test/common/mocks/linux/mock_ioctl_helper.h"
+#include "shared/test/common/mocks/mock_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/mock_gmm_helper.h"
@@ -122,6 +123,31 @@ TEST_F(DrmBufferObjectTest, whenExecFailsThenPinFails) {
     BufferObject *boArray[1] = {boToPin.get()};
     auto ret = bo->pin(boArray, 1, osContext.get(), 0, 1);
     EXPECT_EQ(EINVAL, ret);
+}
+
+TEST_F(DrmBufferObjectTest, givenDirectSubmissionLightWhenValidateHostptrThenStopDirectSubmission) {
+    mock->ioctlExpected.total = -1;
+    executionEnvironment.initializeMemoryManager();
+    MockCommandStreamReceiver csr(executionEnvironment, 0, 0b1);
+    OsContextLinux osContextLinux(*mock, 0, 0u, EngineDescriptorHelper::getDefaultDescriptor());
+    executionEnvironment.memoryManager->createAndRegisterOsContext(&csr, EngineDescriptorHelper::getDefaultDescriptor());
+    auto &engine = executionEnvironment.memoryManager->getRegisteredEngines(0)[0];
+    auto backupContext = engine.osContext;
+    auto &mutableEngine = const_cast<EngineControl &>(engine);
+    mutableEngine.osContext = &osContextLinux;
+    executionEnvironment.memoryManager->getRegisteredEngines(0)[0].osContext->setDirectSubmissionActive();
+    std::unique_ptr<uint32_t[]> buff(new uint32_t[1024]);
+
+    std::unique_ptr<BufferObject> boToPin(new TestedBufferObject(rootDeviceIndex, this->mock.get()));
+    ASSERT_NE(nullptr, boToPin.get());
+    bo->setAddress(reinterpret_cast<uint64_t>(buff.get()));
+    BufferObject *boArray[1] = {boToPin.get()};
+    EXPECT_EQ(csr.stopDirectSubmissionCalledTimes, 0u);
+
+    bo->validateHostPtr(boArray, 1, osContext.get(), 0, 1);
+
+    EXPECT_EQ(csr.stopDirectSubmissionCalledTimes, 1u);
+    mutableEngine.osContext = backupContext;
 }
 
 TEST_F(DrmBufferObjectTest, whenExecFailsThenValidateHostPtrFails) {
@@ -664,7 +690,7 @@ TEST_P(DrmBufferObjectBindTestWithForcePagingFenceSucceeds, givenDrmWhenBindOper
     class MockDrmWithWaitUserFence : public DrmMock {
       public:
         MockDrmWithWaitUserFence(RootDeviceEnvironment &rootDeviceEnvironment)
-            : DrmMock(rootDeviceEnvironment), waitUserFenceCalled(false) {}
+            : DrmMock(rootDeviceEnvironment) {}
 
         int waitUserFence(uint32_t ctxId, uint64_t address, uint64_t value, ValueWidth dataWidth, int64_t timeout, uint16_t flags, bool userInterrupt,
                           uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) override {
@@ -672,7 +698,7 @@ TEST_P(DrmBufferObjectBindTestWithForcePagingFenceSucceeds, givenDrmWhenBindOper
             return 0;
         }
 
-        bool waitUserFenceCalled;
+        bool waitUserFenceCalled = false;
     };
 
     auto drm = new MockDrmWithWaitUserFence(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -732,7 +758,7 @@ TEST_P(DrmBufferObjectBindTestWithForcePagingFenceFalseWaitUserFenceNotCalled, g
     class MockDrmWithWaitUserFence : public DrmMock {
       public:
         MockDrmWithWaitUserFence(RootDeviceEnvironment &rootDeviceEnvironment)
-            : DrmMock(rootDeviceEnvironment), waitUserFenceCalled(false) {}
+            : DrmMock(rootDeviceEnvironment) {}
 
         int waitUserFence(uint32_t ctxId, uint64_t address, uint64_t value, ValueWidth dataWidth, int64_t timeout, uint16_t flags, bool userInterrupt,
                           uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) override {
@@ -740,7 +766,7 @@ TEST_P(DrmBufferObjectBindTestWithForcePagingFenceFalseWaitUserFenceNotCalled, g
             return 0;
         }
 
-        bool waitUserFenceCalled;
+        bool waitUserFenceCalled = false;
     };
 
     auto drm = new MockDrmWithWaitUserFence(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -798,7 +824,7 @@ TEST(DrmBufferObject, givenDrmWhenBindOperationSucceedsWithForcePagingFenceWithD
     class MockDrmWithWaitUserFence : public DrmMock {
       public:
         MockDrmWithWaitUserFence(RootDeviceEnvironment &rootDeviceEnvironment)
-            : DrmMock(rootDeviceEnvironment), waitUserFenceCalled(false) {}
+            : DrmMock(rootDeviceEnvironment) {}
 
         int waitUserFence(uint32_t ctxId, uint64_t address, uint64_t value, ValueWidth dataWidth, int64_t timeout, uint16_t flags, bool userInterrupt,
                           uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) override {
@@ -806,7 +832,7 @@ TEST(DrmBufferObject, givenDrmWhenBindOperationSucceedsWithForcePagingFenceWithD
             return 0;
         }
 
-        bool waitUserFenceCalled;
+        bool waitUserFenceCalled = false;
     };
 
     auto drm = new MockDrmWithWaitUserFence(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -952,7 +978,7 @@ TEST(DrmBufferObject, givenDrmWhenUnBindOperationSucceedsAndForceFenceWaitThenFe
     class MockDrmWithWaitUserFence : public DrmMock {
       public:
         MockDrmWithWaitUserFence(RootDeviceEnvironment &rootDeviceEnvironment)
-            : DrmMock(rootDeviceEnvironment), waitUserFenceCalled(false) {}
+            : DrmMock(rootDeviceEnvironment) {}
 
         int waitUserFence(uint32_t ctxId, uint64_t address, uint64_t value, ValueWidth dataWidth, int64_t timeout, uint16_t flags, bool userInterrupt,
                           uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) override {
@@ -960,7 +986,7 @@ TEST(DrmBufferObject, givenDrmWhenUnBindOperationSucceedsAndForceFenceWaitThenFe
             return 0;
         }
 
-        bool waitUserFenceCalled;
+        bool waitUserFenceCalled = false;
     };
 
     auto drm = new MockDrmWithWaitUserFence(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1005,7 +1031,7 @@ TEST(DrmBufferObject, givenDrmWhenUnBindOperationSucceedsWaitBeforeBindFalseAndF
     class MockDrmWithWaitUserFence : public DrmMock {
       public:
         MockDrmWithWaitUserFence(RootDeviceEnvironment &rootDeviceEnvironment)
-            : DrmMock(rootDeviceEnvironment), waitUserFenceCalled(false) {}
+            : DrmMock(rootDeviceEnvironment) {}
 
         int waitUserFence(uint32_t ctxId, uint64_t address, uint64_t value, ValueWidth dataWidth, int64_t timeout, uint16_t flags, bool userInterrupt,
                           uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) override {
@@ -1013,7 +1039,7 @@ TEST(DrmBufferObject, givenDrmWhenUnBindOperationSucceedsWaitBeforeBindFalseAndF
             return 0;
         }
 
-        bool waitUserFenceCalled;
+        bool waitUserFenceCalled = false;
     };
 
     auto drm = new MockDrmWithWaitUserFence(*executionEnvironment->rootDeviceEnvironments[0]);
@@ -1058,7 +1084,7 @@ TEST(DrmBufferObject, givenDrmWhenUnBindOperationSucceedsWaitBeforeBindTrueAndFo
     class MockDrmWithWaitUserFence : public DrmMock {
       public:
         MockDrmWithWaitUserFence(RootDeviceEnvironment &rootDeviceEnvironment)
-            : DrmMock(rootDeviceEnvironment), waitUserFenceCalled(false) {}
+            : DrmMock(rootDeviceEnvironment) {}
 
         int waitUserFence(uint32_t ctxId, uint64_t address, uint64_t value, ValueWidth dataWidth, int64_t timeout, uint16_t flags, bool userInterrupt,
                           uint32_t externalInterruptId, GraphicsAllocation *allocForInterruptWait) override {
@@ -1066,7 +1092,7 @@ TEST(DrmBufferObject, givenDrmWhenUnBindOperationSucceedsWaitBeforeBindTrueAndFo
             return 0;
         }
 
-        bool waitUserFenceCalled;
+        bool waitUserFenceCalled = false;
     };
 
     auto drm = new MockDrmWithWaitUserFence(*executionEnvironment->rootDeviceEnvironments[0]);

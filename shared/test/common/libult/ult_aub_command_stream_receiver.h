@@ -13,7 +13,7 @@
 namespace NEO {
 
 template <typename GfxFamily>
-class UltAubCommandStreamReceiver : public AUBCommandStreamReceiverHw<GfxFamily>, public NonCopyableOrMovableClass {
+class UltAubCommandStreamReceiver : public AUBCommandStreamReceiverHw<GfxFamily> {
     using BaseClass = AUBCommandStreamReceiverHw<GfxFamily>;
 
   public:

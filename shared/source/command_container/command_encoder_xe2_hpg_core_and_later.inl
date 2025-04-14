@@ -6,7 +6,9 @@
  */
 
 #include "shared/source/gmm_helper/client_context/gmm_client_context.h"
+#include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/hw_walk_order.h"
 
 namespace NEO {
@@ -124,6 +126,11 @@ inline void EncodeMiFlushDW<Family>::adjust(MI_FLUSH_DW *miFlushDwCmd, const Pro
     if (productHelper.isDcFlushAllowed()) {
         miFlushDwCmd->setFlushCcs(1);
     }
+}
+
+template <typename Family>
+bool EncodeSurfaceState<Family>::shouldProgramAuxForMcs(bool isAuxCapable, bool hasMcsSurface) {
+    return hasMcsSurface;
 }
 
 } // namespace NEO

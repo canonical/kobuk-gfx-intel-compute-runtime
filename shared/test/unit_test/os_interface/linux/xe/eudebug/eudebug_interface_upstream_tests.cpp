@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,7 +24,7 @@ TEST(EuDebugInterfaceUpstreamTest, whenGettingParamValueThenCorrectValueIsReturn
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_STATE_CHANGE), euDebugInterface.getParamValue(EuDebugParam::eventBitStateChange));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_EU_ATTENTION), euDebugInterface.getParamValue(EuDebugParam::eventTypeEuAttention));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE), euDebugInterface.getParamValue(EuDebugParam::eventTypeExecQueue));
-    EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_EXEC_QUEUE_PLACEMENTS), euDebugInterface.getParamValue(EuDebugParam::eventTypeExecQueuePlacements));
+    EXPECT_EQ(static_cast<uint32_t>(0), euDebugInterface.getParamValue(EuDebugParam::eventTypeExecQueuePlacements));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_METADATA), euDebugInterface.getParamValue(EuDebugParam::eventTypeMetadata));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_OPEN), euDebugInterface.getParamValue(EuDebugParam::eventTypeOpen));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_PAGEFAULT), euDebugInterface.getParamValue(EuDebugParam::eventTypePagefault));
@@ -36,6 +36,7 @@ TEST(EuDebugInterfaceUpstreamTest, whenGettingParamValueThenCorrectValueIsReturn
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_VM_BIND_UFENCE), euDebugInterface.getParamValue(EuDebugParam::eventTypeVmBindUfence));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_EVENT_VM_BIND_FLAG_UFENCE), euDebugInterface.getParamValue(EuDebugParam::eventVmBindFlagUfence));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_SET_PROPERTY_EUDEBUG), euDebugInterface.getParamValue(EuDebugParam::execQueueSetPropertyEuDebug));
+    EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_EUDEBUG_FLAG_ENABLE), euDebugInterface.getParamValue(EuDebugParam::execQueueSetPropertyValueEnable));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_IOCTL_ACK_EVENT), euDebugInterface.getParamValue(EuDebugParam::ioctlAckEvent));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_IOCTL_EU_CONTROL), euDebugInterface.getParamValue(EuDebugParam::ioctlEuControl));
     EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EUDEBUG_IOCTL_READ_EVENT), euDebugInterface.getParamValue(EuDebugParam::ioctlReadEvent));

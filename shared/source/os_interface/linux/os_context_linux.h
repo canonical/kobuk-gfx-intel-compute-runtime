@@ -46,9 +46,11 @@ class OsContextLinux : public OsContext {
     void incFenceVal(uint32_t deviceIndex) { fenceVal[deviceIndex]++; }
     uint64_t *getFenceAddr(uint32_t deviceIndex) { return &pagingFence[deviceIndex]; }
     void waitForBind(uint32_t drmIterator);
+    bool isDirectSubmissionLightActive() const override;
 
   protected:
     bool initializeContext(bool allocateInterrupt) override;
+    void isOpenVinoLoaded();
 
     unsigned int engineFlag = 0;
     std::vector<uint32_t> drmContextIds;
@@ -57,7 +59,9 @@ class OsContextLinux : public OsContext {
     std::array<uint64_t, EngineLimits::maxHandleCount> pagingFence;
     std::array<uint64_t, EngineLimits::maxHandleCount> fenceVal;
 
+    std::once_flag ovLoadedFlag{};
     Drm &drm;
     bool contextHangDetected = false;
+    bool ovLoaded = false;
 };
 } // namespace NEO

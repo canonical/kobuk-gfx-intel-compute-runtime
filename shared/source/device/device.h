@@ -8,6 +8,7 @@
 #pragma once
 #include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/device/device_info.h"
+#include "shared/source/helpers/common_types.h"
 #include "shared/source/helpers/engine_control.h"
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
@@ -41,7 +42,7 @@ class UsmMemAllocPoolsManager;
 enum class EngineGroupType : uint32_t;
 struct PhysicalDevicePciBusInfo;
 
-struct SelectorCopyEngine : NonCopyableOrMovableClass {
+struct SelectorCopyEngine : NonCopyableAndNonMovableClass {
     std::atomic<bool> isMainUsed = false;
     std::atomic<uint32_t> selector = 0;
 };
@@ -54,7 +55,7 @@ struct EngineGroupT {
 using EngineGroupsT = std::vector<EngineGroupT>;
 using CsrContainer = std::vector<std::unique_ptr<CommandStreamReceiver>>;
 
-struct SecondaryContexts {
+struct SecondaryContexts : NEO::NonCopyableAndNonMovableClass {
     SecondaryContexts() = default;
     SecondaryContexts(SecondaryContexts &&in) {
         this->engines = std::move(in.engines);
@@ -63,8 +64,7 @@ struct SecondaryContexts {
         this->regularEnginesTotal = in.regularEnginesTotal;
         this->highPriorityEnginesTotal = in.highPriorityEnginesTotal;
     }
-    SecondaryContexts(const SecondaryContexts &in) = delete;
-    SecondaryContexts &operator=(const SecondaryContexts &) = delete;
+    SecondaryContexts &operator=(SecondaryContexts &&other) noexcept = delete;
 
     EngineControl *getEngine(const EngineUsage usage);
 
@@ -80,15 +80,15 @@ struct SecondaryContexts {
     std::mutex mutex;
 };
 
+static_assert(NEO::NonCopyable<SecondaryContexts>);
+
 struct RTDispatchGlobalsInfo {
     GraphicsAllocation *rtDispatchGlobalsArray = nullptr;
     std::vector<GraphicsAllocation *> rtStacks; // per tile
 };
 
-class Device : public ReferenceTrackedObject<Device> {
+class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMovableClass {
   public:
-    Device &operator=(const Device &) = delete;
-    Device(const Device &) = delete;
     ~Device() override;
 
     template <typename DeviceT, typename... ArgsT>
@@ -144,6 +144,7 @@ class Device : public ReferenceTrackedObject<Device> {
     bool isFullRangeSvm() const;
     static bool isBlitSplitEnabled();
     static bool isInitDeviceWithFirstSubmissionEnabled(CommandStreamReceiverType csrType);
+    static std::vector<DeviceVector> groupDevices(DeviceVector devices);
     bool isBcsSplitSupported();
     bool isInitDeviceWithFirstSubmissionSupported(CommandStreamReceiverType csrType);
     bool areSharedSystemAllocationsAllowed() const;
@@ -200,7 +201,7 @@ class Device : public ReferenceTrackedObject<Device> {
         return deviceUsmMemAllocPoolsManager.get();
     }
     MOCKABLE_VIRTUAL void stopDirectSubmissionAndWaitForCompletion();
-    bool isAnyDirectSubmissionEnabled();
+    MOCKABLE_VIRTUAL bool isAnyDirectSubmissionEnabled(bool light) const;
     bool isStateSipRequired() const {
         return (getPreemptionMode() == PreemptionMode::MidThread || getDebugger() != nullptr) && getCompilerInterface();
     }
@@ -356,5 +357,7 @@ inline EngineControl &Device::getDefaultEngine() {
 inline SelectorCopyEngine &Device::getSelectorCopyEngine() {
     return selectorCopyEngine;
 }
+
+static_assert(NEO::NonCopyableAndNonMovable<Device>);
 
 } // namespace NEO

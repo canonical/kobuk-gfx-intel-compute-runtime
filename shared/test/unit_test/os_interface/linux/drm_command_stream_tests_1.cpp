@@ -16,6 +16,7 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
 #include "shared/source/os_interface/linux/drm_command_stream.h"
+#include "shared/source/os_interface/linux/drm_memory_operations_handler_default.h"
 #include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/os_context.h"
@@ -121,6 +122,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDebugFlagSetWhenSubmittingThenCall
             }
         }
     }
+    memoryManager->peekGemCloseWorker()->close(true);
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, WhenMakingResidentThenSucceeds) {
@@ -822,8 +824,17 @@ struct MockDrmDirectSubmissionToTestDtor : public DrmDirectSubmission<GfxFamily,
 };
 
 HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionWhenCheckingIsKmdWaitOnTaskCountAllowedThenTrueIsReturned) {
+    mock->isVmBindAvailableCall.callParent = false;
+    mock->isVmBindAvailableCall.returnValue = true;
     EXPECT_TRUE(csr->isDirectSubmissionEnabled());
     EXPECT_TRUE(csr->isKmdWaitOnTaskCountAllowed());
+}
+
+HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionAndDisabledBindWhenCheckingIsKmdWaitOnTaskCountAllowedThenFalseIsReturned) {
+    mock->isVmBindAvailableCall.callParent = false;
+    mock->isVmBindAvailableCall.returnValue = false;
+    EXPECT_TRUE(csr->isDirectSubmissionEnabled());
+    EXPECT_FALSE(csr->isKmdWaitOnTaskCountAllowed());
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionWhenDtorIsCalledButRingIsNotStartedThenDontCallStopRingBufferNorWaitForTagValue) {
@@ -926,6 +937,45 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBlitterDirectSubmissionTest, givenBlitterDire
     EXPECT_NE(NEO::SubmissionStatus::success, res);
 }
 
+HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenDirectSubmissionLightWhenNewResourcesAddedThenAddToResidencyContainer) {
+    auto testedCsr = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr);
+    testedCsr->completionFenceValuePointer = nullptr;
+    testedCsr->directSubmission = std::make_unique<MockDrmDirectSubmissionDispatchCommandBuffer<FamilyType>>(*device->getDefaultEngine().commandStreamReceiver);
+    auto oldMemoryOperationsInterface = executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.release();
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface = std::make_unique<DrmMemoryOperationsHandlerDefault>(device->getRootDeviceIndex());
+
+    EXPECT_EQ(csr->getResidencyAllocations().size(), 0u);
+    EXPECT_FALSE(static_cast<DrmMemoryOperationsHandlerDefault *>(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.get())->obtainAndResetNewResourcesSinceLastRingSubmit());
+
+    auto &cs = csr->getCS();
+    CommandStreamReceiverHw<FamilyType>::addBatchBufferEnd(cs, nullptr);
+    EncodeNoop<FamilyType>::alignToCacheLine(cs);
+    BatchBuffer batchBuffer = BatchBufferHelper::createDefaultBatchBuffer(cs.getGraphicsAllocation(), &cs, cs.getUsed());
+    batchBuffer.startOffset = 4;
+    uint8_t bbStart[64];
+    batchBuffer.endCmdPtr = &bbStart[0];
+
+    csr->flush(batchBuffer, csr->getResidencyAllocations());
+
+    EXPECT_NE(csr->getResidencyAllocations().size(), 0u);
+    EXPECT_TRUE(static_cast<DrmMemoryOperationsHandlerDefault *>(executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.get())->obtainAndResetNewResourcesSinceLastRingSubmit());
+
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->memoryOperationsInterface.reset(oldMemoryOperationsInterface);
+}
+
+HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenDirectSubmissionLightWhenMakeResidentThenDoNotAddToCsrResidencyContainer) {
+    auto testedCsr = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr);
+    testedCsr->directSubmission.reset();
+    csr->initDirectSubmission();
+    EXPECT_FALSE(testedCsr->pushAllocationsForMakeResident);
+    EXPECT_EQ(testedCsr->getResidencyAllocations().size(), 0u);
+
+    DrmAllocation graphicsAllocation(0, 1u /*num gmms*/, AllocationType::unknown, nullptr, nullptr, 1024, static_cast<osHandle>(1u), MemoryPool::memoryNull);
+    csr->makeResident(graphicsAllocation);
+
+    EXPECT_EQ(testedCsr->getResidencyAllocations().size(), 0u);
+}
+
 template <typename GfxFamily>
 struct MockDrmDirectSubmission : public DrmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>> {
     using DrmDirectSubmission<GfxFamily, RenderDispatcher<GfxFamily>>::currentTagData;
@@ -1002,7 +1052,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDrmCommandStreamReceiverWhenCreate
     executionEnvironment.rootDeviceEnvironments[1]->initGmm();
     executionEnvironment.rootDeviceEnvironments[1]->osInterface = std::make_unique<OSInterface>();
     executionEnvironment.rootDeviceEnvironments[1]->osInterface->setDriverModel(DrmMockCustom::create(*executionEnvironment.rootDeviceEnvironments[0]));
-    auto csr = std::make_unique<MockDrmCsr<FamilyType>>(executionEnvironment, 1, 1, GemCloseWorkerMode::gemCloseWorkerActive);
+    auto csr = std::make_unique<MockDrmCsr<FamilyType>>(executionEnvironment, 1, 1);
     auto pageTableManager = csr->createPageTableManager();
     EXPECT_EQ(csr->pageTableManager.get(), pageTableManager);
 }
@@ -1012,11 +1062,11 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenLocalMemoryEnabledWhenCreatingDrmC
         DebugManagerStateRestore restore;
         debugManager.flags.EnableLocalMemory.set(1);
 
-        MockDrmCsr<FamilyType> csr1(executionEnvironment, 0, 1, GemCloseWorkerMode::gemCloseWorkerInactive);
+        MockDrmCsr<FamilyType> csr1(executionEnvironment, 0, 1);
         EXPECT_EQ(DispatchMode::batchedDispatch, csr1.dispatchMode);
 
         debugManager.flags.CsrDispatchMode.set(static_cast<int32_t>(DispatchMode::immediateDispatch));
-        MockDrmCsr<FamilyType> csr2(executionEnvironment, 0, 1, GemCloseWorkerMode::gemCloseWorkerInactive);
+        MockDrmCsr<FamilyType> csr2(executionEnvironment, 0, 1);
         EXPECT_EQ(DispatchMode::immediateDispatch, csr2.dispatchMode);
     }
 
@@ -1024,11 +1074,11 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenLocalMemoryEnabledWhenCreatingDrmC
         DebugManagerStateRestore restore;
         debugManager.flags.EnableLocalMemory.set(0);
 
-        MockDrmCsr<FamilyType> csr1(executionEnvironment, 0, 1, GemCloseWorkerMode::gemCloseWorkerInactive);
+        MockDrmCsr<FamilyType> csr1(executionEnvironment, 0, 1);
         EXPECT_EQ(DispatchMode::immediateDispatch, csr1.dispatchMode);
 
         debugManager.flags.CsrDispatchMode.set(static_cast<int32_t>(DispatchMode::batchedDispatch));
-        MockDrmCsr<FamilyType> csr2(executionEnvironment, 0, 1, GemCloseWorkerMode::gemCloseWorkerInactive);
+        MockDrmCsr<FamilyType> csr2(executionEnvironment, 0, 1);
         EXPECT_EQ(DispatchMode::batchedDispatch, csr2.dispatchMode);
     }
 }

@@ -50,6 +50,7 @@ class SysmanProductHelper {
     // Frequency
     virtual void getFrequencyStepSize(double *pStepSize) = 0;
     virtual bool isFrequencySetRangeSupported() = 0;
+    virtual zes_freq_throttle_reason_flags_t getThrottleReasons(LinuxSysmanImp *pLinuxSysmanImp, uint32_t subdeviceId) = 0;
 
     // Memory
     virtual ze_result_t getMemoryProperties(zes_mem_properties_t *pProperties, LinuxSysmanImp *pLinuxSysmanImp, NEO::Drm *pDrm, SysmanKmdInterface *pSysmanKmdInterface, uint32_t subDeviceId, bool isSubdevice) = 0;
@@ -78,11 +79,8 @@ class SysmanProductHelper {
     virtual uint64_t setPowerLimitValue(int32_t value) = 0;
     virtual zes_limit_unit_t getPowerLimitUnit() = 0;
     virtual bool isPowerSetLimitSupported() = 0;
-    virtual std::string getCardCriticalPowerLimitFile() = 0;
-    virtual SysfsValueUnit getCardCriticalPowerLimitNativeUnit() = 0;
-
-    // Diagnostics
-    virtual bool isDiagnosticsSupported() = 0;
+    virtual std::string getPackageCriticalPowerLimitFile() = 0;
+    virtual SysfsValueUnit getPackageCriticalPowerLimitNativeUnit() = 0;
 
     // standby
     virtual bool isStandbySupported(SysmanKmdInterface *pSysmanKmdInterface) = 0;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,6 +8,7 @@
 #pragma once
 
 #include "shared/source/helpers/common_types.h"
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/os_interface/linux/clos_cache.h"
 #include "shared/source/utilities/spinlock.h"
 
@@ -19,11 +20,15 @@ namespace NEO {
 
 class IoctlHelper;
 
-struct CacheInfo {
-    CacheInfo(IoctlHelper &ioctlHelper, size_t maxReservationCacheSize, uint32_t maxReservationNumCacheRegions, uint16_t maxReservationNumWays)
-        : maxReservationCacheSize(maxReservationCacheSize),
-          maxReservationNumCacheRegions(maxReservationNumCacheRegions),
-          maxReservationNumWays(maxReservationNumWays),
+struct CacheReservationParameters {
+    size_t maxSize{0U};
+    uint32_t maxNumRegions{0U};
+    uint16_t maxNumWays{0U};
+};
+
+struct CacheInfo : NEO::NonCopyableAndNonMovableClass {
+    CacheInfo(IoctlHelper &ioctlHelper, const CacheReservationParameters l3Limits)
+        : l3ReservationLimits{l3Limits},
           cacheReserve{ioctlHelper} {
 
         reservedCacheRegionsSize.fill(0UL);
@@ -31,19 +36,19 @@ struct CacheInfo {
 
     MOCKABLE_VIRTUAL ~CacheInfo();
 
-    CacheInfo(const CacheInfo &) = delete;
-    CacheInfo &operator=(const CacheInfo &) = delete;
-
     size_t getMaxReservationCacheSize() const {
-        return maxReservationCacheSize;
+        const auto &limits{l3ReservationLimits};
+        return limits.maxSize;
     }
 
     size_t getMaxReservationNumCacheRegions() const {
-        return maxReservationNumCacheRegions;
+        const auto &limits{l3ReservationLimits};
+        return limits.maxNumRegions;
     }
 
     size_t getMaxReservationNumWays() const {
-        return maxReservationNumWays;
+        const auto &limits{l3ReservationLimits};
+        return limits.maxNumWays;
     }
 
     CacheRegion reserveCacheRegion(size_t cacheReservationSize) {
@@ -68,12 +73,12 @@ struct CacheInfo {
     bool getRegion(size_t regionSize, CacheRegion regionIndex);
 
   protected:
-    size_t maxReservationCacheSize;
-    uint32_t maxReservationNumCacheRegions;
-    uint16_t maxReservationNumWays;
+    CacheReservationParameters l3ReservationLimits;
     ClosCacheReservation cacheReserve;
     std::array<size_t, toUnderlying(CacheRegion::count)> reservedCacheRegionsSize;
     SpinLock mtx;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<CacheInfo>);
 
 } // namespace NEO

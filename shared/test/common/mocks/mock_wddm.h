@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -47,13 +47,15 @@ class WddmMock : public Wddm {
     using Wddm::featureTable;
     using Wddm::forceEvictOnlyIfNecessary;
     using Wddm::getDeviceState;
+    using Wddm::getReadOnlyFlagValue;
     using Wddm::getSystemInfo;
     using Wddm::gfxFeatureTable;
     using Wddm::gfxPlatform;
     using Wddm::gfxWorkaroundTable;
     using Wddm::gmmMemory;
     using Wddm::hwDeviceId;
-    using Wddm::isReadOnlyMemory;
+    using Wddm::isReadOnlyFlagFallbackAvailable;
+    using Wddm::isReadOnlyFlagFallbackSupported;
     using Wddm::mapGpuVirtualAddress;
     using Wddm::minAddress;
     using Wddm::pagingFenceAddress;

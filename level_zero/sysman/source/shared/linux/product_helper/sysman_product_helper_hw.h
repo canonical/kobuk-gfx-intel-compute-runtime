@@ -25,6 +25,7 @@ class SysmanProductHelperHw : public SysmanProductHelper {
     // Frequency
     void getFrequencyStepSize(double *pStepSize) override;
     bool isFrequencySetRangeSupported() override;
+    zes_freq_throttle_reason_flags_t getThrottleReasons(LinuxSysmanImp *pLinuxSysmanImp, uint32_t subdeviceId) override;
 
     // Memory
     ze_result_t getMemoryProperties(zes_mem_properties_t *pProperties, LinuxSysmanImp *pLinuxSysmanImp, NEO::Drm *pDrm, SysmanKmdInterface *pSysmanKmdInterface, uint32_t subDeviceId, bool isSubdevice) override;
@@ -53,11 +54,8 @@ class SysmanProductHelperHw : public SysmanProductHelper {
     uint64_t setPowerLimitValue(int32_t value) override;
     zes_limit_unit_t getPowerLimitUnit() override;
     bool isPowerSetLimitSupported() override;
-    std::string getCardCriticalPowerLimitFile() override;
-    SysfsValueUnit getCardCriticalPowerLimitNativeUnit() override;
-
-    // Diagnostics
-    bool isDiagnosticsSupported() override;
+    std::string getPackageCriticalPowerLimitFile() override;
+    SysfsValueUnit getPackageCriticalPowerLimitNativeUnit() override;
 
     // standby
     bool isStandbySupported(SysmanKmdInterface *pSysmanKmdInterface) override;

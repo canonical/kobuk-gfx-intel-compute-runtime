@@ -303,6 +303,7 @@ struct Event : _ze_event_handle_t {
     uint64_t getInOrderExecSignalValueWithSubmissionCounter() const;
     uint64_t getInOrderExecBaseSignalValue() const { return inOrderExecSignalValue; }
     uint32_t getInOrderAllocationOffset() const { return inOrderAllocationOffset; }
+    uint64_t getInOrderIncrementValue() const { return inOrderIncrementValue; }
     void setLatestUsedCmdQueue(CommandQueue *newCmdQ);
     NEO::TimeStampData *peekReferenceTs() {
         return static_cast<NEO::TimeStampData *>(ptrOffset(getHostAddress(), getMaxPacketsCount() * getSinglePacketSize()));
@@ -324,9 +325,9 @@ struct Event : _ze_event_handle_t {
 
     void setExternalInterruptId(uint32_t interruptId) { externalInterruptId = interruptId; }
 
-    void resetInOrderTimestampNode(NEO::TagNodeBase *newNode);
+    void resetInOrderTimestampNode(NEO::TagNodeBase *newNode, uint32_t partitionCount);
 
-    bool hasInOrderTimestampNode() const { return inOrderTimestampNode != nullptr; }
+    bool hasInOrderTimestampNode() const { return !inOrderTimestampNode.empty(); }
 
     bool isIpcImported() const { return isFromIpcPool; }
 
@@ -340,9 +341,11 @@ struct Event : _ze_event_handle_t {
     Event(int index, Device *device) : device(device), index(index) {}
 
     ze_result_t enableExtensions(const EventDescriptor &eventDescriptor);
+    NEO::GraphicsAllocation *getExternalCounterAllocationFromAddress(uint64_t *address) const;
 
     void unsetCmdQueue();
     void releaseTempInOrderTimestampNodes();
+    virtual void clearLatestInOrderTimestampData(uint32_t partitionCount) = 0;
 
     EventPool *eventPool = nullptr;
 
@@ -352,6 +355,7 @@ struct Event : _ze_event_handle_t {
     uint64_t contextEndTS = 1;
 
     uint64_t inOrderExecSignalValue = 0;
+    uint64_t inOrderIncrementValue = 0;
     uint32_t inOrderAllocationOffset = 0;
 
     std::chrono::microseconds gpuHangCheckPeriod{CommonConstants::gpuHangCheckTimeInUS};
@@ -379,7 +383,7 @@ struct Event : _ze_event_handle_t {
     std::mutex *kernelWithPrintfDeviceMutex = nullptr;
     std::shared_ptr<NEO::InOrderExecInfo> inOrderExecInfo;
     CommandQueue *latestUsedCmdQueue = nullptr;
-    NEO::TagNodeBase *inOrderTimestampNode = nullptr;
+    std::vector<NEO::TagNodeBase *> inOrderTimestampNode;
 
     uint32_t maxKernelCount = 0;
     uint32_t kernelCount = 1u;

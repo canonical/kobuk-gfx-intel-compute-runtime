@@ -17,6 +17,7 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdqueue.h"
 #include "level_zero/core/test/unit_tests/sources/helper/ze_object_utils.h"
+#include "level_zero/driver_experimental/zex_api.h"
 
 namespace L0 {
 namespace ult {
@@ -34,6 +35,7 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         using EventImp<uint32_t>::Event::isFromIpcPool;
         using EventImp<uint32_t>::Event::counterBasedFlags;
         using EventImp<uint32_t>::Event::isSharableCounterBased;
+        using EventImp<uint32_t>::Event::isTimestampEvent;
         using EventImp<uint32_t>::eventPoolAllocation;
         using EventImp<uint32_t>::maxPacketCount;
         using EventImp<uint32_t>::inOrderExecInfo;
@@ -48,7 +50,7 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         using EventImp<uint32_t>::inOrderTimestampNode;
 
         void makeCounterBasedInitiallyDisabled(MultiGraphicsAllocation &poolAllocation) {
-            resetInOrderTimestampNode(nullptr);
+            resetInOrderTimestampNode(nullptr, 0);
             counterBasedMode = CounterBasedMode::initiallyDisabled;
             resetCompletionStatus();
             counterBasedFlags = 0;
@@ -58,7 +60,7 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         }
 
         void makeCounterBasedImplicitlyDisabled(MultiGraphicsAllocation &poolAllocation) {
-            resetInOrderTimestampNode(nullptr);
+            resetInOrderTimestampNode(nullptr, 0);
             counterBasedMode = CounterBasedMode::implicitlyDisabled;
             resetCompletionStatus();
             counterBasedFlags = 0;
@@ -82,6 +84,24 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         events.clear();
 
         ::Test<ModuleFixture>::TearDown();
+    }
+
+    DestroyableZeUniquePtr<FixtureMockEvent> createExternalSyncStorageEvent(uint64_t counterValue, uint64_t incrementValue, uint64_t *deviceAddress) {
+        ze_event_handle_t outEvent = nullptr;
+        zex_counter_based_event_external_storage_properties_t externalStorageAllocProperties = {ZEX_STRUCTURE_COUNTER_BASED_EVENT_EXTERNAL_STORAGE_ALLOC_PROPERTIES}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
+        externalStorageAllocProperties.completionValue = counterValue;
+        externalStorageAllocProperties.deviceAddress = deviceAddress;
+        externalStorageAllocProperties.incrementValue = incrementValue;
+
+        zex_counter_based_event_desc_t counterBasedDesc = {ZEX_STRUCTURE_COUNTER_BASED_EVENT_DESC}; // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
+        counterBasedDesc.flags = ZEX_COUNTER_BASED_EVENT_FLAG_IMMEDIATE | ZEX_COUNTER_BASED_EVENT_FLAG_NON_IMMEDIATE;
+        counterBasedDesc.pNext = &externalStorageAllocProperties;
+
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zexCounterBasedEventCreate2(context, device, &counterBasedDesc, &outEvent));
+
+        auto eventObj = static_cast<FixtureMockEvent *>(Event::fromHandle(outEvent));
+
+        return DestroyableZeUniquePtr<FixtureMockEvent>(eventObj);
     }
 
     DestroyableZeUniquePtr<FixtureMockEvent> createStandaloneCbEvent(const ze_base_desc_t *pNext) {

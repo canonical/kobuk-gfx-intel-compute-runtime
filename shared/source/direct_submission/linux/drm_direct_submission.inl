@@ -12,6 +12,8 @@
 #include "shared/source/direct_submission/linux/drm_direct_submission.h"
 #include "shared/source/os_interface/linux/drm_allocation.h"
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
+#include "shared/source/os_interface/linux/drm_memory_manager.h"
+#include "shared/source/os_interface/linux/drm_memory_operations_handler.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/drm_wrappers.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
@@ -27,6 +29,7 @@ namespace NEO {
 template <typename GfxFamily, typename Dispatcher>
 DrmDirectSubmission<GfxFamily, Dispatcher>::DrmDirectSubmission(const DirectSubmissionInputParams &inputParams)
     : DirectSubmissionHw<GfxFamily, Dispatcher>(inputParams) {
+    this->execObjectsStorage.resize(1u);
 
     this->completionFenceValue = inputParams.initialCompletionFenceValue;
     if (debugManager.flags.OverrideUserFenceStartValue.get() != -1) {
@@ -45,6 +48,10 @@ DrmDirectSubmission<GfxFamily, Dispatcher>::DrmDirectSubmission(const DirectSubm
 
     auto &drm = osContextLinux->getDrm();
     drm.setDirectSubmissionActive(true);
+
+    if (!drm.isVmBindAvailable()) {
+        static_cast<DrmMemoryManager *>(this->memoryManager)->disableForcePin();
+    }
 
     auto usePciBarrier = !this->hwInfo->capabilityTable.isIntegratedDevice;
     if (debugManager.flags.DirectSubmissionPCIBarrier.get() != -1) {
@@ -124,7 +131,7 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::allocateOsResources() {
 }
 
 template <typename GfxFamily, typename Dispatcher>
-bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, size_t size) {
+bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, size_t size, const ResidencyContainer *allocationsForResidency) {
     auto bb = static_cast<DrmAllocation *>(this->ringCommandStream.getGraphicsAllocation())->getBO();
 
     auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
@@ -132,9 +139,11 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, siz
     auto execFlags = osContextLinux->getEngineFlag() | drm.getIoctlHelper()->getDrmParamValue(DrmParam::execNoReloc);
     auto &drmContextIds = osContextLinux->getDrmContextIds();
 
-    ExecObject execObject{};
-
-    this->handleResidency();
+    if (!allocationsForResidency) {
+        this->handleResidency();
+    } else {
+        this->lastUllsLightExecTimestamp = std::chrono::steady_clock::now();
+    }
 
     auto currentBase = this->ringCommandStream.getGraphicsAllocation()->getGpuAddress();
     auto offset = ptrDiff(gpuAddress, currentBase);
@@ -151,21 +160,33 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, siz
 
     for (auto drmIterator = 0u; drmIterator < osContextLinux->getDeviceBitfield().size(); drmIterator++) {
         if (osContextLinux->getDeviceBitfield().test(drmIterator)) {
-            uint32_t errorCode = bb->exec(static_cast<uint32_t>(size),
-                                          offset,
-                                          execFlags,
-                                          false,
-                                          &this->osContext,
-                                          drmIterator,
-                                          drmContextIds[drmContextId],
-                                          nullptr,
-                                          0,
-                                          &execObject,
-                                          completionFenceGpuAddress,
-                                          completionValue);
+            auto size = allocationsForResidency ? allocationsForResidency->size() : 0u;
+            for (uint32_t i = 0; i < size; i++) {
+                auto drmAlloc = static_cast<DrmAllocation *>((*allocationsForResidency)[i]);
+                drmAlloc->makeBOsResident(&this->osContext, drmIterator, &this->residency, false, false);
+            }
+
+            auto requiredSize = this->residency.size() + 1;
+            if (requiredSize > this->execObjectsStorage.size()) {
+                this->execObjectsStorage.resize(requiredSize);
+            }
+
+            auto errorCode = bb->exec(static_cast<uint32_t>(size),
+                                      offset,
+                                      execFlags,
+                                      false,
+                                      &this->osContext,
+                                      drmIterator,
+                                      drmContextIds[drmContextId],
+                                      this->residency.data(),
+                                      this->residency.size(),
+                                      this->execObjectsStorage.data(),
+                                      completionFenceGpuAddress,
+                                      completionValue);
             if (errorCode != 0) {
                 this->dispatchErrorCode = errorCode;
                 ret = false;
+                break;
             }
             drmContextId++;
             if (completionFenceGpuAddress) {
@@ -173,6 +194,8 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, siz
             }
         }
     }
+
+    this->residency.clear();
 
     if (this->isCompletionFenceSupported() && ret) {
         completionFenceValue++;
@@ -186,6 +209,17 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::handleResidency() {
     auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
     osContextLinux->waitForPagingFence();
     return true;
+}
+
+template <typename GfxFamily, typename Dispatcher>
+void DrmDirectSubmission<GfxFamily, Dispatcher>::handleRingRestartForUllsLightResidency(const ResidencyContainer *allocationsForResidency) {
+    if (allocationsForResidency) {
+        auto restartNeeded = (static_cast<DrmMemoryOperationsHandler *>(this->memoryOperationHandler)->obtainAndResetNewResourcesSinceLastRingSubmit() ||
+                              std::chrono::duration_cast<std::chrono::microseconds>(this->getCpuTimePoint() - this->lastUllsLightExecTimestamp) > std::chrono::microseconds{ullsLightTimeout});
+        if (restartNeeded) {
+            this->stopRingBuffer(false);
+        }
+    }
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -208,6 +242,11 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::handleSwitchRingBuffers(Residen
         if (updateCompletionFences) {
             this->ringBuffers[this->previousRingBuffer].completionFence = this->currentTagData.tagValue;
         }
+    }
+
+    if (allocationsForResidency) {
+        allocationsForResidency->clear();
+        static_cast<DrmMemoryOperationsHandler *>(this->memoryOperationHandler)->mergeWithResidencyContainer(&this->osContext, *allocationsForResidency);
     }
 }
 
@@ -254,6 +293,11 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::wait(TaskCountType taskCountToW
         }
         pollAddress = ptrOffset(pollAddress, this->immWritePostSyncOffset);
     }
+}
+
+template <typename GfxFamily, typename Dispatcher>
+std::chrono::steady_clock::time_point DrmDirectSubmission<GfxFamily, Dispatcher>::getCpuTimePoint() {
+    return std::chrono::steady_clock::now();
 }
 
 template <typename GfxFamily, typename Dispatcher>

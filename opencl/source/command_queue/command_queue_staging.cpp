@@ -15,6 +15,7 @@
 #include "opencl/source/context/context.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/helpers/base_object.h"
+#include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
 
 #include "CL/cl_ext.h"
@@ -70,7 +71,15 @@ cl_int CommandQueue::enqueueStagingImageTransfer(cl_command_type commandType, Im
     auto dstRowPitch = inputRowPitch ? inputRowPitch : globalRegion[0] * bytesPerPixel;
 
     auto stagingBufferManager = this->context->getStagingBufferManager();
-    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, chunkWrite, &csr, isRead);
+    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, bytesPerPixel, chunkWrite, &csr, isRead);
+
+    if (isRead && context->isProvidingPerformanceHints()) {
+        auto hostPtrSize = calculateHostPtrSizeForImage(globalRegion, inputRowPitch, inputSlicePitch, image);
+        if (!isL3Capable(ptr, hostPtrSize)) {
+            context->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_BAD_INTEL, CL_ENQUEUE_READ_IMAGE_DOESNT_MEET_ALIGNMENT_RESTRICTIONS, ptr, hostPtrSize, MemoryConstants::pageSize, MemoryConstants::pageSize);
+        }
+    }
+
     return postStagingTransferSync(ret, event, profilingEvent, isSingleTransfer, blockingCopy, commandType);
 }
 
@@ -159,9 +168,9 @@ bool CommandQueue::isValidForStagingBufferCopy(Device &device, void *dstPtr, con
     return stagingBufferManager->isValidForCopy(device, dstPtr, srcPtr, size, hasDependencies, osContextId);
 }
 
-bool CommandQueue::isValidForStagingTransfer(MemObj *memObj, const void *ptr, bool hasDependencies) {
+bool CommandQueue::isValidForStagingTransfer(MemObj *memObj, const void *ptr, size_t size, cl_command_type commandType, bool isBlocking, bool hasDependencies) {
     GraphicsAllocation *allocation = nullptr;
-    context->tryGetExistingMapAllocation(ptr, memObj->getSize(), allocation);
+    context->tryGetExistingMapAllocation(ptr, size, allocation);
     if (allocation != nullptr) {
         // Direct transfer from mapped allocation is faster than staging buffer
         return false;
@@ -170,10 +179,13 @@ bool CommandQueue::isValidForStagingTransfer(MemObj *memObj, const void *ptr, bo
     if (!stagingBufferManager) {
         return false;
     }
+    auto isValidForStaging = stagingBufferManager->isValidForStagingTransfer(this->getDevice(), ptr, size, hasDependencies);
     switch (memObj->peekClMemObjType()) {
+    case CL_MEM_OBJECT_BUFFER:
+        return isValidForStaging && !this->bufferCpuCopyAllowed(castToObject<Buffer>(memObj), commandType, isBlocking, size, const_cast<void *>(ptr), 0, nullptr);
     case CL_MEM_OBJECT_IMAGE1D:
     case CL_MEM_OBJECT_IMAGE2D:
-        return stagingBufferManager->isValidForStagingTransfer(this->getDevice(), ptr, hasDependencies);
+        return isValidForStaging;
     default:
         return false;
     }

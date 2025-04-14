@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -48,10 +48,14 @@ class IpSamplingMetricSourceImp : public MetricSource {
                                               std::vector<zet_metric_group_handle_t> &metricGroupList) override {
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
+    ze_result_t appendMarker(zet_command_list_handle_t hCommandList, zet_metric_group_handle_t hMetricGroup, uint32_t value) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
 
     void setActivationTracker(MultiDomainDeferredActivationTracker *inputActivationTracker) {
         activationTracker.reset(inputActivationTracker);
     }
+
     uint32_t metricSourceCount = 0;
 
   protected:
@@ -125,7 +129,7 @@ struct IpSamplingMetricGroupImp : public IpSamplingMetricGroupBase {
   private:
     std::vector<std::unique_ptr<IpSamplingMetricImp>> metrics = {};
     zet_metric_group_properties_t properties = {ZET_STRUCTURE_TYPE_METRIC_GROUP_PROPERTIES, nullptr};
-    ze_result_t getCalculatedMetricCount(const size_t rawDataSize, uint32_t &metricValueCount);
+    ze_result_t getCalculatedMetricCount(const uint8_t *pRawData, const size_t rawDataSize, uint32_t &metricValueCount);
     ze_result_t getCalculatedMetricValues(const zet_metric_group_calculation_type_t type, const size_t rawDataSize, const uint8_t *pRawData,
                                           uint32_t &metricValueCount,
                                           zet_typed_value_t *pCalculatedData);

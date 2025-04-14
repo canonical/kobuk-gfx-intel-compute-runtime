@@ -5,6 +5,12 @@
  *
  */
 
+#pragma once
+
+#include <cstdint>
+
 namespace NEO {
-constexpr bool wmtpSupported = false;
+
+struct EncodeKernelArgsExt {
+};
 } // namespace NEO

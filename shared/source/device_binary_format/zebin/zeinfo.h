@@ -8,6 +8,7 @@
 #pragma once
 
 #include "shared/source/device_binary_format/yaml/yaml_parser.h"
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/utilities/const_stringref.h"
 
 #include <array>
@@ -398,7 +399,7 @@ struct ExecutionEnvExt;
 ExecutionEnvExt *allocateExecEnvExt();
 void freeExecEnvExt(ExecutionEnvExt *);
 
-struct ExecutionEnvBaseT final {
+struct ExecutionEnvBaseT final : NEO::NonCopyableAndNonMovableClass {
     ExecutionEnvBaseT() {
         execEnvExt = allocateExecEnvExt();
     }
@@ -439,6 +440,8 @@ struct ExecutionEnvBaseT final {
     WalkOrderT dispatchWalkOrder = Defaults::dispatchWalkOrder;
     PartitionDimT partitionDim = Defaults::partitionDim;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<ExecutionEnvBaseT>);
 
 struct ExperimentalPropertiesBaseT {
     HasNonKernelArgLoadT hasNonKernelArgLoad = Defaults::hasNonKernelArgLoad;

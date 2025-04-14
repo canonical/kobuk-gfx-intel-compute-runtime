@@ -29,6 +29,7 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/utilities/api_intercept.h"
+#include "shared/source/utilities/staging_buffer_manager.h"
 #include "shared/source/utilities/tag_allocator.h"
 
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
@@ -106,7 +107,8 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
         auto &compilerProductHelper = device->getCompilerProductHelper();
         auto &rootDeviceEnvironment = device->getRootDeviceEnvironment();
 
-        bcsAllowed = productHelper.isBlitterFullySupported(hwInfo) &&
+        bcsAllowed = !device->getDevice().isAnyDirectSubmissionEnabled(true) &&
+                     productHelper.isBlitterFullySupported(hwInfo) &&
                      gfxCoreHelper.isSubDeviceEngineSupported(rootDeviceEnvironment, device->getDeviceBitfield(), aub_stream::EngineType::ENGINE_BCS);
 
         if (bcsAllowed || device->getDefaultEngine().commandStreamReceiver->peekTimestampPacketWriteEnabled()) {
@@ -548,7 +550,9 @@ WaitStatus CommandQueue::waitUntilComplete(TaskCountType gpgpuTaskCountToWait, R
                      : getGpgpuCommandStreamReceiver().waitForTaskCount(gpgpuTaskCountToWait);
 
     WAIT_LEAVE()
-
+    if (this->context->getStagingBufferManager()) {
+        this->context->getStagingBufferManager()->resetDetectedPtrs();
+    }
     return waitStatus;
 }
 
@@ -1553,6 +1557,14 @@ void CommandQueue::unregisterGpgpuAndBcsCsrClients() {
             unregisterBcsCsrClient(*engine->commandStreamReceiver);
         }
     }
+}
+
+size_t CommandQueue::calculateHostPtrSizeForImage(const size_t *region, size_t rowPitch, size_t slicePitch, Image *image) {
+    auto bytesPerPixel = image->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
+    auto dstRowPitch = rowPitch ? rowPitch : region[0] * bytesPerPixel;
+    auto dstSlicePitch = slicePitch ? slicePitch : ((image->getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? 1 : region[1]) * dstRowPitch);
+
+    return Image::calculateHostPtrSize(region, dstRowPitch, dstSlicePitch, bytesPerPixel, image->getImageDesc().image_type);
 }
 
 } // namespace NEO

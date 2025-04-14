@@ -23,6 +23,7 @@
 #include <level_zero/zet_api.h>
 
 #include <cstring>
+#include <unordered_set>
 
 namespace L0 {
 constexpr uint32_t ipSamplinDomainId = 100u;
@@ -212,7 +213,11 @@ ze_result_t IpSamplingMetricSourceImp::handleMetricGroupExtendedProperties(zet_m
     while (pNext) {
         auto extendedProperties = reinterpret_cast<zet_base_properties_t *>(pNext);
 
-        if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GLOBAL_TIMESTAMPS_RESOLUTION_EXP) {
+        if (extendedProperties->stype == ZET_INTEL_STRUCTURE_TYPE_METRIC_SOURCE_ID_EXP) {
+
+            getMetricGroupSourceIdProperty(extendedProperties);
+            retVal = ZE_RESULT_SUCCESS;
+        } else if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GLOBAL_TIMESTAMPS_RESOLUTION_EXP) {
 
             zet_metric_global_timestamps_resolution_exp_t *metricsTimestampProperties =
                 reinterpret_cast<zet_metric_global_timestamps_resolution_exp_t *>(extendedProperties);
@@ -220,14 +225,11 @@ ze_result_t IpSamplingMetricSourceImp::handleMetricGroupExtendedProperties(zet_m
             getTimerResolution(metricsTimestampProperties->timerResolution);
             getTimestampValidBits(metricsTimestampProperties->timestampValidBits);
             retVal = ZE_RESULT_SUCCESS;
-        }
-
-        if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP) {
+        } else if (extendedProperties->stype == ZET_STRUCTURE_TYPE_METRIC_GROUP_TYPE_EXP) {
             zet_metric_group_type_exp_t *groupType = reinterpret_cast<zet_metric_group_type_exp_t *>(extendedProperties);
             groupType->type = ZET_METRIC_GROUP_TYPE_EXP_FLAG_OTHER;
             retVal = ZE_RESULT_SUCCESS;
         }
-
         pNext = extendedProperties->pNext;
     }
 
@@ -300,7 +302,7 @@ ze_result_t IpSamplingMetricGroupImp::calculateMetricValues(const zet_metric_gro
     }
 
     if (calculateCountOnly) {
-        return getCalculatedMetricCount(rawDataSize, *pMetricValueCount);
+        return getCalculatedMetricCount(pRawData, rawDataSize, *pMetricValueCount);
     } else {
         return getCalculatedMetricValues(type, rawDataSize, pRawData, *pMetricValueCount, pMetricValues);
     }
@@ -372,15 +374,26 @@ ze_result_t IpSamplingMetricGroupImp::getMetricTimestampsExp(const ze_bool_t syn
     return getDeviceTimestamps(deviceImp, synchronizedWithHost, globalTimestamp, metricTimestamp);
 }
 
-ze_result_t IpSamplingMetricGroupImp::getCalculatedMetricCount(const size_t rawDataSize,
+ze_result_t IpSamplingMetricGroupImp::getCalculatedMetricCount(const uint8_t *pRawData, const size_t rawDataSize,
                                                                uint32_t &metricValueCount) {
 
-    if ((rawDataSize % IpSamplingMetricGroupBase::rawReportSize) != 0) {
+    std::unordered_set<uint64_t> stallReportIpCount{};
+    constexpr uint32_t rawReportSize = IpSamplingMetricGroupBase::rawReportSize;
+
+    if ((rawDataSize % rawReportSize) != 0) {
         return ZE_RESULT_ERROR_INVALID_SIZE;
     }
 
-    const uint32_t rawReportCount = static_cast<uint32_t>(rawDataSize) / IpSamplingMetricGroupBase::rawReportSize;
-    metricValueCount = rawReportCount * properties.metricCount;
+    const uint32_t rawReportCount = static_cast<uint32_t>(rawDataSize) / rawReportSize;
+
+    for (const uint8_t *pRawIpData = pRawData; pRawIpData < pRawData + (rawReportCount * rawReportSize); pRawIpData += rawReportSize) {
+        uint64_t ip = 0ULL;
+        memcpy_s(reinterpret_cast<uint8_t *>(&ip), sizeof(ip), pRawIpData, sizeof(ip));
+        ip &= 0x1fffffff;
+        stallReportIpCount.insert(ip);
+    }
+
+    metricValueCount = static_cast<uint32_t>(stallReportIpCount.size()) * properties.metricCount;
     return ZE_RESULT_SUCCESS;
 }
 
@@ -401,7 +414,7 @@ ze_result_t IpSamplingMetricGroupImp::getCalculatedMetricCount(const uint8_t *pM
         }
 
         auto currTotalMetricValueCount = 0u;
-        auto result = this->getCalculatedMetricCount(header->rawDataSize, currTotalMetricValueCount);
+        auto result = this->getCalculatedMetricCount((processMetricData + sizeof(IpSamplingMetricDataHeader)), header->rawDataSize, currTotalMetricValueCount);
         if (result != ZE_RESULT_SUCCESS) {
             metricValueCount = 0;
             return result;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,6 +34,7 @@
 #include "shared/test/common/mocks/mock_l0_debugger.h"
 #include "shared/test/common/mocks/mock_memory_operations_handler.h"
 #include "shared/test/common/mocks/mock_modules_zebin.h"
+#include "shared/test/common/mocks/mock_product_helper.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/kernel/kernel_imp.h"
@@ -174,7 +175,6 @@ HWTEST_F(ModuleTest, givenUserModuleWhenCreatedThenCorrectAllocationTypeIsUsedFo
 
 template <bool localMemEnabled>
 struct ModuleKernelIsaAllocationsFixture : public ModuleFixture {
-    static constexpr size_t isaAllocationPageSize = (localMemEnabled ? MemoryConstants::pageSize64k : MemoryConstants::pageSize);
     using Module = WhiteBox<::L0::Module>;
 
     void setUp() {
@@ -209,7 +209,7 @@ struct ModuleKernelIsaAllocationsFixture : public ModuleFixture {
     void givenSeparateIsaMemoryRegionPerKernelWhenGraphicsAllocationFailsThenProperErrorReturned() {
         mockModule->allocateKernelsIsaMemoryCallBase = false;
         mockModule->computeKernelIsaAllocationAlignedSizeWithPaddingCallBase = false;
-        mockModule->computeKernelIsaAllocationAlignedSizeWithPaddingResult = isaAllocationPageSize;
+        mockModule->computeKernelIsaAllocationAlignedSizeWithPaddingResult = this->mockModule->getIsaAllocationPageSize();
 
         auto result = module->initialize(&this->moduleDesc, device->getNEODevice());
         EXPECT_EQ(result, ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY);
@@ -792,6 +792,35 @@ HWTEST_F(ModuleTest, whenMultipleModulesCreatedThenModulesShareIsaAllocation) {
         EXPECT_EQ(initialWriteMemoryCount + 1, ultCsr.writeMemoryParams.totalCallCount);
     }
 };
+
+TEST_F(ModuleTest, GivenLocalMemoryEnabledOrDisabledAnd2MBAlignmentEnabledOrDisabledWhenGettingIsaAllocationPageSizeThenCorrectValueIsReturned) {
+    DebugManagerStateRestore restorer;
+    auto mockProductHelper = new MockProductHelper;
+
+    device->getNEODevice()->getRootDeviceEnvironmentRef().productHelper.reset(mockProductHelper);
+
+    MockModule mockModule{device, nullptr, ModuleType::user};
+    EXPECT_EQ(mockModule.getIsaAllocationPageSize(), mockModule.isaAllocationPageSize);
+
+    {
+        debugManager.flags.EnableLocalMemory.set(0);
+        mockProductHelper->is2MBLocalMemAlignmentEnabledResult = true;
+
+        EXPECT_EQ(MemoryConstants::pageSize, mockModule.getIsaAllocationPageSize());
+    }
+    {
+        debugManager.flags.EnableLocalMemory.set(1);
+        mockProductHelper->is2MBLocalMemAlignmentEnabledResult = true;
+
+        EXPECT_EQ(MemoryConstants::pageSize2M, mockModule.getIsaAllocationPageSize());
+    }
+    {
+        debugManager.flags.EnableLocalMemory.set(1);
+        mockProductHelper->is2MBLocalMemAlignmentEnabledResult = false;
+
+        EXPECT_EQ(MemoryConstants::pageSize64k, mockModule.getIsaAllocationPageSize());
+    }
+}
 
 template <typename T1, typename T2>
 struct ModuleSpecConstantsFixture : public DeviceFixture {
@@ -3268,9 +3297,11 @@ HWTEST_F(ModuleTranslationUnitTest, GivenRebuildFlagWhenCreatingModuleFromNative
 HWTEST_F(ModuleTranslationUnitTest, WhenCreatingFromNativeBinaryThenSetsUpRequiredTargetProductProperly) {
     ZebinTestData::ValidEmptyProgram emptyProgram;
 
-    const auto &hwInfo = device->getNEODevice()->getHardwareInfo();
+    auto copyHwInfo = device->getNEODevice()->getHardwareInfo();
+    auto &compilerProductHelper = device->getCompilerProductHelper();
+    compilerProductHelper.adjustHwInfoForIgc(copyHwInfo);
 
-    emptyProgram.elfHeader->machine = hwInfo.platform.eProductFamily;
+    emptyProgram.elfHeader->machine = copyHwInfo.platform.eProductFamily;
     L0::ModuleTranslationUnit moduleTuValid(this->device);
     ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     result = moduleTuValid.createFromNativeBinary(reinterpret_cast<const char *>(emptyProgram.storage.data()), emptyProgram.storage.size(), "");
@@ -3280,6 +3311,7 @@ HWTEST_F(ModuleTranslationUnitTest, WhenCreatingFromNativeBinaryThenSetsUpRequir
     EXPECT_EQ(0, strcmp(pStr, emptyString.c_str()));
     EXPECT_EQ(result, ZE_RESULT_SUCCESS);
 
+    emptyProgram.elfHeader->machine = copyHwInfo.platform.eProductFamily;
     ++emptyProgram.elfHeader->machine;
     L0::ModuleTranslationUnit moduleTuInvalid(this->device);
     result = moduleTuInvalid.createFromNativeBinary(reinterpret_cast<const char *>(emptyProgram.storage.data()), emptyProgram.storage.size(), "");
@@ -3327,9 +3359,11 @@ HWTEST_F(ModuleTranslationUnitTest, WhenCreatingFromNativeBinaryThenSetsUpPacked
 HWTEST_F(ModuleTranslationUnitTest, WhenCreatingFromZebinThenDontAppendAllowZebinFlagToBuildOptions) {
     ZebinTestData::ValidEmptyProgram zebin;
 
-    const auto &hwInfo = device->getNEODevice()->getHardwareInfo();
+    auto copyHwInfo = device->getNEODevice()->getHardwareInfo();
+    auto &compilerProductHelper = device->getCompilerProductHelper();
+    compilerProductHelper.adjustHwInfoForIgc(copyHwInfo);
 
-    zebin.elfHeader->machine = hwInfo.platform.eProductFamily;
+    zebin.elfHeader->machine = copyHwInfo.platform.eProductFamily;
     L0::ModuleTranslationUnit moduleTu(this->device);
     ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     result = moduleTu.createFromNativeBinary(reinterpret_cast<const char *>(zebin.storage.data()), zebin.storage.size(), "");
@@ -4043,7 +4077,6 @@ TEST_F(ModuleTest, whenContainsStatefulAccessIsCalledThenResultIsCorrect) {
 
 template <bool localMemEnabled>
 struct ModuleIsaAllocationsFixture : public DeviceFixture {
-    static constexpr size_t isaAllocationPageSize = (localMemEnabled ? MemoryConstants::pageSize64k : MemoryConstants::pageSize);
     static constexpr NEO::MemoryPool isaAllocationMemoryPool = (localMemEnabled ? NEO::MemoryPool::localMemory : NEO::MemoryPool::system4KBPagesWith32BitGpuAddressing);
 
     void setUp() {
@@ -4059,6 +4092,7 @@ struct ModuleIsaAllocationsFixture : public DeviceFixture {
         this->mockMemoryManager->localMemorySupported[this->neoDevice->getRootDeviceIndex()] = true;
         this->mockModule.reset(new MockModule{this->device, nullptr, ModuleType::user});
         this->mockModule->translationUnit.reset(new MockModuleTranslationUnit{this->device});
+        this->isaAllocationPageSize = this->mockModule->getIsaAllocationPageSize();
     }
 
     void tearDown() {
@@ -4114,8 +4148,8 @@ struct ModuleIsaAllocationsFixture : public DeviceFixture {
         EXPECT_EQ(kernelImmDatas[1]->getIsaOffsetInParentAllocation(), 0lu);
         EXPECT_EQ(kernelImmDatas[1]->getIsaSubAllocationSize(), 0lu);
         if constexpr (localMemEnabled) {
-            EXPECT_EQ(isaAllocationPageSize, kernelImmDatas[0]->getIsaSize());
-            EXPECT_EQ(isaAllocationPageSize, kernelImmDatas[1]->getIsaSize());
+            EXPECT_EQ(alignUp<size_t>(maxAllocationSizeInPage, MemoryConstants::pageSize64k), kernelImmDatas[0]->getIsaSize());
+            EXPECT_EQ(alignUp<size_t>(tinyAllocationSize, MemoryConstants::pageSize64k), kernelImmDatas[1]->getIsaSize());
         } else {
             EXPECT_EQ(this->computeKernelIsaAllocationSizeWithPadding(maxAllocationSizeInPage), kernelImmDatas[0]->getIsaSize());
             EXPECT_EQ(this->computeKernelIsaAllocationSizeWithPadding(tinyAllocationSize), kernelImmDatas[1]->getIsaSize());
@@ -4162,6 +4196,7 @@ struct ModuleIsaAllocationsFixture : public DeviceFixture {
 
     size_t isaPadding;
     size_t kernelStartPointerAlignment;
+    size_t isaAllocationPageSize;
     NEO::Device *neoDevice = nullptr;
     MockMemoryManager *mockMemoryManager = nullptr;
     std::unique_ptr<MockModule> mockModule = nullptr;
@@ -4915,9 +4950,13 @@ kernels:
       execution_env :
         simd_size : 8
 )===";
+    auto copyHwInfo = device->getHwInfo();
+    auto &compilerProductHelper = device->getCompilerProductHelper();
+    compilerProductHelper.adjustHwInfoForIgc(copyHwInfo);
+
     MockElfEncoder<> elfEncoder;
     elfEncoder.getElfFileHeader().type = NEO::Elf::ET_REL;
-    elfEncoder.getElfFileHeader().machine = productFamily;
+    elfEncoder.getElfFileHeader().machine = copyHwInfo.platform.eProductFamily;
     elfEncoder.appendSection(NEO::Elf::SHT_PROGBITS, NEO::Zebin::Elf::SectionNames::textPrefix.str() + "kernel1", std::string{});
     elfEncoder.appendSection(NEO::Elf::SHT_PROGBITS, NEO::Zebin::Elf::SectionNames::textPrefix.str() + "kernel2", std::string{});
     elfEncoder.appendSection(NEO::Zebin::Elf::SHT_ZEBIN_ZEINFO, NEO::Zebin::Elf::SectionNames::zeInfo, zeInfo);
@@ -4989,9 +5028,11 @@ TEST_F(ModuleWithZebinTest, givenNonZebinaryFormatWhenGettingDebugInfoThenDebugZ
 HWTEST_F(ModuleWithZebinTest, givenZebinWithKernelCallingExternalFunctionThenUpdateKernelsBarrierCount) {
     ZebinTestData::ZebinWithExternalFunctionsInfo zebin;
 
-    const auto &hwInfo = device->getNEODevice()->getHardwareInfo();
+    auto copyHwInfo = device->getHwInfo();
+    auto &compilerProductHelper = device->getCompilerProductHelper();
+    compilerProductHelper.adjustHwInfoForIgc(copyHwInfo);
 
-    zebin.setProductFamily(static_cast<uint16_t>(hwInfo.platform.eProductFamily));
+    zebin.setProductFamily(static_cast<uint16_t>(copyHwInfo.platform.eProductFamily));
 
     ze_module_desc_t moduleDesc = {};
     moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;

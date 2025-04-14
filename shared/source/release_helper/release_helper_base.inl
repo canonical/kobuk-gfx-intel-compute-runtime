@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -61,6 +61,11 @@ bool ReleaseHelperHw<releaseType>::isResolvingSubDeviceIDNeeded() const {
 
 template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isDirectSubmissionSupported() const {
+    return false;
+}
+
+template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::isDirectSubmissionLightSupported() const {
     return false;
 }
 
@@ -138,11 +143,6 @@ bool ReleaseHelperHw<releaseType>::isLocalOnlyAllowed() const {
 }
 
 template <ReleaseType releaseType>
-bool ReleaseHelperHw<releaseType>::isDisablingMsaaRequired() const {
-    return false;
-}
-
-template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isDummyBlitWaRequired() const {
     return false;
 }
@@ -162,4 +162,10 @@ template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::getFtrXe2Compression() const {
     return true;
 }
+
+template <ReleaseType releaseType>
+uint32_t ReleaseHelperHw<releaseType>::computeSlmValues(uint32_t slmSize, bool isHeapless) const {
+    return 0u;
+}
+
 } // namespace NEO

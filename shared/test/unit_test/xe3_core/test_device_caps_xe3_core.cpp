@@ -52,7 +52,7 @@ XE3_CORETEST_F(Xe3CoreDeviceCaps, givenXe3CoreWhenCheckingCxlTypeThenReturnZero)
     EXPECT_EQ(0u, pDevice->getHardwareInfo().capabilityTable.cxlType);
 }
 
-XE3_CORETEST_F(Xe3CoreDeviceCaps, givenXe3CoreWhenCheckingDefaltPreemptionModeThenDefaultPreemptionModeIsMidThread) {
+XE3_CORETEST_F(Xe3CoreDeviceCaps, givenXe3CoreWhenCheckingDefaultPreemptionModeThenDefaultPreemptionModeIsMidThread) {
     EXPECT_EQ(PreemptionMode::MidThread, pDevice->getHardwareInfo().capabilityTable.defaultPreemptionMode);
 }
 
@@ -96,8 +96,8 @@ XE3_CORETEST_F(Xe3CoreDeviceCaps, givenSlmSizeWhenEncodingThenReturnCorrectValue
         {11, 128 * MemoryConstants::kiloByte}};
 
     for (const auto &testInput : computeSlmValuesXe3AndLaterTestsInput) {
-        EXPECT_EQ(testInput.expected, gfxCoreHelper.computeSlmValues(hwInfo, testInput.slmSize));
+        EXPECT_EQ(testInput.expected, gfxCoreHelper.computeSlmValues(hwInfo, testInput.slmSize, nullptr, false));
     }
 
-    EXPECT_THROW(gfxCoreHelper.computeSlmValues(hwInfo, 128 * MemoryConstants::kiloByte + 1), std::exception);
+    EXPECT_THROW(gfxCoreHelper.computeSlmValues(hwInfo, 128 * MemoryConstants::kiloByte + 1, nullptr, false), std::exception);
 }

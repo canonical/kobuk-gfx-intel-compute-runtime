@@ -34,6 +34,7 @@
 #include "shared/test/common/mocks/mock_driver_model.h"
 #include "shared/test/common/mocks/mock_io_functions.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
+#include "shared/test/common/mocks/mock_os_interface.h"
 #include "shared/test/common/mocks/mock_product_helper.h"
 #include "shared/test/common/mocks/mock_release_helper.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
@@ -494,11 +495,6 @@ TEST_F(DeviceGetCapsTest, whenDriverModelHasLimitationForMaxMemoryAllocationSize
     device->initializeCaps();
     const auto &caps = device->getDeviceInfo();
     EXPECT_EQ(maxAllocSizeTestValue, caps.maxMemAllocSize);
-}
-
-TEST_F(DeviceGetCapsTest, WhenDeviceIsCreatedThenVmeIsEnabled) {
-    DebugSettingsManager<DebugFunctionalityLevel::regKeys> freshDebugSettingsManager("");
-    EXPECT_TRUE(freshDebugSettingsManager.flags.EnableIntelVme.get());
 }
 
 TEST(DeviceGetCapsSimpleTest, givenVariousOclVersionsWhenCapsAreCreatedThenDeviceReportsSpirvAsSupportedIl) {
@@ -1233,18 +1229,8 @@ HWTEST2_F(DeviceTests, givenHwInfoWhenSlmSizeIsRequiredThenReturnCorrectValue, I
     EXPECT_EQ(64u, defaultHwInfo->capabilityTable.slmSize);
 }
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenXeHPAndLaterProductWhenCheckingDeviceEnqueueSupportThenFalseIsReturned) {
-    EXPECT_FALSE(defaultHwInfo->capabilityTable.supportsDeviceEnqueue);
-}
-
 HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenXeHPAndLaterProductWhenCheckingPipesSupportThenFalseIsReturned) {
     EXPECT_FALSE(defaultHwInfo->capabilityTable.supportsPipes);
-}
-
-HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenXeHPAndLaterProductWhenRequestedVmeFlagsThenReturnFalse) {
-    EXPECT_FALSE(defaultHwInfo->capabilityTable.supportsVme);
-    EXPECT_FALSE(defaultHwInfo->capabilityTable.ftrSupportsVmeAvcTextureSampler);
-    EXPECT_FALSE(defaultHwInfo->capabilityTable.ftrSupportsVmeAvcPreemption);
 }
 
 TEST_F(DeviceTests, whenCheckingPreferredPlatformNameThenNullIsReturned) {
@@ -1565,6 +1551,93 @@ HWTEST_F(DeviceTests, givenContextGroupSizeEnabledWhenMoreHpEnginesCreatedThenFr
             }
         }
     }
+}
+
+HWTEST_F(DeviceTests, givenDeviceWithCCSEngineAndAggregatedProcessesWhenDeviceIsCreatedThenNumberOfSecondaryEnginesIsLimited) {
+    if (defaultHwInfo->capabilityTable.defaultEngineType != aub_stream::EngineType::ENGINE_CCS) {
+        GTEST_SKIP();
+    }
+    DebugManagerStateRestore dbgRestorer;
+
+    HardwareInfo hwInfo = *defaultHwInfo;
+    hwInfo.featureTable.flags.ftrCCSNode = true;
+    hwInfo.featureTable.ftrBcsInfo = 0;
+    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
+    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 2;
+
+    const auto numProcesses = 4u;
+    auto executionEnvironment = new MockExecutionEnvironment(&hwInfo, false, 1);
+    executionEnvironment->incRefInternal();
+    auto osInterface = new MockOsInterface();
+    auto driverModelMock = std::make_unique<MockDriverModel>();
+    osInterface->setDriverModel(std::move(driverModelMock));
+
+    executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(osInterface);
+    osInterface->numberOfProcesses = numProcesses;
+
+    uint32_t testedContextGroupSizes[] = {10, 22};
+    uint32_t expectedRegularCounts[] = {1u, 3u};
+    uint32_t expectedHpCounts[] = {1u, 2u};
+
+    for (uint32_t contextGroupSizeIndex = 0; contextGroupSizeIndex < 2; contextGroupSizeIndex++) {
+        debugManager.flags.ContextGroupSize.set(testedContextGroupSizes[contextGroupSizeIndex]);
+
+        auto device = std::unique_ptr<MockDevice>(MockDevice::createWithExecutionEnvironment<MockDevice>(&hwInfo, executionEnvironment, 0));
+        auto &engineGroups = device->getRegularEngineGroups();
+
+        auto engineGroupType = EngineGroupType::compute;
+        size_t computeEnginesCount = 0;
+        for (const auto &engine : engineGroups) {
+            if (engine.engineGroupType == engineGroupType) {
+                computeEnginesCount = engine.engines.size();
+            }
+        }
+
+        ASSERT_EQ(computeEnginesCount, device->secondaryEngines.size());
+        ASSERT_EQ(testedContextGroupSizes[contextGroupSizeIndex] / numProcesses, device->secondaryEngines[aub_stream::EngineType::ENGINE_CCS].engines.size());
+
+        auto defaultEngine = device->getDefaultEngine();
+        EXPECT_EQ(defaultEngine.commandStreamReceiver, device->secondaryEngines[aub_stream::EngineType::ENGINE_CCS].engines[0].commandStreamReceiver);
+
+        const uint32_t regularContextCount = expectedRegularCounts[contextGroupSizeIndex];
+        const uint32_t hpContextCount = expectedHpCounts[contextGroupSizeIndex];
+
+        for (uint32_t ccsIndex = 0; ccsIndex < computeEnginesCount; ccsIndex++) {
+            auto &secondaryEngines = device->secondaryEngines[EngineHelpers::mapCcsIndexToEngineType(ccsIndex)];
+
+            EXPECT_TRUE(secondaryEngines.engines[0].osContext->isPartOfContextGroup());
+            EXPECT_EQ(nullptr, secondaryEngines.engines[0].osContext->getPrimaryContext());
+
+            for (size_t i = 1; i < device->secondaryEngines[aub_stream::EngineType::ENGINE_CCS].engines.size(); i++) {
+                EXPECT_EQ(secondaryEngines.engines[0].osContext, secondaryEngines.engines[i].osContext->getPrimaryContext());
+                EXPECT_TRUE(secondaryEngines.engines[i].osContext->isPartOfContextGroup());
+            }
+
+            EXPECT_EQ(regularContextCount, secondaryEngines.regularEnginesTotal);
+            EXPECT_EQ(hpContextCount, secondaryEngines.highPriorityEnginesTotal);
+
+            for (size_t contextId = 0; contextId < regularContextCount + 1; contextId++) {
+                auto engine = device->getSecondaryEngineCsr({EngineHelpers::mapCcsIndexToEngineType(ccsIndex), EngineUsage::regular}, false);
+                ASSERT_NE(nullptr, engine);
+
+                if (contextId == regularContextCount) {
+                    EXPECT_EQ(&secondaryEngines.engines[0], engine);
+                }
+            }
+
+            for (size_t contextId = 0; contextId < hpContextCount; contextId++) {
+                auto engine = device->getSecondaryEngineCsr({EngineHelpers::mapCcsIndexToEngineType(ccsIndex), EngineUsage::highPriority}, false);
+                ASSERT_NE(nullptr, engine);
+
+                EXPECT_EQ(contextId + 1, secondaryEngines.highPriorityCounter.load());
+                if (contextId == testedContextGroupSizes[contextGroupSizeIndex] - regularContextCount) {
+                    EXPECT_EQ(&secondaryEngines.engines[regularContextCount], engine);
+                }
+            }
+        }
+        executionEnvironment->memoryManager->reInitLatestContextId();
+    }
+    executionEnvironment->decRefInternal();
 }
 
 HWTEST_F(DeviceTests, givenDebugFlagSetWhenCreatingSecondaryEnginesThenCreateCorrectNumberOfHighPriorityContexts) {
@@ -1951,7 +2024,7 @@ TEST_F(DeviceTests, givenNewUsmPoolingEnabledWhenDeviceInitializedThenUsmMemAllo
         auto executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
         auto mockProductHelper = new MockProductHelper;
         executionEnvironment->rootDeviceEnvironments[0]->productHelper.reset(mockProductHelper);
-        mockProductHelper->isUsmPoolAllocatorSupportedResult = true;
+        mockProductHelper->isDeviceUsmPoolAllocatorSupportedResult = true;
         UltDeviceFactory deviceFactory{1, 1, *executionEnvironment};
         auto device = deviceFactory.rootDevices[0];
         auto usmMemAllocPoolsManager = device->getUsmMemAllocPoolsManager();
@@ -1964,7 +2037,7 @@ TEST_F(DeviceTests, givenNewUsmPoolingEnabledWhenDeviceInitializedThenUsmMemAllo
         auto executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
         auto mockProductHelper = new MockProductHelper;
         executionEnvironment->rootDeviceEnvironments[0]->productHelper.reset(mockProductHelper);
-        mockProductHelper->isUsmPoolAllocatorSupportedResult = true;
+        mockProductHelper->isDeviceUsmPoolAllocatorSupportedResult = true;
         UltDeviceFactory deviceFactory{1, 1, *executionEnvironment};
         auto device = deviceFactory.rootDevices[0];
         auto usmMemAllocPoolsManager = device->getUsmMemAllocPoolsManager();
@@ -1976,7 +2049,7 @@ TEST_F(DeviceTests, givenNewUsmPoolingEnabledWhenDeviceInitializedThenUsmMemAllo
         auto executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
         auto mockProductHelper = new MockProductHelper;
         executionEnvironment->rootDeviceEnvironments[0]->productHelper.reset(mockProductHelper);
-        mockProductHelper->isUsmPoolAllocatorSupportedResult = false;
+        mockProductHelper->isDeviceUsmPoolAllocatorSupportedResult = false;
         UltDeviceFactory deviceFactory{1, 1, *executionEnvironment};
         auto device = deviceFactory.rootDevices[0];
         auto usmMemAllocPoolsManager = device->getUsmMemAllocPoolsManager();
@@ -1989,7 +2062,7 @@ TEST_F(DeviceTests, givenNewUsmPoolingEnabledWhenDeviceInitializedThenUsmMemAllo
         auto executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
         auto mockProductHelper = new MockProductHelper;
         executionEnvironment->rootDeviceEnvironments[0]->productHelper.reset(mockProductHelper);
-        mockProductHelper->isUsmPoolAllocatorSupportedResult = true;
+        mockProductHelper->isDeviceUsmPoolAllocatorSupportedResult = true;
         UltDeviceFactory deviceFactory{1, 1, *executionEnvironment};
         auto device = deviceFactory.rootDevices[0];
         auto usmMemAllocPoolsManager = device->getUsmMemAllocPoolsManager();
@@ -2040,4 +2113,64 @@ TEST(Device, givenDeviceWhenGettingMicrosecondResolutionThenCorrectValueReturned
     uint32_t expectedMicrosecondResolution = 123;
     device->microsecondResolution = expectedMicrosecondResolution;
     EXPECT_EQ(device->getMicrosecondResolution(), expectedMicrosecondResolution);
+}
+
+TEST(GroupDevicesTest, whenMultipleDevicesAreCreatedThenGroupDevicesCreatesVectorPerEachProductFamilySortedOverGpuTypeAndProductFamily) {
+    DebugManagerStateRestore restorer;
+    const size_t numRootDevices = 5u;
+
+    debugManager.flags.CreateMultipleRootDevices.set(numRootDevices);
+    auto executionEnvironment = new ExecutionEnvironment();
+
+    for (auto i = 0u; i < numRootDevices; i++) {
+        executionEnvironment->rootDeviceEnvironments.push_back(std::make_unique<MockRootDeviceEnvironment>(*executionEnvironment));
+    }
+    auto inputDevices = DeviceFactory::createDevices(*executionEnvironment);
+    EXPECT_EQ(numRootDevices, inputDevices.size());
+
+    auto lnl0Device = inputDevices[0].get();
+    auto bmg0Device = inputDevices[1].get();
+    auto lnl1Device = inputDevices[2].get();
+    auto lnl2Device = inputDevices[3].get();
+    auto ptl0Device = inputDevices[4].get();
+
+    executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo()->platform.eProductFamily = IGFX_LUNARLAKE;
+    executionEnvironment->rootDeviceEnvironments[0]->getMutableHardwareInfo()->capabilityTable.isIntegratedDevice = true;
+    executionEnvironment->rootDeviceEnvironments[1]->getMutableHardwareInfo()->platform.eProductFamily = IGFX_BMG;
+    executionEnvironment->rootDeviceEnvironments[1]->getMutableHardwareInfo()->capabilityTable.isIntegratedDevice = false;
+    executionEnvironment->rootDeviceEnvironments[2]->getMutableHardwareInfo()->platform.eProductFamily = IGFX_LUNARLAKE;
+    executionEnvironment->rootDeviceEnvironments[2]->getMutableHardwareInfo()->capabilityTable.isIntegratedDevice = true;
+    executionEnvironment->rootDeviceEnvironments[3]->getMutableHardwareInfo()->platform.eProductFamily = IGFX_LUNARLAKE;
+    executionEnvironment->rootDeviceEnvironments[3]->getMutableHardwareInfo()->capabilityTable.isIntegratedDevice = true;
+    executionEnvironment->rootDeviceEnvironments[4]->getMutableHardwareInfo()->platform.eProductFamily = IGFX_PTL;
+    executionEnvironment->rootDeviceEnvironments[4]->getMutableHardwareInfo()->capabilityTable.isIntegratedDevice = true;
+
+    auto groupedDevices = Device::groupDevices(std::move(inputDevices));
+
+    EXPECT_EQ(3u, groupedDevices.size());
+    EXPECT_EQ(1u, groupedDevices[0].size());
+    EXPECT_EQ(1u, groupedDevices[1].size());
+    EXPECT_EQ(3u, groupedDevices[2].size());
+
+    EXPECT_EQ(lnl0Device, groupedDevices[2][0].get());
+    EXPECT_EQ(lnl1Device, groupedDevices[2][1].get());
+    EXPECT_EQ(lnl2Device, groupedDevices[2][2].get());
+    EXPECT_EQ(ptl0Device, groupedDevices[1][0].get());
+    EXPECT_EQ(bmg0Device, groupedDevices[0][0].get());
+}
+
+TEST(GroupDevicesTest, givenEmptyDeviceVectorWhenGroupDevicesThenEmptyVectorIsReturned) {
+    DeviceVector inputDevices{};
+    auto groupedDevices = Device::groupDevices(std::move(inputDevices));
+
+    EXPECT_TRUE(groupedDevices.empty());
+}
+
+TEST(GroupDevicesTest, givenNullInputInDeviceVectorWhenGroupDevicesThenEmptyVectorIsReturned) {
+    DeviceVector inputDevices{};
+    inputDevices.push_back(nullptr);
+    inputDevices.push_back(nullptr);
+    auto groupedDevices = Device::groupDevices(std::move(inputDevices));
+
+    EXPECT_TRUE(groupedDevices.empty());
 }

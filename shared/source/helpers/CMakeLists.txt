@@ -25,7 +25,6 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bindless_heaps_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bit_helpers.h
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_base.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper_bdw_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_commands_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blit_helper.h
@@ -42,7 +41,7 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_base.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/compiler_aot_config_bdw_and_later.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/compiler_aot_config_tgllp_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_before_xe_hp.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_before_xe_hpc.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/compiler_product_helper_disable_subgroup_local_block_io.inl
@@ -88,7 +87,6 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_base.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_bdw_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_bdw_to_dg2.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_bdw_to_icllp.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/gfx_core_helper_pvc_and_later.inl
@@ -144,7 +142,7 @@ set(NEO_CORE_HELPERS
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_base.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_bdw.inl
-    ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_bdw_and_later.inl
+    ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_tgllp_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_helper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_icllp_and_later.inl
     ${CMAKE_CURRENT_SOURCE_DIR}/state_base_address_skl.inl

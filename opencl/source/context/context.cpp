@@ -310,6 +310,8 @@ bool Context::createImpl(const cl_context_properties *properties,
             auto requiresWritableStaging = device->getDefaultEngine().commandStreamReceiver->getType() != CommandStreamReceiverType::hardware;
             this->stagingBufferManager = std::make_unique<StagingBufferManager>(svmAllocsManager, rootDeviceIndices, deviceBitfields, requiresWritableStaging);
         }
+
+        smallBufferPoolAllocator.setParams(SmallBuffersParams::getPreferredBufferPoolParams(device->getProductHelper()));
     }
 
     return true;
@@ -513,6 +515,29 @@ bool Context::isSingleDeviceContext() {
     return getNumDevices() == 1 && devices[0]->getNumGenericSubDevices() == 0;
 }
 
+Context::UsmPoolParams Context::getUsmHostPoolParams() const {
+    return {
+        .poolSize = 2 * MemoryConstants::megaByte,
+        .minServicedSize = 0u,
+        .maxServicedSize = 1 * MemoryConstants::megaByte};
+}
+
+Context::UsmPoolParams Context::getUsmDevicePoolParams() const {
+    const auto &productHelper = devices[0]->getDevice().getProductHelper();
+
+    if (productHelper.is2MBLocalMemAlignmentEnabled()) {
+        return {
+            .poolSize = 16 * MemoryConstants::megaByte,
+            .minServicedSize = 0u,
+            .maxServicedSize = 2 * MemoryConstants::megaByte};
+    }
+
+    return {
+        .poolSize = 2 * MemoryConstants::megaByte,
+        .minServicedSize = 0u,
+        .maxServicedSize = 1 * MemoryConstants::megaByte};
+}
+
 void Context::initializeUsmAllocationPools() {
     if (this->usmPoolInitialized) {
         return;
@@ -528,11 +553,12 @@ void Context::initializeUsmAllocationPools() {
     }
 
     auto &productHelper = getDevices()[0]->getProductHelper();
-    bool enabled = ApiSpecificConfig::isDeviceUsmPoolingEnabled() && productHelper.isUsmPoolAllocatorSupported();
-    size_t poolSize = 2 * MemoryConstants::megaByte;
+    bool enabled = ApiSpecificConfig::isDeviceUsmPoolingEnabled() && productHelper.isDeviceUsmPoolAllocatorSupported();
+
+    auto usmDevicePoolParams = getUsmDevicePoolParams();
     if (debugManager.flags.EnableDeviceUsmAllocationPool.get() != -1) {
         enabled = debugManager.flags.EnableDeviceUsmAllocationPool.get() > 0;
-        poolSize = debugManager.flags.EnableDeviceUsmAllocationPool.get() * MemoryConstants::megaByte;
+        usmDevicePoolParams.poolSize = debugManager.flags.EnableDeviceUsmAllocationPool.get() * MemoryConstants::megaByte;
     }
     if (enabled) {
         auto subDeviceBitfields = getDeviceBitfields();
@@ -541,14 +567,14 @@ void Context::initializeUsmAllocationPools() {
         SVMAllocsManager::UnifiedMemoryProperties memoryProperties(InternalMemoryType::deviceUnifiedMemory, MemoryConstants::pageSize2M,
                                                                    getRootDeviceIndices(), subDeviceBitfields);
         memoryProperties.device = &neoDevice;
-        usmDeviceMemAllocPool.initialize(svmMemoryManager, memoryProperties, poolSize, 0u, 1 * MemoryConstants::megaByte);
+        usmDeviceMemAllocPool.initialize(svmMemoryManager, memoryProperties, usmDevicePoolParams.poolSize, usmDevicePoolParams.minServicedSize, usmDevicePoolParams.maxServicedSize);
     }
 
-    enabled = ApiSpecificConfig::isHostUsmPoolingEnabled() && productHelper.isUsmPoolAllocatorSupported();
-    poolSize = 2 * MemoryConstants::megaByte;
+    enabled = ApiSpecificConfig::isHostUsmPoolingEnabled() && productHelper.isHostUsmPoolAllocatorSupported();
+    auto usmHostPoolParams = getUsmHostPoolParams();
     if (debugManager.flags.EnableHostUsmAllocationPool.get() != -1) {
         enabled = debugManager.flags.EnableHostUsmAllocationPool.get() > 0;
-        poolSize = debugManager.flags.EnableHostUsmAllocationPool.get() * MemoryConstants::megaByte;
+        usmHostPoolParams.poolSize = debugManager.flags.EnableHostUsmAllocationPool.get() * MemoryConstants::megaByte;
     }
     if (enabled) {
         auto subDeviceBitfields = getDeviceBitfields();
@@ -556,7 +582,7 @@ void Context::initializeUsmAllocationPools() {
         subDeviceBitfields[neoDevice.getRootDeviceIndex()] = neoDevice.getDeviceBitfield();
         SVMAllocsManager::UnifiedMemoryProperties memoryProperties(InternalMemoryType::hostUnifiedMemory, MemoryConstants::pageSize2M,
                                                                    getRootDeviceIndices(), subDeviceBitfields);
-        usmHostMemAllocPool.initialize(svmMemoryManager, memoryProperties, poolSize, 0u, 1 * MemoryConstants::megaByte);
+        usmHostMemAllocPool.initialize(svmMemoryManager, memoryProperties, usmHostPoolParams.poolSize, usmHostPoolParams.minServicedSize, usmHostPoolParams.maxServicedSize);
     }
     this->usmPoolInitialized = true;
 }
@@ -584,7 +610,9 @@ bool Context::BufferPoolAllocator::isAggregatedSmallBuffersEnabled(Context *cont
            (isSupportedForSingleDeviceContexts && context->isSingleDeviceContext());
 }
 
-Context::BufferPool::BufferPool(Context *context) : BaseType(context->memoryManager, nullptr) {
+Context::BufferPool::BufferPool(Context *context) : BaseType(context->memoryManager,
+                                                             nullptr,
+                                                             SmallBuffersParams::getPreferredBufferPoolParams(context->getDevice(0)->getDevice().getProductHelper())) {
     static constexpr cl_mem_flags flags = CL_MEM_UNCOMPRESSED_HINT_INTEL;
     [[maybe_unused]] cl_int errcodeRet{};
     Buffer::AdditionalBufferCreateArgs bufferCreateArgs{};
@@ -592,14 +620,14 @@ Context::BufferPool::BufferPool(Context *context) : BaseType(context->memoryMana
     bufferCreateArgs.makeAllocationLockable = true;
     this->mainStorage.reset(Buffer::create(context,
                                            flags,
-                                           BufferPoolAllocator::aggregatedSmallBuffersPoolSize,
+                                           context->getBufferPoolAllocator().getParams().aggregatedSmallBuffersPoolSize,
                                            nullptr,
                                            bufferCreateArgs,
                                            errcodeRet));
     if (this->mainStorage) {
-        this->chunkAllocator.reset(new HeapAllocator(BufferPool::startingOffset,
-                                                     BufferPoolAllocator::aggregatedSmallBuffersPoolSize,
-                                                     BufferPoolAllocator::chunkAlignment));
+        this->chunkAllocator.reset(new HeapAllocator(params.startingOffset,
+                                                     context->getBufferPoolAllocator().getParams().aggregatedSmallBuffersPoolSize,
+                                                     context->getBufferPoolAllocator().getParams().chunkAlignment));
         context->decRefInternal();
     }
 }
@@ -620,7 +648,7 @@ Buffer *Context::BufferPool::allocate(const MemoryProperties &memoryProperties,
     if (bufferRegion.origin == 0) {
         return nullptr;
     }
-    bufferRegion.origin -= BufferPool::startingOffset;
+    bufferRegion.origin -= params.startingOffset;
     bufferRegion.size = requestedSize;
     auto bufferFromPool = this->mainStorage->createSubBuffer(flags, flagsIntel, &bufferRegion, errcodeRet);
     bufferFromPool->createFunction = this->mainStorage->createFunction;

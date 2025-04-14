@@ -70,16 +70,12 @@ const RuntimeCapabilityTable PVC::capabilityTable{
     true,                                                      // ftrSupports64BitMath
     true,                                                      // ftrSvm
     false,                                                     // ftrSupportsCoherency
-    false,                                                     // ftrSupportsVmeAvcTextureSampler
-    false,                                                     // ftrSupportsVmeAvcPreemption
     false,                                                     // ftrRenderCompressedBuffers
     false,                                                     // ftrRenderCompressedImages
     true,                                                      // ftr64KBpages
     true,                                                      // instrumentationEnabled
-    false,                                                     // supportsVme
     false,                                                     // supportCacheFlushAfterWalker
     false,                                                     // supportsImages
-    false,                                                     // supportsDeviceEnqueue
     false,                                                     // supportsPipes
     true,                                                      // supportsOcl21Features
     true,                                                      // supportsOnDemandPageFaults

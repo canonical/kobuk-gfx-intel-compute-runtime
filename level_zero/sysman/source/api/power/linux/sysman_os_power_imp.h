@@ -21,7 +21,7 @@ class SysFsAccessInterface;
 class SysmanKmdInterface;
 class SysmanProductHelper;
 class LinuxSysmanImp;
-class LinuxPowerImp : public OsPower, NEO::NonCopyableOrMovableClass {
+class LinuxPowerImp : public OsPower, NEO::NonCopyableAndNonMovableClass {
   public:
     ze_result_t getProperties(zes_power_properties_t *pProperties) override;
     ze_result_t getEnergyCounter(zes_power_energy_counter_t *pEnergy) override;
@@ -49,14 +49,17 @@ class LinuxPowerImp : public OsPower, NEO::NonCopyableOrMovableClass {
 
   private:
     std::string intelGraphicsHwmonDir = {};
-    std::string criticalPowerLimit = {};
-    std::string sustainedPowerLimit = {};
-    std::string sustainedPowerLimitInterval = {};
+    std::string energyCounterNodeFile = {};
+    std::string criticalPowerLimitFile = {};
+    std::string sustainedPowerLimitFile = {};
+    std::string sustainedPowerLimitIntervalFile = {};
+    bool sustainedPowerLimitFileExists = false;
+    bool criticalPowerLimitFileExists = false;
     bool canControl = false;
     bool isSubdevice = false;
     uint32_t subdeviceId = 0;
     uint32_t powerLimitCount = 0;
-    zes_power_domain_t powerDomain = ZES_POWER_DOMAIN_CARD;
+    zes_power_domain_t powerDomain = ZES_POWER_DOMAIN_UNKNOWN;
 
     ze_result_t getErrorCode(ze_result_t result) {
         if (result == ZE_RESULT_ERROR_NOT_AVAILABLE) {
@@ -66,6 +69,7 @@ class LinuxPowerImp : public OsPower, NEO::NonCopyableOrMovableClass {
     }
 
     ze_result_t getDefaultLimit(int32_t &defaultLimit);
+    void init();
 };
 } // namespace Sysman
 } // namespace L0

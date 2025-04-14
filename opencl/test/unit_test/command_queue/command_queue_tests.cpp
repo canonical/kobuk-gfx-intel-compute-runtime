@@ -290,6 +290,14 @@ TEST(CommandQueue, givenDeviceWhenCreatingCommandQueueThenPickCsrFromDefaultEngi
     EXPECT_EQ(defaultCsr, &cmdQ.getGpgpuCommandStreamReceiver());
 }
 
+TEST(CommandQueue, givenDirectSubmissionLightWhenCreateCmdQThenDisallowBlitter) {
+    auto mockDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    mockDevice->device.anyDirectSubmissionEnabledReturnValue = true;
+    MockCommandQueue cmdQ(nullptr, mockDevice.get(), 0, false);
+
+    EXPECT_FALSE(cmdQ.bcsAllowed);
+}
+
 TEST(CommandQueue, givenDeviceNotSupportingBlitOperationsWhenQueueIsCreatedThenDontRegisterAnyBcsCsrs) {
     HardwareInfo hwInfo = *defaultHwInfo;
     hwInfo.capabilityTable.blitterOperationsSupported = false;
@@ -3327,13 +3335,15 @@ HWTEST_F(CsrSelectionCommandQueueWithBlitterTests, givenBlitterAndBcsEnqueueNotP
         {true, true, ccsCsr}    // OOQ & CCS idle -> CCS
     };
 
+    const auto initialTagAddress = queue->heaplessStateInitEnabled ? 1 : 0;
+
     for (auto &state : queueState) {
         auto queue = std::make_unique<MockCommandQueue>(context.get(), clDevice.get(), queueProperties, false);
         if (state.isOOQ) {
             queue->setOoqEnabled();
         }
 
-        *ccsCsr->tagAddress = 0u;
+        *ccsCsr->tagAddress = initialTagAddress;
         ccsCsr->taskCount = 1u;
         if (state.isIdle) {
             ccsCsr->taskCount = 0u;

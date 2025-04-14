@@ -172,6 +172,26 @@ void CommandListCoreFamily<gfxCoreFamily>::handleInOrderDependencyCounter(Event 
         return;
     }
 
+    this->handleInOrderCounterOverflow(copyOffloadOperation);
+
+    inOrderExecInfo->addCounterValue(getInOrderIncrementValue());
+
+    this->commandContainer.addToResidencyContainer(inOrderExecInfo->getDeviceCounterAllocation());
+    this->commandContainer.addToResidencyContainer(inOrderExecInfo->getHostCounterAllocation());
+
+    if (signalEvent && signalEvent->getInOrderIncrementValue() == 0) {
+        if (signalEvent->isCounterBased() || nonWalkerInOrderCmdsChaining || (isImmediateType() && this->duplicatedInOrderCounterStorageEnabled)) {
+            signalEvent->updateInOrderExecState(inOrderExecInfo, inOrderExecInfo->getCounterValue(), inOrderExecInfo->getAllocationOffset());
+        } else {
+            signalEvent->unsetInOrderExecInfo();
+        }
+    }
+
+    this->latestOperationRequiredNonWalkerInOrderCmdsChaining = nonWalkerInOrderCmdsChaining;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+void CommandListCoreFamily<gfxCoreFamily>::handleInOrderCounterOverflow(bool copyOffloadOperation) {
     if (!isQwordInOrderCounter() && ((inOrderExecInfo->getCounterValue() + 1) == std::numeric_limits<uint32_t>::max())) {
         CommandListCoreFamily<gfxCoreFamily>::appendWaitOnInOrderDependency(inOrderExecInfo, nullptr, inOrderExecInfo->getCounterValue() + 1, inOrderExecInfo->getAllocationOffset(), false, true, false, false, copyOffloadOperation);
 
@@ -188,21 +208,6 @@ void CommandListCoreFamily<gfxCoreFamily>::handleInOrderDependencyCounter(Event 
 
         CommandListCoreFamily<gfxCoreFamily>::appendSignalInOrderDependencyCounter(nullptr, copyOffloadOperation, false); // signal counter on new offset
     }
-
-    inOrderExecInfo->addCounterValue(getInOrderIncrementValue());
-
-    this->commandContainer.addToResidencyContainer(inOrderExecInfo->getDeviceCounterAllocation());
-    this->commandContainer.addToResidencyContainer(inOrderExecInfo->getHostCounterAllocation());
-
-    if (signalEvent) {
-        if (signalEvent->isCounterBased() || nonWalkerInOrderCmdsChaining || (isImmediateType() && this->duplicatedInOrderCounterStorageEnabled)) {
-            signalEvent->updateInOrderExecState(inOrderExecInfo, inOrderExecInfo->getCounterValue(), inOrderExecInfo->getAllocationOffset());
-        } else {
-            signalEvent->unsetInOrderExecInfo();
-        }
-    }
-
-    this->latestOperationRequiredNonWalkerInOrderCmdsChaining = nonWalkerInOrderCmdsChaining;
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -255,6 +260,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::initialize(Device *device, NEO
     this->copyOperationFenceSupported = (isCopyOnly(false) || isCopyOffloadEnabled()) && productHelper.isDeviceToHostCopySignalingFenceRequired();
     this->defaultPipelinedThreadArbitrationPolicy = gfxCoreHelper.getDefaultThreadArbitrationPolicy();
     this->implicitSynchronizedDispatchForCooperativeKernelsAllowed = l0GfxCoreHelper.implicitSynchronizedDispatchForCooperativeKernelsAllowed();
+    this->maxLocalSubRegionSize = productHelper.getMaxLocalSubRegionSize(hwInfo);
     if (NEO::debugManager.flags.OverrideThreadArbitrationPolicy.get() != -1) {
         this->defaultPipelinedThreadArbitrationPolicy = NEO::debugManager.flags.OverrideThreadArbitrationPolicy.get();
     }
@@ -428,7 +434,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernel(ze_kernel_h
                                             event, launchParams);
 
     if (!launchParams.skipInOrderNonWalkerSignaling) {
-        handleInOrderDependencyCounter(event, isInOrderNonWalkerSignalingRequired(event), false);
+        handleInOrderDependencyCounter(event, isInOrderNonWalkerSignalingRequired(event) && !(event && event->isCounterBased() && event->isUsingContextEndOffset()), false);
     }
 
     appendSynchronizedDispatchCleanupSection();
@@ -1050,7 +1056,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendImageCopyToMemoryExt(voi
         return ZE_RESULT_ERROR_UNKNOWN;
     }
 
-    if (this->device->getNEODevice()->isAnyDirectSubmissionEnabled()) {
+    if (this->device->getNEODevice()->isAnyDirectSubmissionEnabled(false)) {
         NEO::PipeControlArgs pipeControlArgs;
         pipeControlArgs.textureCacheInvalidationEnable = true;
         NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), pipeControlArgs);
@@ -2327,15 +2333,15 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendBlitFill(void *ptr,
             }
         }
 
-        uint64_t offset = getAllocationOffsetForAppendBlitFill(ptr, *gpuAllocation);
+        auto offset = getAllocationOffsetForAppendBlitFill(ptr, *gpuAllocation);
 
         commandContainer.addToResidencyContainer(gpuAllocation);
         uint32_t patternToCommand[4] = {};
         memcpy_s(&patternToCommand, sizeof(patternToCommand), pattern, patternSize);
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryColorFill(gpuAllocation, offset, patternToCommand, patternSize,
-                                                                        *commandContainer.getCommandStream(),
-                                                                        size,
-                                                                        neoDevice->getRootDeviceEnvironmentRef());
+
+        auto blitProperties = NEO::BlitProperties::constructPropertiesForMemoryFill(gpuAllocation, size, patternToCommand, patternSize, offset);
+
+        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryColorFill(blitProperties, *commandContainer.getCommandStream(), neoDevice->getRootDeviceEnvironmentRef());
         dummyBlitWa.isWaRequired = true;
 
         appendSignalEventPostWalker(signalEvent, nullptr, nullptr, false, false, true);
@@ -2527,6 +2533,11 @@ inline ze_result_t CommandListCoreFamily<gfxCoreFamily>::addEventsToCmdList(uint
     }
 
     if (waitForImplicitInOrderDependency) {
+        auto ret = this->flushInOrderCounterSignal(copyOffloadOperation || relaxedOrderingAllowed);
+        if (ret != ZE_RESULT_SUCCESS) {
+            return ret;
+        }
+
         inOrderDependenciesSent = handleInOrderImplicitDependencies(relaxedOrderingAllowed, copyOffloadOperation);
     }
 
@@ -2628,7 +2639,7 @@ void CommandListCoreFamily<gfxCoreFamily>::appendWaitOnInOrderDependency(std::sh
             NEO::EncodeBatchBufferStartOrEnd<GfxFamily>::programConditionalDataMemBatchBufferStart(*commandContainer.getCommandStream(), 0, gpuAddress, waitValue, NEO::CompareOperation::less, true, isQwordInOrderCounter(), isCopyOnly(copyOffloadOperation));
 
         } else {
-            auto resolveDependenciesViaPipeControls = !this->isCopyOnly(copyOffloadOperation) && !this->asMutable() && implicitDependency && this->dcFlushSupport;
+            auto resolveDependenciesViaPipeControls = !this->isCopyOnly(copyOffloadOperation) && !this->asMutable() && implicitDependency && (this->dcFlushSupport || !this->heaplessModeEnabled);
 
             if (NEO::debugManager.flags.ResolveDependenciesViaPipeControls.get() != -1) {
                 resolveDependenciesViaPipeControls = NEO::debugManager.flags.ResolveDependenciesViaPipeControls.get();
@@ -2646,6 +2657,9 @@ void CommandListCoreFamily<gfxCoreFamily>::appendWaitOnInOrderDependency(std::sh
                 bool indirectMode = false;
 
                 size_t inOrderPatchListIndex = std::numeric_limits<size_t>::max();
+
+                bool patchingRequired = inOrderExecInfo->isRegularCmdList() && !inOrderExecInfo->isExternalMemoryExecInfo();
+
                 if (isQwordInOrderCounter()) {
                     indirectMode = true;
 
@@ -2663,7 +2677,7 @@ void CommandListCoreFamily<gfxCoreFamily>::appendWaitOnInOrderDependency(std::sh
                         memset(lri2, 0, sizeof(MI_LOAD_REGISTER_IMM));
                     }
 
-                    if (inOrderExecInfo->isRegularCmdList()) {
+                    if (patchingRequired) {
                         inOrderPatchListIndex = addCmdForPatching((implicitDependency ? nullptr : &inOrderExecInfo), lri1, lri2, waitValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::lri64b);
                         if (noopDispatch) {
                             disablePatching(inOrderPatchListIndex);
@@ -2693,7 +2707,7 @@ void CommandListCoreFamily<gfxCoreFamily>::appendWaitOnInOrderDependency(std::sh
                     memset(semaphoreCommand, 0, sizeof(MI_SEMAPHORE_WAIT));
                 }
 
-                if (inOrderExecInfo->isRegularCmdList() && !isQwordInOrderCounter()) {
+                if (patchingRequired && !isQwordInOrderCounter()) {
                     inOrderPatchListIndex = addCmdForPatching((implicitDependency ? nullptr : &inOrderExecInfo), semaphoreCommand, nullptr, waitValue, NEO::InOrderPatchCommandHelpers::PatchCmdType::semaphore);
                     if (noopDispatch) {
                         disablePatching(inOrderPatchListIndex);
@@ -2775,7 +2789,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendWaitOnEvents(uint32_t nu
             continue;
         }
 
-        if (event->isCounterBased()) {
+        if (event->isCounterBased() && (this->heaplessModeEnabled || !event->hasInOrderTimestampNode() || this->asMutable())) {
             // 1. Regular CmdList adds submission counter to base value on each Execute
             // 2. Immediate CmdList takes current value (with submission counter)
             auto waitValue = !isImmediateType() ? event->getInOrderExecBaseSignalValue() : event->getInOrderExecSignalValueWithSubmissionCounter();
@@ -2853,6 +2867,9 @@ void CommandListCoreFamily<gfxCoreFamily>::appendSdiInOrderCounterSignalling(uin
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandListCoreFamily<gfxCoreFamily>::appendSignalInOrderDependencyCounter(Event *signalEvent, bool copyOffloadOperation, bool stall) {
+    using ATOMIC_OPCODES = typename GfxFamily::MI_ATOMIC::ATOMIC_OPCODES;
+    using DATA_SIZE = typename GfxFamily::MI_ATOMIC::DATA_SIZE;
+
     uint64_t deviceAllocGpuVa = inOrderExecInfo->getBaseDeviceAddress();
     uint64_t signalValue = inOrderExecInfo->getCounterValue() + getInOrderIncrementValue();
 
@@ -2872,9 +2889,6 @@ void CommandListCoreFamily<gfxCoreFamily>::appendSignalInOrderDependencyCounter(
             args);
 
     } else if (this->inOrderAtomicSignalingEnabled) {
-        using ATOMIC_OPCODES = typename GfxFamily::MI_ATOMIC::ATOMIC_OPCODES;
-        using DATA_SIZE = typename GfxFamily::MI_ATOMIC::DATA_SIZE;
-
         ATOMIC_OPCODES opcode = ATOMIC_OPCODES::ATOMIC_8B_INCREMENT;
         uint64_t operand1Data = 0;
 
@@ -2892,6 +2906,11 @@ void CommandListCoreFamily<gfxCoreFamily>::appendSignalInOrderDependencyCounter(
 
     if (inOrderExecInfo->isHostStorageDuplicated()) {
         appendSdiInOrderCounterSignalling(inOrderExecInfo->getBaseHostGpuAddress(), signalValue, copyOffloadOperation);
+    }
+
+    if (signalEvent && signalEvent->getInOrderIncrementValue() > 0) {
+        NEO::EncodeAtomic<GfxFamily>::programMiAtomic(*cmdStream, signalEvent->getInOrderExecInfo()->getBaseDeviceAddress(), ATOMIC_OPCODES::ATOMIC_8B_ADD,
+                                                      DATA_SIZE::DATA_SIZE_QWORD, 0, 0, signalEvent->getInOrderIncrementValue(), 0);
     }
 
     if ((NEO::debugManager.flags.ProgramUserInterruptOnResolvedDependency.get() == 1 || copyOffloadOperation) && signalEvent && signalEvent->isInterruptModeEnabled()) {
@@ -3998,7 +4017,7 @@ void CommandListCoreFamily<gfxCoreFamily>::dispatchPostSyncCommands(const CmdLis
             if (isImmediateType()) {
                 pipeControlArgs.constantCacheInvalidationEnable = getCsr(false)->isDirectSubmissionEnabled();
             } else {
-                pipeControlArgs.constantCacheInvalidationEnable = this->device->getNEODevice()->isAnyDirectSubmissionEnabled();
+                pipeControlArgs.constantCacheInvalidationEnable = this->device->getNEODevice()->isAnyDirectSubmissionEnabled(false);
             }
         }
 
@@ -4166,10 +4185,10 @@ bool CommandListCoreFamily<gfxCoreFamily>::handleCounterBasedEventOperations(Eve
         }
 
         if (signalEvent->isUsingContextEndOffset() && Event::standaloneInOrderTimestampAllocationEnabled()) {
-            signalEvent->resetInOrderTimestampNode(device->getInOrderTimestampAllocator()->getTag());
-            if (NEO::debugManager.flags.ClearStandaloneInOrderTimestampAllocation.get() != 0) {
-                signalEvent->hostEventSetValue(Event::STATE_INITIAL);
-            }
+            auto tag = device->getInOrderTimestampAllocator()->getTag();
+
+            this->commandContainer.addToResidencyContainer(tag->getBaseGraphicsAllocation()->getGraphicsAllocation(device->getRootDeviceIndex()));
+            signalEvent->resetInOrderTimestampNode(tag, this->partitionCount);
         }
     }
 

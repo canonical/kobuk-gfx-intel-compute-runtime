@@ -105,7 +105,7 @@ cl_int CL_API_CALL clGetPlatformIDs(cl_uint numEntries,
                 retVal = CL_OUT_OF_HOST_MEMORY;
                 break;
             }
-            auto groupedDevices = Platform::groupDevices(std::move(allDevices));
+            auto groupedDevices = Device::groupDevices(std::move(allDevices));
             for (auto &deviceVector : groupedDevices) {
 
                 auto pPlatform = Platform::createFunc(*executionEnvironment);
@@ -616,9 +616,6 @@ cl_command_queue CL_API_CALL clCreateCommandQueue(cl_context context,
             pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, DRIVER_CALLS_INTERNAL_CL_FLUSH);
             if (castToObjectOrAbort<CommandQueue>(commandQueue)->isProfilingEnabled()) {
                 pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, PROFILING_ENABLED);
-                if (pDevice->getDeviceInfo().preemptionSupported && pDevice->getHardwareInfo().platform.eProductFamily < IGFX_SKYLAKE) {
-                    pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, PROFILING_ENABLED_WITH_DISABLED_PREEMPTION);
-                }
             }
         }
     } while (false);
@@ -696,7 +693,7 @@ cl_int CL_API_CALL clSetCommandQueueProperty(cl_command_queue commandQueue,
                                              cl_bool enable,
                                              cl_command_queue_properties *oldProperties) {
     TRACING_ENTER(ClSetCommandQueueProperty, &commandQueue, &properties, &enable, &oldProperties);
-    cl_int retVal = CL_INVALID_VALUE;
+    cl_int retVal = CL_INVALID_OPERATION;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("commandQueue", commandQueue,
                    "properties", properties,
@@ -2545,7 +2542,7 @@ cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue commandQueue,
             return retVal;
         }
 
-        if (pCommandQueue->isValidForStagingTransfer(pBuffer, ptr, numEventsInWaitList > 0)) {
+        if (pCommandQueue->isValidForStagingTransfer(pBuffer, ptr, cb, CL_COMMAND_WRITE_BUFFER, blockingWrite, numEventsInWaitList > 0)) {
             retVal = pCommandQueue->enqueueStagingWriteBuffer(
                 pBuffer,
                 blockingWrite,
@@ -2902,18 +2899,22 @@ cl_int CL_API_CALL clEnqueueReadImage(cl_command_queue commandQueue,
             return retVal;
         }
 
-        retVal = pCommandQueue->enqueueReadImage(
-            pImage,
-            blockingRead,
-            origin,
-            region,
-            rowPitch,
-            slicePitch,
-            ptr,
-            nullptr,
-            numEventsInWaitList,
-            eventWaitList,
-            event);
+        if (pCommandQueue->isValidForStagingTransfer(pImage, ptr, pImage->getSize(), CL_COMMAND_READ_IMAGE, blockingRead, numEventsInWaitList > 0)) {
+            retVal = pCommandQueue->enqueueStagingImageTransfer(CL_COMMAND_READ_IMAGE, pImage, blockingRead, origin, region, rowPitch, slicePitch, ptr, event);
+        } else {
+            retVal = pCommandQueue->enqueueReadImage(
+                pImage,
+                blockingRead,
+                origin,
+                region,
+                rowPitch,
+                slicePitch,
+                ptr,
+                nullptr,
+                numEventsInWaitList,
+                eventWaitList,
+                event);
+        }
     }
     DBG_LOG_INPUTS("event", getClFileLogger().getEvents(reinterpret_cast<const uintptr_t *>(event), 1u));
     TRACING_EXIT(ClEnqueueReadImage, &retVal);
@@ -2974,7 +2975,7 @@ cl_int CL_API_CALL clEnqueueWriteImage(cl_command_queue commandQueue,
             TRACING_EXIT(ClEnqueueWriteImage, &retVal);
             return retVal;
         }
-        if (pCommandQueue->isValidForStagingTransfer(pImage, ptr, numEventsInWaitList > 0)) {
+        if (pCommandQueue->isValidForStagingTransfer(pImage, ptr, pImage->getSize(), CL_COMMAND_WRITE_IMAGE, blockingWrite, numEventsInWaitList > 0)) {
             retVal = pCommandQueue->enqueueStagingImageTransfer(CL_COMMAND_WRITE_IMAGE, pImage, blockingWrite, origin, region, inputRowPitch, inputSlicePitch, ptr, event);
         } else {
             retVal = pCommandQueue->enqueueWriteImage(
@@ -5617,9 +5618,6 @@ cl_command_queue CL_API_CALL clCreateCommandQueueWithProperties(cl_context conte
         pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, DRIVER_CALLS_INTERNAL_CL_FLUSH);
         if (castToObjectOrAbort<CommandQueue>(commandQueue)->isProfilingEnabled()) {
             pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, PROFILING_ENABLED);
-            if (pDevice->getDeviceInfo().preemptionSupported && pDevice->getHardwareInfo().platform.eProductFamily < IGFX_SKYLAKE) {
-                pContext->providePerformanceHint(CL_CONTEXT_DIAGNOSTICS_LEVEL_NEUTRAL_INTEL, PROFILING_ENABLED_WITH_DISABLED_PREEMPTION);
-            }
         }
     }
 

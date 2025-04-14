@@ -30,7 +30,7 @@ class DeviceAllocNodeType {
 
     static constexpr size_t defaultAllocatorTagCount = 128;
 
-    static constexpr AllocationType getAllocationType() { return deviceAlloc ? NEO::AllocationType::timestampPacketTagBuffer : NEO::AllocationType::bufferHostMemory; }
+    static constexpr AllocationType getAllocationType() { return deviceAlloc ? NEO::AllocationType::gpuTimestampDeviceBuffer : NEO::AllocationType::timestampPacketTagBuffer; }
 
     static constexpr TagNodeType getTagNodeType() { return TagNodeType::counter64b; }
 
@@ -84,7 +84,9 @@ class InOrderExecInfo : public NEO::NonCopyableClass {
     void reset();
     bool isExternalMemoryExecInfo() const { return deviceCounterNode == nullptr; }
     void setLastWaitedCounterValue(uint64_t value) {
-        lastWaitedCounterValue = std::max(value, lastWaitedCounterValue);
+        if (!isExternalMemoryExecInfo()) {
+            lastWaitedCounterValue = std::max(value, lastWaitedCounterValue);
+        }
     }
 
     bool isCounterAlreadyDone(uint64_t waitValue) const {
@@ -111,7 +113,6 @@ class InOrderExecInfo : public NEO::NonCopyableClass {
 
     uint64_t counterValue = 0;
     uint64_t lastWaitedCounterValue = 0;
-
     uint64_t regularCmdListSubmissionCounter = 0;
     uint64_t deviceAddress = 0;
     uint64_t *hostAddress = nullptr;

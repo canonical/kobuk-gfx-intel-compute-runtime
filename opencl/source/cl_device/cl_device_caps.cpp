@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -15,7 +15,9 @@
 #include "shared/source/helpers/hw_info_helper.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/kernel/kernel_properties.h"
+#include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/driver_info.h"
+#include "shared/source/utilities/buffer_pool_allocator.inl"
 
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/context/context.h"
@@ -190,16 +192,8 @@ void ClDevice::initializeCaps() {
     if (debugManager.flags.EnablePackedYuv.get() && hwInfo.capabilityTable.supportsImages) {
         deviceInfo.packedYuvExtension = true;
     }
-    auto supportsVme = hwInfo.capabilityTable.supportsVme;
-    if (debugManager.flags.EnableIntelVme.get() != -1) {
-        supportsVme = !!debugManager.flags.EnableIntelVme.get();
-    }
 
-    if (supportsVme) {
-        deviceInfo.vmeExtension = true;
-    }
-
-    auto sharingAllowed = (getNumGenericSubDevices() <= 1u);
+    auto sharingAllowed = (getNumGenericSubDevices() <= 1u) && productHelper.isSharingWith3dOrMediaAllowed();
     if (sharingAllowed) {
         deviceExtensions += sharingFactory.getExtensions(driverInfo.get());
     }
@@ -220,30 +214,7 @@ void ClDevice::initializeCaps() {
     }
 
     deviceInfo.deviceExtensions = deviceExtensions.c_str();
-
-    std::vector<std::string> exposedBuiltinKernelsVector;
-    if (supportsVme) {
-        exposedBuiltinKernelsVector.push_back("block_motion_estimate_intel");
-    }
-    auto supportsAdvancedVme = hwInfo.capabilityTable.supportsVme;
-
-    if (debugManager.flags.EnableIntelAdvancedVme.get() != -1) {
-        supportsAdvancedVme = !!debugManager.flags.EnableIntelAdvancedVme.get();
-    }
-    if (supportsAdvancedVme) {
-        exposedBuiltinKernelsVector.push_back("block_advanced_motion_estimate_check_intel");
-        exposedBuiltinKernelsVector.push_back("block_advanced_motion_estimate_bidirectional_check_intel");
-    }
-    for (auto &builtInKernel : exposedBuiltinKernelsVector) {
-        exposedBuiltinKernels.append(builtInKernel);
-        exposedBuiltinKernels.append(";");
-
-        cl_name_version kernelNameVersion;
-        kernelNameVersion.version = CL_MAKE_VERSION(1, 0, 0);
-        strcpy_s(kernelNameVersion.name, CL_NAME_VERSION_MAX_NAME_SIZE, builtInKernel.c_str());
-        deviceInfo.builtInKernelsWithVersion.push_back(kernelNameVersion);
-    }
-    deviceInfo.builtInKernels = exposedBuiltinKernels.c_str();
+    deviceInfo.builtInKernels = "";
 
     deviceInfo.deviceType = CL_DEVICE_TYPE_GPU;
     deviceInfo.endianLittle = 1;
@@ -385,11 +356,6 @@ void ClDevice::initializeCaps() {
     deviceInfo.planarYuvMaxWidth = 16384;
     deviceInfo.planarYuvMaxHeight = gfxCoreHelper.getPlanarYuvMaxHeight();
 
-    deviceInfo.vmeAvcSupportsTextureSampler = hwInfo.capabilityTable.ftrSupportsVmeAvcTextureSampler;
-    if (hwInfo.capabilityTable.supportsVme) {
-        deviceInfo.vmeAvcVersion = CL_AVC_ME_VERSION_1_INTEL;
-        deviceInfo.vmeVersion = CL_ME_VERSION_ADVANCED_VER_2_INTEL;
-    }
     deviceInfo.platformHostTimerResolution = getPlatformHostTimerResolution();
 
     deviceInfo.internalDriverVersion = CL_DEVICE_DRIVER_VERSION_INTEL_NEO1;
@@ -404,7 +370,9 @@ void ClDevice::initializeCaps() {
 
     deviceInfo.hostMemCapabilities = productHelper.getHostMemCapabilities(&hwInfo);
     deviceInfo.deviceMemCapabilities = productHelper.getDeviceMemCapabilities();
-    deviceInfo.singleDeviceSharedMemCapabilities = productHelper.getSingleDeviceSharedMemCapabilities();
+
+    const bool isKmdMigrationAvailable{getMemoryManager()->isKmdMigrationAvailable(getRootDeviceIndex())};
+    deviceInfo.singleDeviceSharedMemCapabilities = productHelper.getSingleDeviceSharedMemCapabilities(isKmdMigrationAvailable);
     deviceInfo.crossDeviceSharedMemCapabilities = productHelper.getCrossDeviceSharedMemCapabilities();
     deviceInfo.sharedSystemMemCapabilities = productHelper.getSharedSystemMemCapabilities(&hwInfo);
 
@@ -477,7 +445,8 @@ void ClDevice::initializeMaxPoolCount() {
     auto &device = getDevice();
     const auto bitfield = device.getDeviceBitfield();
     const auto deviceMemory = device.getGlobalMemorySize(static_cast<uint32_t>(bitfield.to_ulong()));
-    const auto maxPoolCount = Context::BufferPoolAllocator::calculateMaxPoolCount(deviceMemory, 2);
+    const auto preferredBufferPoolParams = SmallBuffersParams::getPreferredBufferPoolParams(device.getProductHelper());
+    const auto maxPoolCount = Context::BufferPoolAllocator::calculateMaxPoolCount(preferredBufferPoolParams, deviceMemory, 2);
     device.updateMaxPoolCount(maxPoolCount);
 }
 

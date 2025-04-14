@@ -238,7 +238,7 @@ cl_int CommandQueueHw<GfxFamily>::enqueueHandler(Surface **surfacesForResidency,
     }
 
     auto &commandStream = *obtainCommandStream<commandType>(csrDeps, false, blockQueue, multiDispatchInfo, eventsRequest,
-                                                            blockedCommandsData, surfacesForResidency, numSurfaceForResidency, canUsePipeControlInsteadOfSemaphoresForOnCsrDependencies, isFlushWithPostSyncWrite);
+                                                            blockedCommandsData, surfacesForResidency, numSurfaceForResidency, isFlushWithPostSyncWrite, canUsePipeControlInsteadOfSemaphoresForOnCsrDependencies);
     auto commandStreamStart = commandStream.getUsed();
 
     if (canUsePipeControlInsteadOfSemaphoresForOnCsrDependencies) {
@@ -1251,15 +1251,6 @@ void CommandQueueHw<GfxFamily>::computeOffsetsValueForRectCommands(size_t *buffe
     size_t computedHostSlicePitch = hostSlicePitch ? hostSlicePitch : region[1] * computedHostRowPitch;
     *bufferOffset = bufferOrigin[2] * computedBufferSlicePitch + bufferOrigin[1] * computedBufferRowPitch + bufferOrigin[0];
     *hostOffset = hostOrigin[2] * computedHostSlicePitch + hostOrigin[1] * computedHostRowPitch + hostOrigin[0];
-}
-
-template <typename GfxFamily>
-size_t CommandQueueHw<GfxFamily>::calculateHostPtrSizeForImage(const size_t *region, size_t rowPitch, size_t slicePitch, Image *image) {
-    auto bytesPerPixel = image->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
-    auto dstRowPitch = rowPitch ? rowPitch : region[0] * bytesPerPixel;
-    auto dstSlicePitch = slicePitch ? slicePitch : ((image->getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? 1 : region[1]) * dstRowPitch);
-
-    return Image::calculateHostPtrSize(region, dstRowPitch, dstSlicePitch, bytesPerPixel, image->getImageDesc().image_type);
 }
 
 template <typename GfxFamily>
