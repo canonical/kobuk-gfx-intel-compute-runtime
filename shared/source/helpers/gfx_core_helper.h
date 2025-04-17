@@ -74,7 +74,6 @@ class GfxCoreHelper {
     static uint32_t getHighestEnabledSlice(const HardwareInfo &hwInfo);
     static uint32_t getHighestEnabledDualSubSlice(const HardwareInfo &hwInfo);
     virtual bool timestampPacketWriteSupported() const = 0;
-    virtual bool isTimestampWaitSupportedForQueues() const = 0;
     virtual bool isUpdateTaskCountFromWaitSupported() const = 0;
     virtual bool makeResidentBeforeLockNeeded(bool precondition) const = 0;
     virtual size_t getRenderSurfaceStateSize() const = 0;
@@ -145,6 +144,7 @@ class GfxCoreHelper {
     virtual void setSipKernelData(uint32_t *&sipKernelBinary, size_t &kernelBinarySize, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual void adjustPreemptionSurfaceSize(size_t &csrSize, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual size_t getSamplerStateSize() const = 0;
+    virtual uint32_t getSamplerBorderColorStateSize() const = 0;
     virtual bool preferInternalBcsEngine() const = 0;
     virtual bool isScratchSpaceSurfaceStateAccessible() const = 0;
     virtual uint32_t getMaxScratchSize(const NEO::ProductHelper &productHelper) const = 0;
@@ -180,6 +180,8 @@ class GfxCoreHelper {
     virtual void initializeFromProductHelper(const ProductHelper &productHelper) = 0;
 
     virtual bool is48ResourceNeededForCmdBuffer() const = 0;
+    virtual bool isStateSipRequired() const = 0;
+
     virtual uint32_t getKernelPrivateMemSize(const KernelDescriptor &kernelDescriptor) const = 0;
 
     virtual bool singleTileExecImplicitScalingRequired(bool cooperativeKernel) const = 0;
@@ -198,6 +200,8 @@ class GfxCoreHelper {
 
     virtual uint32_t getDeviceTimestampWidth() const = 0;
     virtual void alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const = 0;
+    virtual bool getSipBinaryFromExternalLib() const = 0;
+    virtual uint32_t getImplicitArgsVersion() const = 0;
 
     virtual ~GfxCoreHelper() = default;
 
@@ -221,6 +225,10 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     size_t getSamplerStateSize() const override {
         using SAMPLER_STATE = typename GfxFamily::SAMPLER_STATE;
         return sizeof(SAMPLER_STATE);
+    }
+
+    uint32_t getSamplerBorderColorStateSize() const override {
+        return 64u;
     }
 
     uint32_t getBindlessSurfaceExtendedMessageDescriptorValue(uint32_t surfStateOffset) const override {
@@ -264,7 +272,6 @@ class GfxCoreHelperHw : public GfxCoreHelper {
 
     bool timestampPacketWriteSupported() const override;
 
-    bool isTimestampWaitSupportedForQueues() const override;
     bool isUpdateTaskCountFromWaitSupported() const override;
 
     bool is1MbAlignmentSupported(const HardwareInfo &hwInfo, bool isCompressionEnabled) const override;
@@ -417,6 +424,7 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     void initializeFromProductHelper(const ProductHelper &productHelper) override;
 
     bool is48ResourceNeededForCmdBuffer() const override;
+    bool isStateSipRequired() const override;
 
     uint32_t getKernelPrivateMemSize(const KernelDescriptor &kernelDescriptor) const override;
 
@@ -436,6 +444,9 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     bool usmCompressionSupported(const NEO::HardwareInfo &hwInfo) const override;
 
     uint32_t getDeviceTimestampWidth() const override;
+    uint32_t getImplicitArgsVersion() const override;
+
+    bool getSipBinaryFromExternalLib() const override;
 
     ~GfxCoreHelperHw() override = default;
 

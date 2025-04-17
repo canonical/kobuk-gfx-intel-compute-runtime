@@ -11,6 +11,7 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/page_table_mngr.h"
 #include "shared/source/gmm_helper/resource_info.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/flush_stamp.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
@@ -23,7 +24,6 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/sys_calls_common.h"
 #include "shared/test/common/helpers/batch_buffer_helper.h"
-#include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
@@ -409,6 +409,8 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenCheckFlagsWhenFlushingThenSucceeds
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenCheckDrmFreeWhenFlushingThenSucceeds) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
     mock->returnHandle = 17;
 
     auto &cs = csr->getCS();
@@ -567,6 +569,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBatchingTests, givenCsrWhenDispatchPolicyIsSe
     size_t csrSurfaceCount = (device->getPreemptionMode() == PreemptionMode::MidThread) ? 2 : 0;
     csrSurfaceCount += testedCsr->globalFenceAllocation ? 1 : 0;
     csrSurfaceCount += testedCsr->clearColorAllocation ? 1 : 0;
+    csrSurfaceCount += device->getRTMemoryBackedBuffer() ? 1u : 0u;
 
     auto recordedCmdBuffer = cmdBuffers.peekHead();
     EXPECT_EQ(3u + csrSurfaceCount, recordedCmdBuffer->surfaces.size());
@@ -641,6 +644,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamBatchingTests, givenRecordedCommandBufferWhen
     size_t csrSurfaceCount = (device->getPreemptionMode() == PreemptionMode::MidThread) ? 2 : 0;
     csrSurfaceCount += testedCsr->globalFenceAllocation ? 1 : 0;
     csrSurfaceCount += testedCsr->clearColorAllocation ? 1 : 0;
+    csrSurfaceCount += device->getRTMemoryBackedBuffer() ? 1u : 0u;
 
     // validate that submited command buffer has what we want
     EXPECT_EQ(3u + csrSurfaceCount, this->mock->execBuffer.getBufferCount());
@@ -740,28 +744,6 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenFailingExecWhenFlushingThe
     mm->freeGraphicsMemory(allocation);
     mm->freeGraphicsMemory(commandBuffer);
 }
-
-struct DrmCommandStreamDirectSubmissionTest : public DrmCommandStreamEnhancedTest {
-    template <typename GfxFamily>
-    void setUpT() {
-        debugManager.flags.EnableDirectSubmission.set(1u);
-        debugManager.flags.DirectSubmissionDisableMonitorFence.set(0);
-        debugManager.flags.DirectSubmissionFlatRingBuffer.set(0);
-        DrmCommandStreamEnhancedTest::setUpT<GfxFamily>();
-        auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
-        auto engineType = device->getDefaultEngine().osContext->getEngineType();
-        hwInfo->capabilityTable.directSubmissionEngines.data[engineType].engineSupported = true;
-        csr->initDirectSubmission();
-    }
-
-    template <typename GfxFamily>
-    void tearDownT() {
-        this->dbgState.reset();
-        DrmCommandStreamEnhancedTest::tearDownT<GfxFamily>();
-    }
-
-    DebugManagerStateRestore restorer;
-};
 
 struct DrmCommandStreamBlitterDirectSubmissionTest : public DrmCommandStreamDirectSubmissionTest {
     template <typename GfxFamily>
@@ -994,11 +976,31 @@ HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmi
     batchBuffer.startOffset = 4;
     uint8_t bbStart[64];
     batchBuffer.endCmdPtr = &bbStart[0];
+    static_cast<DrmMockCustom *>(static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->drm)->isVmBindAvailableCall.callParent = false;
 
     auto flushStamp = csr->obtainCurrentFlushStamp();
     csr->flush(batchBuffer, csr->getResidencyAllocations());
 
     EXPECT_EQ(csr->obtainCurrentFlushStamp(), flushStamp);
+
+    auto directSubmission = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->directSubmission.get();
+    ASSERT_NE(nullptr, directSubmission);
+    static_cast<MockDrmDirectSubmission<FamilyType> *>(directSubmission)->currentTagData.tagValue = 0u;
+}
+
+HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionLightWhenFlushThenFlushStampIsUpdated) {
+    auto &cs = csr->getCS();
+    CommandStreamReceiverHw<FamilyType>::addBatchBufferEnd(cs, nullptr);
+    EncodeNoop<FamilyType>::alignToCacheLine(cs);
+    BatchBuffer batchBuffer = BatchBufferHelper::createDefaultBatchBuffer(cs.getGraphicsAllocation(), &cs, cs.getUsed());
+    batchBuffer.startOffset = 4;
+    uint8_t bbStart[64];
+    batchBuffer.endCmdPtr = &bbStart[0];
+
+    auto flushStamp = csr->obtainCurrentFlushStamp();
+    csr->flush(batchBuffer, csr->getResidencyAllocations());
+
+    EXPECT_NE(csr->obtainCurrentFlushStamp(), flushStamp);
 
     auto directSubmission = static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->directSubmission.get();
     ASSERT_NE(nullptr, directSubmission);

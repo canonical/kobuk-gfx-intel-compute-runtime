@@ -1,11 +1,15 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
+#include "shared/source/os_interface/product_helper.inl"
+#include "shared/source/os_interface/product_helper_from_xe_hpg_to_xe3.inl"
+#include "shared/source/os_interface/product_helper_xe2_and_later.inl"
 #include "shared/source/os_interface/product_helper_xe_hpc_and_later.inl"
+#include "shared/source/os_interface/product_helper_xe_hpg_and_later.inl"
 
 namespace NEO {
 

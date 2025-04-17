@@ -1599,6 +1599,8 @@ using RayTracingMatcher = IsAtLeastXeHpCore;
 using CommandListAppendLaunchRayTracingKernelTest = Test<CommandListAppendLaunchRayTracingKernelFixture>;
 
 HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenKernelUsingRayTracingWhenAppendLaunchKernelIsCalledThenSuccessIsReturned, RayTracingMatcher) {
+    VariableBackup<GraphicsAllocation *> rtMemoryBackedBuffer{&neoDevice->rtMemoryBackedBuffer};
+
     Mock<::L0::KernelImp> kernel;
     auto pMockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = pMockModule.get();
@@ -1611,7 +1613,7 @@ HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenKernelUsingRayTracin
 
     kernel.immutableData.kernelDescriptor->kernelAttributes.flags.hasRTCalls = true;
 
-    neoDevice->rtMemoryBackedBuffer = nullptr;
+    rtMemoryBackedBuffer = nullptr;
     CmdListKernelLaunchParams launchParams = {};
     result = pCommandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
     EXPECT_NE(ZE_RESULT_SUCCESS, result);
@@ -1620,10 +1622,12 @@ HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenKernelUsingRayTracin
     result = pCommandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-    neoDevice->rtMemoryBackedBuffer = nullptr;
+    rtMemoryBackedBuffer = buffer1;
 }
 
 HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenDcFlushMitigationWhenAppendLaunchKernelWithRayTracingIsCalledThenRequireDcFlush, RayTracingMatcher) {
+    VariableBackup<GraphicsAllocation *> rtMemoryBackedBuffer{&neoDevice->rtMemoryBackedBuffer, buffer1};
+
     DebugManagerStateRestore restorer;
     debugManager.flags.AllowDcFlush.set(0);
 
@@ -1638,14 +1642,11 @@ HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenDcFlushMitigationWhe
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     kernel.immutableData.kernelDescriptor->kernelAttributes.flags.hasRTCalls = true;
-    neoDevice->rtMemoryBackedBuffer = buffer1;
     CmdListKernelLaunchParams launchParams = {};
 
     result = pCommandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_EQ(pCommandList->requiresDcFlushForDcMitigation, device->getProductHelper().isDcFlushMitigated());
-
-    neoDevice->rtMemoryBackedBuffer = nullptr;
 }
 
 using RayTracingCmdListTest = Test<RayTracingCmdListFixture>;
@@ -1719,6 +1720,9 @@ void find3dBtdCommand(LinearStream &cmdStream, size_t offset, size_t size, uint6
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenRegularCmdListExecutedAndRegularExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+        GTEST_SKIP();
+    }
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
@@ -1789,6 +1793,10 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenRegularCmdListExecutedAndImmediateExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+        GTEST_SKIP();
+    }
+
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
 
@@ -1843,6 +1851,10 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenImmediateCmdListExecutedAndImmediateExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+        GTEST_SKIP();
+    }
+
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
 
@@ -1901,6 +1913,10 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenImmediateCmdListExecutedAndRegularExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+        GTEST_SKIP();
+    }
+
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(commandQueue->getCsr());
     ultCsr->storeMakeResidentAllocations = true;
 

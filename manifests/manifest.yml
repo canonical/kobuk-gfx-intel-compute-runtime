@@ -15,14 +15,14 @@ components:
     dest_dir: gmmlib
     type: git
     branch: master
-    revision: intel-gmmlib-22.6.0
+    revision: intel-gmmlib-22.7.0
     repository: https://github.com/intel/gmmlib.git
   igc:
     asset_name: igc
     dest_dir: igc
     type: git
-    branch: releases/2.8.x
-    revision: v2.8.4
+    branch: releases/2.10.x
+    revision: v2.10.9
     repository: https://github.com/intel/intelgraphicscompiler
   igsc:
     asset_name: igsc
@@ -41,7 +41,7 @@ components:
     dest_dir: kernels_bin
     type: git
     branch: kernels_bin
-    revision: 3326-3860
+    revision: 3361-4014
   kmdaf:
     branch: kmdaf
     dest_dir: kmdaf
@@ -52,7 +52,7 @@ components:
     dest_dir: level_zero
     type: git
     branch: master
-    revision: v1.20.6
+    revision: v1.21.1
     repository: https://github.com/oneapi-src/level-zero
   libva:
     asset_name: libva
@@ -66,14 +66,14 @@ components:
     dest_dir: metrics/discovery
     type: git
     branch: master
-    revision: metrics-discovery-1.13.179
+    revision: metrics-discovery-1.14.180
     repository: https://github.com/intel/metrics-discovery.git
   metrics-library:
     asset_name: metrics-library
     dest_dir: metrics/library
     type: git
     branch: master
-    revision: metrics-library-1.0.182
+    revision: metrics-library-1.0.196
     repository: https://github.com/intel/metrics-library.git
   neo-clang-format:
     dest_dir: tools/clang-format
@@ -84,13 +84,13 @@ components:
     dest_dir: wdk
     type: git
     branch: wdk
-    revision: ab182b834cc760c8ef9c5d6b776f1bd8df3bf1c5-3315
+    revision: f2275bc82a304df0315a1d7c059199fc30ae6471-3350
   wsl:
     branch: wsl
     dest_dir: wsl
     revision: 56430997dac34ca0e9e18c177636234cac26ad54
     type: git
-converter: M-3326
+converter: M-3361
 include:
 - infra.yml
 version: '1'

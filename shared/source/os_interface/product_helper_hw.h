@@ -47,7 +47,6 @@ class ProductHelperHw : public ProductHelper {
     std::optional<aub_stream::ProductFamily> getAubStreamProductFamily() const override;
     bool isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const override;
     bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const override;
-    bool allowCompression(const HardwareInfo &hwInfo) const override;
     LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
     bool isNewResidencyModelSupported() const override;
     bool isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const override;
@@ -89,6 +88,7 @@ class ProductHelperHw : public ProductHelper {
     bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const override;
+    bool isTimestampWaitSupportedForQueues(bool heaplessEnabled) const override;
     uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const override;
     void adjustScratchSize(size_t &requiredScratchSize) const override;
     size_t getSvmCpuAlignment() const override;
@@ -168,6 +168,7 @@ class ProductHelperHw : public ProductHelper {
     void fillFrontEndPropertiesSupportStructure(FrontEndPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) const override;
     void fillPipelineSelectPropertiesSupportStructure(PipelineSelectPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) const override;
     void fillStateBaseAddressPropertiesSupportStructure(StateBaseAddressPropertiesSupport &propertiesSupport) const override;
+    void parseCcsMode(std::string ccsModeString, std::unordered_map<uint32_t, uint32_t> &rootDeviceNumCcsMap, uint32_t rootDeviceIndex, RootDeviceEnvironment *rootDeviceEnvironment) const override;
 
     bool isFusedEuDisabledForDpas(bool kernelHasDpasInstructions, const uint32_t *lws, const uint32_t *groupCount, const HardwareInfo &hwInfo) const override;
     bool isCalculationForDisablingEuFusionWithDpasNeeded(const HardwareInfo &hwInfo) const override;
@@ -197,21 +198,27 @@ class ProductHelperHw : public ProductHelper {
     bool supports2DBlockStore() const override;
     bool supports2DBlockLoad() const override;
     uint32_t getNumCacheRegions() const override;
+    uint32_t adjustMaxThreadsPerThreadGroup(uint32_t maxThreadsPerThreadGroup, uint32_t simt, uint32_t totalWorkItems, uint32_t grfCount, bool isHwLocalIdGeneration, bool isHeaplessModeEnabled) const override;
     uint64_t getPatIndex(CacheRegion cacheRegion, CachePolicy cachePolicy) const override;
     bool isSharingWith3dOrMediaAllowed() const override;
+    bool isL3FlushAfterPostSyncRequired(bool heaplessEnabled) const override;
+    void overrideDirectSubmissionTimeouts(std::chrono::microseconds &timeout, std::chrono::microseconds &maxTimeout) const override;
+    bool isMisalignedUserPtr2WayCoherent() const override;
+    void setRenderCompressedFlags(HardwareInfo &hwInfo) const override;
+    bool isCompressionForbidden(const HardwareInfo &hwInfo) const override;
 
     ~ProductHelperHw() override = default;
 
   protected:
     ProductHelperHw() = default;
 
-    void enableCompression(HardwareInfo *hwInfo) const;
     void enableBlitterOperationsSupport(HardwareInfo *hwInfo) const;
     bool getConcurrentAccessMemCapabilitiesSupported(UsmAccessCapabilities capability) const;
     uint64_t getHostMemCapabilitiesValue() const;
     bool getHostMemCapabilitiesSupported(const HardwareInfo *hwInfo) const;
     LocalMemoryAccessMode getDefaultLocalMemoryAccessMode(const HardwareInfo &hwInfo) const override;
     void fillScmPropertiesSupportStructureBase(StateComputeModePropertiesSupport &propertiesSupport) const override;
+    bool isCompressionForbiddenCommon(bool defaultValue) const;
 };
 
 template <PRODUCT_FAMILY gfxProduct>

@@ -36,6 +36,7 @@ class GmmHelper;
 class OSTime;
 class ProductHelper;
 class ReleaseHelper;
+class SipExternalLib;
 class SubDevice;
 class SyncBufferHandler;
 class UsmMemAllocPoolsManager;
@@ -157,6 +158,7 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
         return reinterpret_cast<SpecializedDeviceT *>(specializedDevice);
     }
     MOCKABLE_VIRTUAL CompilerInterface *getCompilerInterface() const;
+    MOCKABLE_VIRTUAL SipExternalLib *getSipExternalLibInterface() const;
     BuiltIns *getBuiltIns() const;
     void allocateSyncBufferHandler();
 
@@ -178,7 +180,8 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
     std::unique_ptr<SyncBufferHandler> syncBufferHandler;
     GraphicsAllocation *getRTMemoryBackedBuffer() { return rtMemoryBackedBuffer; }
     RTDispatchGlobalsInfo *getRTDispatchGlobals(uint32_t maxBvhLevels);
-    bool rayTracingIsInitialized() const { return rtMemoryBackedBuffer != nullptr; }
+    bool rayTracingIsInitialized() const { return rtMemoryBackedBuffer != nullptr && rtDispatchGlobalsInfos.size() != 0; }
+    void initializeRTMemoryBackedBuffer();
     void initializeRayTracing(uint32_t maxBvhLevels);
     void allocateRTDispatchGlobals(uint32_t maxBvhLevels);
 

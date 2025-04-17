@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/built_ins/sip.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/command_stream/wait_status.h"
@@ -168,9 +169,19 @@ TEST(CommandQueue, givenEnableTimestampWaitWhenCheckIsTimestampWaitEnabledThenRe
 
     {
         debugManager.flags.EnableTimestampWaitForQueues.set(-1);
-        const auto &gfxCoreHelper = mockDevice->getGfxCoreHelper();
         const auto &productHelper = mockDevice->getProductHelper();
-        EXPECT_EQ(cmdQ.isWaitForTimestampsEnabled(), gfxCoreHelper.isTimestampWaitSupportedForQueues() && !productHelper.isDcFlushAllowed());
+        const auto &compilerProductHelper = mockDevice->getCompilerProductHelper();
+        bool heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+
+        auto enabled = productHelper.isTimestampWaitSupportedForQueues(heaplessEnabled);
+
+        if (productHelper.isL3FlushAfterPostSyncRequired(heaplessEnabled)) {
+            enabled &= true;
+        } else {
+            enabled &= !productHelper.isDcFlushAllowed();
+        }
+
+        EXPECT_EQ(enabled, cmdQ.isWaitForTimestampsEnabled());
     }
 
     {
@@ -440,8 +451,8 @@ HWTEST_F(CommandQueueCommandStreamTest, WhenCheckIsTextureCacheFlushNeededThenRe
 
     EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(CL_COMMAND_COPY_BUFFER_RECT));
 
-    for (auto i = CL_COMMAND_NDRANGE_KERNEL; i < CL_COMMAND_RELEASE_GL_OBJECTS; i++) {
-        if (i == CL_COMMAND_COPY_IMAGE || i == CL_COMMAND_WRITE_IMAGE) {
+    for (auto i = CL_COMMAND_NDRANGE_KERNEL; i < CL_COMMAND_SVM_MIGRATE_MEM; i++) {
+        if (i == CL_COMMAND_COPY_IMAGE || i == CL_COMMAND_WRITE_IMAGE || i == CL_COMMAND_FILL_IMAGE) {
             commandStreamReceiver.directSubmissionAvailable = true;
             EXPECT_TRUE(cmdQ.isTextureCacheFlushNeeded(i));
             commandStreamReceiver.directSubmissionAvailable = false;
@@ -1870,6 +1881,10 @@ struct CsrSelectionCommandQueueTests : ::testing::Test {
         queue = std::make_unique<MockCommandQueue>(context.get(), clDevice.get(), queueProperties, false);
     }
 
+    void TearDown() override {
+        NEO::SipKernel::freeSipKernels(&device->getRootDeviceEnvironmentRef(), device->getMemoryManager());
+    }
+
     MockDevice *device;
     std::unique_ptr<MockClDevice> clDevice;
     std::unique_ptr<MockContext> context;
@@ -3079,7 +3094,7 @@ TEST_F(MultiTileFixture, givenTile1WhenQueueIsCreatedThenItContainsTile1Device) 
 
 struct CopyOnlyQueueTests : ::testing::Test {
     void SetUp() override {
-        auto device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get());
+        device = MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get());
         typeUsageRcs.first = EngineHelpers::remapEngineTypeToHwSpecific(typeUsageRcs.first, device->getRootDeviceEnvironment());
 
         auto copyEngineGroup = std::find_if(device->regularEngineGroups.begin(), device->regularEngineGroups.end(), [](const auto &engineGroup) {
@@ -3102,6 +3117,10 @@ struct CopyOnlyQueueTests : ::testing::Test {
         properties[1] = device->getEngineGroupIndexFromEngineGroupType(EngineGroupType::copy);
     }
 
+    void TearDown() override {
+        NEO::SipKernel::freeSipKernels(&device->getRootDeviceEnvironmentRef(), device->getMemoryManager());
+    }
+
     EngineTypeUsage typeUsageBcs = EngineTypeUsage{aub_stream::EngineType::ENGINE_BCS, EngineUsage::regular};
     EngineTypeUsage typeUsageRcs = EngineTypeUsage{aub_stream::EngineType::ENGINE_RCS, EngineUsage::regular};
 
@@ -3109,6 +3128,7 @@ struct CopyOnlyQueueTests : ::testing::Test {
     std::unique_ptr<MockContext> context{};
     std::unique_ptr<MockCommandQueue> queue{};
     const EngineControl *bcsEngine = nullptr;
+    MockDevice *device = nullptr;
 
     cl_queue_properties properties[5] = {CL_QUEUE_FAMILY_INTEL, 0, CL_QUEUE_INDEX_INTEL, 0, 0};
 };

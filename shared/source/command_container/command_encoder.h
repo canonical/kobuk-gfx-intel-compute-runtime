@@ -89,6 +89,8 @@ struct EncodeDispatchKernelArgs {
     bool interruptEvent = false;
     bool immediateScratchAddressPatching = false;
     bool makeCommandView = false;
+    bool isFlushL3AfterPostSyncForExternalAllocationRequired = false;
+    bool isFlushL3AfterPostSyncForHostUsmRequired = false;
 
     bool requiresSystemMemoryFence() const {
         return (isHostScopeSignalEvent && isKernelUsingSystemAllocation);
@@ -189,6 +191,9 @@ struct EncodeDispatchKernel {
     static void adjustTimestampPacket(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
 
     template <typename WalkerType>
+    static void encodeL3FlushAfterPostSync(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
+
+    template <typename WalkerType>
     static void setupPostSyncForRegularEvent(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args);
 
     template <typename WalkerType>
@@ -259,6 +264,8 @@ struct EncodeStates {
                                      const void *fnDynamicStateHeap,
                                      BindlessHeapsHelper *bindlessHeapHelper,
                                      const RootDeviceEnvironment &rootDeviceEnvironment);
+
+    static void adjustSamplerStateBorderColor(SAMPLER_STATE &samplerState, const SAMPLER_BORDER_COLOR_STATE &borderColorState);
     static size_t getSshHeapSize();
 };
 

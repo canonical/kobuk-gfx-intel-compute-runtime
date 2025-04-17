@@ -40,7 +40,9 @@ class OaMetricSourceImp : public MetricSource {
     ze_result_t metricProgrammableGet(uint32_t *pCount, zet_metric_programmable_exp_handle_t *phMetricProgrammables) override;
     ze_result_t getConcurrentMetricGroups(std::vector<zet_metric_group_handle_t> &hMetricGroups,
                                           uint32_t *pConcurrentGroupCount, uint32_t *pCountPerConcurrentGroup) override;
-    ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup, void *pNext) override;
+    ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup,
+                                                    zet_metric_group_properties_t *pBaseProperties,
+                                                    void *pNext) override;
     bool isMetricGroupActivated(const zet_metric_group_handle_t hMetricGroup) const;
     bool isMetricGroupActivatedInHw() const;
     void setUseCompute(const bool useCompute);
@@ -49,8 +51,6 @@ class OaMetricSourceImp : public MetricSource {
     bool isImplicitScalingCapable() const;
     const MetricDeviceContext &getMetricDeviceContext() const { return metricDeviceContext; }
     static std::unique_ptr<OaMetricSourceImp> create(const MetricDeviceContext &metricDeviceContext);
-    void setMetricOsInterface(std::unique_ptr<MetricOAOsInterface> &metricOAOsInterface);
-    MetricOAOsInterface *getMetricOsInterface() { return metricOAOsInterface.get(); }
     ze_result_t metricGroupCreateFromMetric(const char *pName, const char *pDescription,
                                             zet_metric_group_sampling_type_flags_t samplingType, zet_metric_handle_t hMetric,
                                             zet_metric_group_handle_t *phMetricGroup);
@@ -59,13 +59,18 @@ class OaMetricSourceImp : public MetricSource {
                                               const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION],
                                               uint32_t *maxMetricGroupCount,
                                               std::vector<zet_metric_group_handle_t> &metricGroupList) override;
-    ze_result_t appendMarker(zet_command_list_handle_t hCommandList, zet_metric_group_handle_t hMetricGroup, uint32_t value) override {
-        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-    }
+    ze_result_t appendMarker(zet_command_list_handle_t hCommandList, zet_metric_group_handle_t hMetricGroup, uint32_t value) override;
     void metricGroupCreate(const char name[ZET_MAX_METRIC_GROUP_NAME],
                            const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION],
                            zet_metric_group_sampling_type_flag_t samplingType,
                            zet_metric_group_handle_t *pMetricGroupHandle);
+    ze_result_t calcOperationCreate(MetricDeviceContext &metricDeviceContext,
+                                    zet_intel_metric_calculate_exp_desc_t *pCalculateDesc,
+                                    uint32_t *pCount,
+                                    zet_metric_handle_t *phExcludedMetrics,
+                                    zet_intel_metric_calculate_operation_exp_handle_t *phCalculateOperation) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
 
   protected:
     ze_result_t initializationState = ZE_RESULT_ERROR_UNINITIALIZED;
@@ -74,7 +79,6 @@ class OaMetricSourceImp : public MetricSource {
     std::unique_ptr<MetricsLibrary> metricsLibrary;
     MetricStreamer *pMetricStreamer = nullptr;
     bool useCompute = false;
-    std::unique_ptr<MetricOAOsInterface> metricOAOsInterface = nullptr;
     std::unique_ptr<MultiDomainDeferredActivationTracker> activationTracker{};
     ze_result_t getTimerResolution(uint64_t &resolution);
     ze_result_t getTimestampValidBits(uint64_t &validBits);

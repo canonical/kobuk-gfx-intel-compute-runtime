@@ -11,10 +11,12 @@
 
 #include "aubstream/engine_node.h"
 
+#include <chrono>
 #include <igfxfmid.h>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace aub_stream {
@@ -106,7 +108,6 @@ class ProductHelper {
     virtual bool isDefaultEngineTypeAdjustmentRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool overrideGfxPartitionLayoutForWsl() const = 0;
     virtual bool isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const = 0;
-    virtual bool allowCompression(const HardwareInfo &hwInfo) const = 0;
     virtual LocalMemoryAccessMode getLocalMemoryAccessMode(const HardwareInfo &hwInfo) const = 0;
     virtual bool isNewResidencyModelSupported() const = 0;
     virtual bool isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const = 0;
@@ -186,6 +187,8 @@ class ProductHelper {
     virtual bool isHostUsmAllocationReuseSupported() const = 0;
     virtual bool useLocalPreferredForCacheableBuffers() const = 0;
     virtual bool useGemCreateExtInAllocateMemoryByKMD() const = 0;
+    virtual bool isTimestampWaitSupportedForQueues(bool heaplessEnabled) const = 0;
+
     virtual bool isTlbFlushRequired() const = 0;
     virtual bool isDetectIndirectAccessInKernelSupported(const KernelDescriptor &kernelDescriptor, const bool isPrecompiled, const uint32_t precompiledKernelIndirectDetectionVersion) const = 0;
     virtual uint32_t getRequiredDetectIndirectVersion() const = 0;
@@ -227,6 +230,8 @@ class ProductHelper {
     virtual void fillPipelineSelectPropertiesSupportStructure(PipelineSelectPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) const = 0;
     virtual void fillStateBaseAddressPropertiesSupportStructure(StateBaseAddressPropertiesSupport &propertiesSupport) const = 0;
 
+    virtual void parseCcsMode(std::string ccsModeString, std::unordered_map<uint32_t, uint32_t> &rootDeviceNumCcsMap, uint32_t rootDeviceIndex, RootDeviceEnvironment *rootDeviceEnvironment) const = 0;
+
     virtual bool isFusedEuDisabledForDpas(bool kernelHasDpasInstructions, const uint32_t *lws, const uint32_t *groupCount, const HardwareInfo &hwInfo) const = 0;
     virtual bool isCalculationForDisablingEuFusionWithDpasNeeded(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getNumberOfPartsInTileForConcurrentKernel(uint32_t ccsCount) const = 0;
@@ -256,8 +261,14 @@ class ProductHelper {
     virtual bool supports2DBlockStore() const = 0;
     virtual bool supports2DBlockLoad() const = 0;
     virtual uint32_t getNumCacheRegions() const = 0;
+    virtual uint32_t adjustMaxThreadsPerThreadGroup(uint32_t maxThreadsPerThreadGroup, uint32_t simt, uint32_t totalWorkItems, uint32_t grfCount, bool isHwLocalIdGeneration, bool isHeaplessModeEnabled) const = 0;
     virtual uint64_t getPatIndex(CacheRegion cacheRegion, CachePolicy cachePolicy) const = 0;
     virtual bool isSharingWith3dOrMediaAllowed() const = 0;
+    virtual bool isL3FlushAfterPostSyncRequired(bool heaplessEnabled) const = 0;
+    virtual void overrideDirectSubmissionTimeouts(std::chrono::microseconds &timeout, std::chrono::microseconds &maxTimeout) const = 0;
+    virtual bool isMisalignedUserPtr2WayCoherent() const = 0;
+    virtual void setRenderCompressedFlags(HardwareInfo &hwInfo) const = 0;
+    virtual bool isCompressionForbidden(const HardwareInfo &hwInfo) const = 0;
 
     virtual ~ProductHelper() = default;
 

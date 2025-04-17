@@ -38,11 +38,11 @@
 #define RETURN_ME(X) return X
 
 #ifndef DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR
-#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 4)
+#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 5)
 #endif
 
-#ifndef DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR
-#define DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR (1 << 1)
+#ifndef DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR
+#define DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR (1 << 2)
 #endif
 
 namespace NEO {
@@ -162,8 +162,9 @@ bool IoctlHelperXe::queryDeviceIdAndRevision(Drm &drm) {
     hwInfo->platform.usDeviceID = config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] & 0xffff;
     hwInfo->platform.usRevId = static_cast<int>((config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] >> 16) & 0xff);
 
-    if ((debugManager.flags.EnableSharedSystemUsmSupport.get() != 0) && (config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR)) {
+    if ((debugManager.flags.EnableRecoverablePageFaults.get() != 0) && (debugManager.flags.EnableSharedSystemUsmSupport.get() != 0) && (config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR)) {
         drm.setSharedSystemAllocEnable(true);
+        drm.setPageFaultSupported(true);
     }
     return true;
 }
@@ -1284,6 +1285,7 @@ int IoctlHelperXe::ioctl(DrmIoctl request, void *arg) {
     case DrmIoctl::metadataDestroy: {
         ret = debuggerMetadataDestroyIoctl(request, arg);
     } break;
+    case DrmIoctl::perfQuery:
     case DrmIoctl::perfOpen: {
         ret = perfOpenIoctl(request, arg);
     } break;
@@ -1706,6 +1708,7 @@ unsigned int IoctlHelperXe::getIoctlRequestValue(DrmIoctl ioctlRequest) const {
     case DrmIoctl::perfOpen:
     case DrmIoctl::perfEnable:
     case DrmIoctl::perfDisable:
+    case DrmIoctl::perfQuery:
         return getIoctlRequestValuePerf(ioctlRequest);
     default:
         UNRECOVERABLE_IF(true);

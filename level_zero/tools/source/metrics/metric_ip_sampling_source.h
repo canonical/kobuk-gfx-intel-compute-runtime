@@ -40,7 +40,9 @@ class IpSamplingMetricSourceImp : public MetricSource {
     MetricIpSamplingOsInterface *getMetricOsInterface() { return metricIPSamplingpOsInterface.get(); }
     IpSamplingMetricStreamerImp *pActiveStreamer = nullptr;
     const MetricDeviceContext &getMetricDeviceContext() const { return metricDeviceContext; }
-    ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup, void *pNext) override;
+    ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup,
+                                                    zet_metric_group_properties_t *pBaseProperties,
+                                                    void *pNext) override;
     ze_result_t createMetricGroupsFromMetrics(std::vector<zet_metric_handle_t> &metricList,
                                               const char metricGroupNamePrefix[ZET_INTEL_MAX_METRIC_GROUP_NAME_PREFIX_EXP],
                                               const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION],
@@ -55,6 +57,11 @@ class IpSamplingMetricSourceImp : public MetricSource {
     void setActivationTracker(MultiDomainDeferredActivationTracker *inputActivationTracker) {
         activationTracker.reset(inputActivationTracker);
     }
+    ze_result_t calcOperationCreate(MetricDeviceContext &metricDeviceContext,
+                                    zet_intel_metric_calculate_exp_desc_t *pCalculateDesc,
+                                    uint32_t *pCount,
+                                    zet_metric_handle_t *phExcludedMetrics,
+                                    zet_intel_metric_calculate_operation_exp_handle_t *phCalculateOperation) override;
 
     uint32_t metricSourceCount = 0;
 

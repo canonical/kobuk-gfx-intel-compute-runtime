@@ -474,7 +474,7 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryForNonSvmHostPtr(co
     }
 
     auto gmm = new Gmm(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmHelper(), alignedPtr, alignedSize, 0u,
-                       CacheSettingsHelper::getGmmUsageType(wddmAllocation->getAllocationType(), !!allocationData.flags.uncacheable, productHelper), {}, gmmRequirements);
+                       CacheSettingsHelper::getGmmUsageTypeForUserPtr(allocationData.hostPtr, allocationData.size, productHelper), {}, gmmRequirements);
 
     wddmAllocation->setDefaultGmm(gmm);
 
@@ -743,8 +743,7 @@ void WddmMemoryManager::freeGraphicsMemoryImpl(GraphicsAllocation *gfxAllocation
             if (engine.commandStreamReceiver->pageTableManager.get()) {
                 std::unique_lock<CommandStreamReceiver::MutexType> lock;
                 if (engine.commandStreamReceiver->isAnyDirectSubmissionEnabled()) {
-                    lock = engine.commandStreamReceiver->obtainUniqueOwnership();
-                    engine.commandStreamReceiver->stopDirectSubmission(true);
+                    engine.commandStreamReceiver->stopDirectSubmission(true, true);
                 }
                 [[maybe_unused]] auto status = engine.commandStreamReceiver->pageTableManager->updateAuxTable(input->getGpuAddress(), defaultGmm, false);
                 DEBUG_BREAK_IF(!status);

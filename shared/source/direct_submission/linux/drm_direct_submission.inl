@@ -90,6 +90,7 @@ DrmDirectSubmission<GfxFamily, Dispatcher>::DrmDirectSubmission(const DirectSubm
             }
         }
     }
+    this->notifyKmdDuringMonitorFence = true;
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -97,6 +98,7 @@ inline DrmDirectSubmission<GfxFamily, Dispatcher>::~DrmDirectSubmission() {
     if (this->ringStart) {
         this->stopRingBuffer(true);
     }
+    this->tagAddress = nullptr;
     if (this->isCompletionFenceSupported()) {
         auto osContextLinux = static_cast<OsContextLinux *>(&this->osContext);
         auto &drm = osContextLinux->getDrm();
@@ -119,7 +121,9 @@ TaskCountType *DrmDirectSubmission<GfxFamily, Dispatcher>::getCompletionValuePoi
 
 template <typename GfxFamily, typename Dispatcher>
 void DrmDirectSubmission<GfxFamily, Dispatcher>::ensureRingCompletion() {
-    this->wait(static_cast<uint32_t>(this->currentTagData.tagValue));
+    if (this->tagAddress) {
+        this->wait(static_cast<uint32_t>(this->currentTagData.tagValue));
+    }
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -143,6 +147,7 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::submit(uint64_t gpuAddress, siz
         this->handleResidency();
     } else {
         this->lastUllsLightExecTimestamp = std::chrono::steady_clock::now();
+        this->boHandleForExec = bb->peekHandle();
     }
 
     auto currentBase = this->ringCommandStream.getGraphicsAllocation()->getGpuAddress();
@@ -223,6 +228,14 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::handleRingRestartForUllsLightRe
 }
 
 template <typename GfxFamily, typename Dispatcher>
+inline void DrmDirectSubmission<GfxFamily, Dispatcher>::handleResidencyContainerForUllsLightNewRingAllocation(ResidencyContainer *allocationsForResidency) {
+    if (allocationsForResidency) {
+        allocationsForResidency->clear();
+        static_cast<DrmMemoryOperationsHandler *>(this->memoryOperationHandler)->mergeWithResidencyContainer(&this->osContext, *allocationsForResidency);
+    }
+}
+
+template <typename GfxFamily, typename Dispatcher>
 void DrmDirectSubmission<GfxFamily, Dispatcher>::handleStopRingBuffer() {
     if (this->disableMonitorFence) {
         this->currentTagData.tagValue++;
@@ -243,11 +256,6 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::handleSwitchRingBuffers(Residen
             this->ringBuffers[this->previousRingBuffer].completionFence = this->currentTagData.tagValue;
         }
     }
-
-    if (allocationsForResidency) {
-        allocationsForResidency->clear();
-        static_cast<DrmMemoryOperationsHandler *>(this->memoryOperationHandler)->mergeWithResidencyContainer(&this->osContext, *allocationsForResidency);
-    }
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -256,7 +264,7 @@ uint64_t DrmDirectSubmission<GfxFamily, Dispatcher>::updateTagValue(bool require
         this->currentTagData.tagValue++;
         this->ringBuffers[this->currentRingBuffer].completionFence = this->currentTagData.tagValue;
     }
-    return 0ull;
+    return boHandleForExec;
 }
 
 template <typename GfxFamily, typename Dispatcher>
@@ -286,9 +294,10 @@ bool DrmDirectSubmission<GfxFamily, Dispatcher>::isCompletionFenceSupported() {
 template <typename GfxFamily, typename Dispatcher>
 void DrmDirectSubmission<GfxFamily, Dispatcher>::wait(TaskCountType taskCountToWait) {
     auto lastHangCheckTime = std::chrono::high_resolution_clock::now();
+    auto waitStartTime = lastHangCheckTime;
     auto pollAddress = this->tagAddress;
     for (uint32_t i = 0; i < this->activeTiles; i++) {
-        while (!WaitUtils::waitFunction(pollAddress, taskCountToWait) &&
+        while (!WaitUtils::waitFunction(pollAddress, taskCountToWait, std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - waitStartTime).count()) &&
                !isGpuHangDetected(lastHangCheckTime)) {
         }
         pollAddress = ptrOffset(pollAddress, this->immWritePostSyncOffset);

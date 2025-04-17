@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,15 +9,16 @@
 #include "shared/test/common/helpers/variable_backup.h"
 
 #include "level_zero/sysman/source/api/engine/linux/sysman_os_engine_imp.h"
-#include "level_zero/sysman/source/api/engine/sysman_engine_imp.h"
-#include "level_zero/sysman/source/shared/linux/zes_os_sysman_imp.h"
 #include "level_zero/sysman/test/unit_tests/sources/engine/linux/mock_engine_xe.h"
 #include "level_zero/sysman/test/unit_tests/sources/linux/mock_sysman_fixture.h"
 #include "level_zero/sysman/test/unit_tests/sources/shared/linux/kmd_interface/mock_sysman_kmd_interface_xe.h"
+#include "level_zero/sysman/test/unit_tests/sources/shared/linux/mock_pmu_interface.h"
 
 namespace L0 {
 namespace Sysman {
 namespace ult {
+
+constexpr uint32_t mockEngineHandleCount = 4u;
 
 class ZesEngineFixtureXe : public SysmanDeviceFixture {
   protected:
@@ -52,8 +53,8 @@ class ZesEngineFixtureXe : public SysmanDeviceFixture {
         pLinuxSysmanImp->pPmuInterface = pPmuInterface.get();
 
         pSysmanDeviceImp->pEngineHandleContext->handleList.clear();
-        pSysmanDeviceImp->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.isIntegratedDevice = true;
-
+        bool isIntegratedDevice = true;
+        pLinuxSysmanImp->pSysmanKmdInterface->setSysmanDeviceDirName(isIntegratedDevice);
         getEngineHandles(0);
     }
 
@@ -79,35 +80,85 @@ class ZesEngineFixtureXe : public SysmanDeviceFixture {
     }
 };
 
-TEST_F(ZesEngineFixtureXe, GivenComponentCountZeroWhenCallingzesDeviceEnumEngineGroupsThenZeroCountIsReturnedAndVerifyCallSucceeds) {
+TEST_F(ZesEngineFixtureXe, GivenComponentCountZeroWhenCallingZesDeviceEnumEngineGroupsThenCallSucceedsAndValidCountIsReturned) {
 
     uint32_t count = 0;
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEnumEngineGroups(device->toHandle(), &count, NULL));
-    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(count, mockEngineHandleCount);
 
     uint32_t testcount = count + 1;
     EXPECT_EQ(ZE_RESULT_SUCCESS, zesDeviceEnumEngineGroups(device->toHandle(), &testcount, NULL));
-    EXPECT_EQ(testcount, 0u);
+    EXPECT_EQ(testcount, mockEngineHandleCount);
 
     count = 0;
     std::vector<zes_engine_handle_t> handles(count, nullptr);
     EXPECT_EQ(zesDeviceEnumEngineGroups(device->toHandle(), &count, handles.data()), ZE_RESULT_SUCCESS);
-    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(count, mockEngineHandleCount);
 }
 
-TEST_F(ZesEngineFixtureXe, GivenValidEngineHandleWhenCallingZesEngineGetActivityAndperfEventOpenFailsThenVerifyEngineGetActivityReturnsFailure) {
+TEST_F(ZesEngineFixtureXe, GivenValidEngineHandleWhenCallingZesEngineGetActivityThenCallSuccedsAndValidValuesAreReturned) {
+
+    zes_engine_stats_t stats = {};
+    auto handles = getEngineHandles(mockEngineHandleCount);
+    EXPECT_EQ(mockEngineHandleCount, handles.size());
+
+    for (auto handle : handles) {
+        ASSERT_NE(nullptr, handle);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesEngineGetActivity(handle, &stats));
+        EXPECT_EQ(stats.activeTime, pPmuInterface->mockActiveTime);
+        EXPECT_EQ(stats.timestamp, pPmuInterface->mockTimestamp);
+    }
+}
+
+TEST_F(ZesEngineFixtureXe, GivenValidEngineHandleAndPmuTimeStampIsZeroWhenCallingZesEngineGetActivityThenValidTimeStampIsReturned) {
+    zes_engine_stats_t stats = {};
+    pPmuInterface->mockTimestamp = 0u;
+    auto handles = getEngineHandles(mockEngineHandleCount);
+    EXPECT_EQ(mockEngineHandleCount, handles.size());
+
+    std::chrono::time_point<std::chrono::steady_clock> ts = std::chrono::steady_clock::now();
+    uint64_t timeBeforeApiCall = std::chrono::duration_cast<std::chrono::microseconds>(ts.time_since_epoch()).count();
+
+    for (auto handle : handles) {
+        ASSERT_NE(nullptr, handle);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, zesEngineGetActivity(handle, &stats));
+        EXPECT_EQ(stats.activeTime, pPmuInterface->mockActiveTime);
+        EXPECT_GE(stats.timestamp, timeBeforeApiCall);
+    }
+}
+
+TEST_F(ZesEngineFixtureXe, GivenValidEngineHandleAndPmuReadFailsWhenCallingZesEngineGetActivityThenErrorIsReturned) {
+
+    zes_engine_stats_t stats = {};
+    pPmuInterface->mockPmuReadFailureReturnValue = -1;
+    auto handles = getEngineHandles(mockEngineHandleCount);
+    EXPECT_EQ(mockEngineHandleCount, handles.size());
+
+    for (auto handle : handles) {
+        ASSERT_NE(nullptr, handle);
+        EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, zesEngineGetActivity(handle, &stats));
+    }
+}
+
+TEST_F(ZesEngineFixtureXe, GivenDeviceHandleAndPmuOpenFailsDueToFileTableOverFlowWhenCallingZesDeviceEnumEngineGroupsThenZeroHandlesReturned) {
 
     VariableBackup<decltype(NEO::SysCalls::sysCallsPread)> mockPread(&NEO::SysCalls::sysCallsPread, [](int fd, void *buf, size_t count, off_t offset) -> ssize_t {
-        uint32_t mockReadVal = 23;
         std::ostringstream oStream;
-        oStream << mockReadVal;
+        oStream << 23;
         std::string value = oStream.str();
         memcpy(buf, value.data(), count);
         return count;
     });
 
-    pPmuInterface->mockPerfEventFailureReturnValue = -1;
-    EXPECT_EQ(-1, pPmuInterface->pmuInterfaceOpen(0, -1, 0));
+    pPmuInterface->mockPerfEventOpenReadFail = true;
+    pPmuInterface->mockPerfEventOpenFailAtCount = 3;
+    pPmuInterface->mockErrorNumber = ENFILE;
+    pSysmanDeviceImp->pEngineHandleContext->handleList.clear();
+    pSysmanDeviceImp->pEngineHandleContext->init(pOsSysman->getSubDeviceCount());
+
+    uint32_t handleCount = 0;
+    EXPECT_EQ(zesDeviceEnumEngineGroups(device->toHandle(), &handleCount, nullptr), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(handleCount, 0u);
 }
 
 } // namespace ult

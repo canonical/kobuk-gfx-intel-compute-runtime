@@ -6,9 +6,7 @@
  */
 
 #include "shared/source/command_stream/command_stream_receiver.h"
-#include "shared/source/os_interface/product_helper.h"
-#include "shared/source/os_interface/product_helper.inl"
-#include "shared/source/os_interface/product_helper_xe2_and_later.inl"
+#include "shared/source/os_interface/product_helper_hw.h"
 #include "shared/source/xe3_core/hw_cmds_ptl.h"
 #include "shared/source/xe3_core/hw_info_ptl.h"
 
@@ -26,6 +24,18 @@ bool ProductHelperHw<gfxProduct>::isResolveDependenciesByPipeControlsSupported(c
         return debugManager.flags.ResolveDependenciesViaPipeControls.get() == 1;
     }
     return enabled;
+}
+
+template <>
+void ProductHelperHw<gfxProduct>::overrideDirectSubmissionTimeouts(std::chrono::microseconds &timeout, std::chrono::microseconds &maxTimeout) const {
+    timeout = std::chrono::microseconds{1'000};
+    maxTimeout = std::chrono::microseconds{1'000};
+    if (debugManager.flags.DirectSubmissionControllerTimeout.get() != -1) {
+        timeout = std::chrono::microseconds{debugManager.flags.DirectSubmissionControllerTimeout.get()};
+    }
+    if (debugManager.flags.DirectSubmissionControllerMaxTimeout.get() != -1) {
+        maxTimeout = std::chrono::microseconds{debugManager.flags.DirectSubmissionControllerMaxTimeout.get()};
+    }
 }
 
 template class ProductHelperHw<gfxProduct>;

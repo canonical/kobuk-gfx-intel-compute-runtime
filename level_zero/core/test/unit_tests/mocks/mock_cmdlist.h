@@ -92,7 +92,9 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::inOrderAtomicSignalingEnabled;
     using BaseClass::inOrderExecInfo;
     using BaseClass::inOrderPatchCmds;
+    using BaseClass::internalUsage;
     using BaseClass::interruptEvents;
+    using BaseClass::isAllocationImported;
     using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isInOrderNonWalkerSignalingRequired;
     using BaseClass::isQwordInOrderCounter;
@@ -100,6 +102,7 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
     using BaseClass::isTimestampEventForMultiTile;
+    using BaseClass::l3FlushAfterPostSyncRequired;
     using BaseClass::latestOperationRequiredNonWalkerInOrderCmdsChaining;
     using BaseClass::obtainKernelPreemptionMode;
     using BaseClass::partitionCount;
@@ -216,6 +219,7 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::inOrderAtomicSignalingEnabled;
     using BaseClass::inOrderExecInfo;
     using BaseClass::inOrderPatchCmds;
+    using BaseClass::internalUsage;
     using BaseClass::interruptEvents;
     using BaseClass::isBcsSplitNeeded;
     using BaseClass::isFlushTaskSubmissionEnabled;
@@ -224,6 +228,7 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
     using BaseClass::latestFlushIsHostVisible;
+    using BaseClass::latestOperationHasOptimizedCbEvent;
     using BaseClass::latestOperationRequiredNonWalkerInOrderCmdsChaining;
     using BaseClass::partitionCount;
     using BaseClass::pipeControlMultiKernelEventSync;
@@ -262,6 +267,7 @@ struct MockCommandListImmediate : public CommandListCoreFamilyImmediate<gfxCoreF
     using BaseClass::finalStreamState;
     using BaseClass::immediateCmdListHeapSharing;
     using BaseClass::indirectAllocationsAllowed;
+    using BaseClass::internalUsage;
     using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
@@ -282,6 +288,7 @@ struct WhiteBox<::L0::CommandListImp> : public ::L0::CommandListImp {
     using BaseClass::commandContainer;
     using BaseClass::commandListPreemptionMode;
     using BaseClass::commandsToPatch;
+    using BaseClass::compactL3FlushEventPacket;
     using BaseClass::copyOperationOffloadEnabled;
     using BaseClass::copyThroughLockedPtrEnabled;
     using BaseClass::currentBindingTablePoolBaseAddress;
@@ -303,6 +310,7 @@ struct WhiteBox<::L0::CommandListImp> : public ::L0::CommandListImp {
     using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
+    using BaseClass::l3FlushAfterPostSyncRequired;
     using BaseClass::minimalSizeForBcsSplit;
     using BaseClass::partitionCount;
     using BaseClass::pipelineSelectStateTracking;
@@ -565,12 +573,12 @@ struct MockCommandList : public CommandList {
                      (void *desc, void *ptr, uint64_t data, ze_event_handle_t signalEventHandle, bool useQwordData));
 
     ADDMETHOD_NOBASE(appendWaitExternalSemaphores, ze_result_t, ZE_RESULT_SUCCESS,
-                     (uint32_t numExternalSemaphores, const ze_intel_external_semaphore_exp_handle_t *hSemaphores,
-                      const ze_intel_external_semaphore_wait_params_exp_t *params, ze_event_handle_t hSignalEvent,
+                     (uint32_t numExternalSemaphores, const ze_external_semaphore_ext_handle_t *hSemaphores,
+                      const ze_external_semaphore_wait_params_ext_t *params, ze_event_handle_t hSignalEvent,
                       uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents));
     ADDMETHOD_NOBASE(appendSignalExternalSemaphores, ze_result_t, ZE_RESULT_SUCCESS,
-                     (size_t numExternalSemaphores, const ze_intel_external_semaphore_exp_handle_t *hSemaphores,
-                      const ze_intel_external_semaphore_signal_params_exp_t *params, ze_event_handle_t hSignalEvent,
+                     (size_t numExternalSemaphores, const ze_external_semaphore_ext_handle_t *hSemaphores,
+                      const ze_external_semaphore_signal_params_ext_t *params, ze_event_handle_t hSignalEvent,
                       uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents));
 
     ADDMETHOD_NOBASE(appendWriteToMemory, ze_result_t, ZE_RESULT_SUCCESS,
@@ -608,6 +616,7 @@ class MockCommandListCoreFamily : public CommandListCoreFamily<gfxCoreFamily> {
     using BaseClass::dummyBlitWa;
     using BaseClass::enableInOrderExecution;
     using BaseClass::encodeMiFlush;
+    using BaseClass::getDeviceCounterAllocForResidency;
     using BaseClass::ownedPrivateAllocations;
     using BaseClass::taskCountUpdateFenceRequired;
 
@@ -704,6 +713,7 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
     using BaseClass::dcFlushSupport;
     using BaseClass::dependenciesPresent;
     using BaseClass::dummyBlitWa;
+    using BaseClass::internalUsage;
     using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
@@ -717,10 +727,12 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
         return executeCommandListImmediateReturnValue;
     }
 
-    ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, bool requireTaskCountUpdate) override {
+    ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, NEO::AppendOperations appendOperation,
+                                                         bool copyOffloadSubmission, bool requireTaskCountUpdate,
+                                                         MutexLock *outerLock) override {
         ++executeCommandListImmediateWithFlushTaskCalledCount;
         if (callBaseExecute) {
-            return BaseClass::executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, kernelOperation, copyOffloadSubmission, requireTaskCountUpdate);
+            return BaseClass::executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, appendOperation, copyOffloadSubmission, requireTaskCountUpdate, outerLock);
         }
         return executeCommandListImmediateWithFlushTaskReturnValue;
     }

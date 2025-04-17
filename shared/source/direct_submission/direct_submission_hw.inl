@@ -166,19 +166,20 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchStaticRelaxedOrderingSch
         LriHelper<GfxFamily>::program(&schedulerCmdStream, RegisterOffsets::csGprR8, static_cast<uint32_t>(deferredTasksListGpuVa & 0xFFFF'FFFFULL), true, isBcs);
         LriHelper<GfxFamily>::program(&schedulerCmdStream, RegisterOffsets::csGprR8 + 4, static_cast<uint32_t>(deferredTasksListGpuVa >> 32), true, isBcs);
 
-        EncodeAluHelper<GfxFamily, 10> aluHelper;
-        aluHelper.setMocs(miMathMocs);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr2);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr6);
-        aluHelper.setNextAlu(AluRegisters::opcodeShl);
-        aluHelper.setNextAlu(AluRegisters::opcodeStore, AluRegisters::gpr7, AluRegisters::accu);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr7);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr8);
-        aluHelper.setNextAlu(AluRegisters::opcodeAdd);
-        aluHelper.setNextAlu(AluRegisters::opcodeStore, AluRegisters::gpr6, AluRegisters::accu);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoadind, AluRegisters::gpr0, AluRegisters::accu);
-        aluHelper.setNextAlu(AluRegisters::opcodeFenceRd);
+        EncodeAluHelper<GfxFamily, 10> aluHelper({{
+            {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr2},
+            {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr6},
+            {AluRegisters::opcodeShl, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeStore, AluRegisters::gpr7, AluRegisters::accu},
+            {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr7},
+            {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr8},
+            {AluRegisters::opcodeAdd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeStore, AluRegisters::gpr6, AluRegisters::accu},
+            {AluRegisters::opcodeLoadind, AluRegisters::gpr0, AluRegisters::accu},
+            {AluRegisters::opcodeFenceRd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+        }});
 
+        aluHelper.setMocs(miMathMocs);
         aluHelper.copyToCmdStream(schedulerCmdStream);
 
         EncodeBatchBufferStartOrEnd<GfxFamily>::programBatchBufferStart(&schedulerCmdStream, 0, false, true, false);
@@ -204,23 +205,24 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchStaticRelaxedOrderingSch
         LriHelper<GfxFamily>::program(&schedulerCmdStream, RegisterOffsets::csGprR8, static_cast<uint32_t>(deferredTasksListGpuVa & 0xFFFF'FFFFULL), true, isBcs);
         LriHelper<GfxFamily>::program(&schedulerCmdStream, RegisterOffsets::csGprR8 + 4, static_cast<uint32_t>(deferredTasksListGpuVa >> 32), true, isBcs);
 
-        EncodeAluHelper<GfxFamily, 14> aluHelper;
-        aluHelper.setMocs(miMathMocs);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr1);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr7);
-        aluHelper.setNextAlu(AluRegisters::opcodeShl);
-        aluHelper.setNextAlu(AluRegisters::opcodeStore, AluRegisters::gpr7, AluRegisters::accu);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr7);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr8);
-        aluHelper.setNextAlu(AluRegisters::opcodeAdd);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoadind, AluRegisters::gpr7, AluRegisters::accu);
-        aluHelper.setNextAlu(AluRegisters::opcodeFenceRd);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr6);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad0, AluRegisters::srcb, AluRegisters::opcodeNone);
-        aluHelper.setNextAlu(AluRegisters::opcodeAdd);
-        aluHelper.setNextAlu(AluRegisters::opcodeStoreind, AluRegisters::accu, AluRegisters::gpr7);
-        aluHelper.setNextAlu(AluRegisters::opcodeFenceWr);
+        EncodeAluHelper<GfxFamily, 14> aluHelper({{
+            {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr1},
+            {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr7},
+            {AluRegisters::opcodeShl, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeStore, AluRegisters::gpr7, AluRegisters::accu},
+            {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr7},
+            {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr8},
+            {AluRegisters::opcodeAdd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeLoadind, AluRegisters::gpr7, AluRegisters::accu},
+            {AluRegisters::opcodeFenceRd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr6},
+            {AluRegisters::opcodeLoad0, AluRegisters::srcb, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeAdd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeStoreind, AluRegisters::accu, AluRegisters::gpr7},
+            {AluRegisters::opcodeFenceWr, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+        }});
 
+        aluHelper.setMocs(miMathMocs);
         aluHelper.copyToCmdStream(schedulerCmdStream);
     }
 
@@ -271,12 +273,13 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchStaticRelaxedOrderingSch
         LriHelper<GfxFamily>::program(&schedulerCmdStream, RegisterOffsets::csGprR10, static_cast<uint32_t>(RelaxedOrderingHelper::DynamicSchedulerSizeAndOffsetSection<GfxFamily>::semaphoreSectionSize), true, isBcs);
         LriHelper<GfxFamily>::program(&schedulerCmdStream, RegisterOffsets::csGprR10 + 4, 0, true, isBcs);
 
-        EncodeAluHelper<GfxFamily, 4> aluHelper;
+        EncodeAluHelper<GfxFamily, 4> aluHelper({{
+            {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr9},
+            {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr10},
+            {AluRegisters::opcodeAdd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+            {AluRegisters::opcodeStore, AluRegisters::gpr0, AluRegisters::accu},
+        }});
         aluHelper.setMocs(miMathMocs);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr9);
-        aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr10);
-        aluHelper.setNextAlu(AluRegisters::opcodeAdd);
-        aluHelper.setNextAlu(AluRegisters::opcodeStore, AluRegisters::gpr0, AluRegisters::accu);
         aluHelper.copyToCmdStream(schedulerCmdStream);
 
         EncodeBatchBufferStartOrEnd<GfxFamily>::programConditionalRegMemBatchBufferStart(schedulerCmdStream, 0, semaphoreGpuVa, RegisterOffsets::csGprR11, CompareOperation::greaterOrEqual, true, isBcs);
@@ -420,7 +423,7 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::allocateResources() {
 
 template <typename GfxFamily, typename Dispatcher>
 bool DirectSubmissionHw<GfxFamily, Dispatcher>::makeResourcesResident(DirectSubmissionAllocations &allocations) {
-    auto ret = memoryOperationHandler->makeResidentWithinOsContext(&this->osContext, ArrayRef<GraphicsAllocation *>(allocations), false, false) == MemoryOperationsStatus::success;
+    auto ret = memoryOperationHandler->makeResidentWithinOsContext(&this->osContext, ArrayRef<GraphicsAllocation *>(allocations), false, false, true) == MemoryOperationsStatus::success;
 
     return ret;
 }
@@ -528,7 +531,7 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::stopRingBuffer(bool blocking) {
     if (disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired, this->notifyKmdDuringMonitorFence);
     }
     Dispatcher::dispatchStopCommandBuffer(ringCommandStream);
 
@@ -615,7 +618,7 @@ inline void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchSwitchRingBufferS
     if (disableMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired, this->notifyKmdDuringMonitorFence);
     }
     Dispatcher::dispatchStartCommandBuffer(ringCommandStream, nextBufferGpuAddress);
 }
@@ -764,7 +767,7 @@ void *DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchWorkloadSection(BatchBu
     if (dispatchMonitorFence) {
         TagData currentTagData = {};
         getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired);
+        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired, this->notifyKmdDuringMonitorFence);
     }
 
     dispatchSemaphoreSection(currentQueueWorkCount + 1);
@@ -843,18 +846,18 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::preinitializeRelaxedOrderingSect
 
     const uint32_t miMathMocs = this->rootDeviceEnvironment.getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
 
-    EncodeAluHelper<GfxFamily, 9> aluHelper;
+    EncodeAluHelper<GfxFamily, 9> aluHelper({{
+        {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr1},
+        {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr8},
+        {AluRegisters::opcodeShl, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+        {AluRegisters::opcodeStore, AluRegisters::gpr8, AluRegisters::accu},
+        {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr8},
+        {AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr6},
+        {AluRegisters::opcodeAdd, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+        {AluRegisters::opcodeStoreind, AluRegisters::accu, AluRegisters::gpr7},
+        {AluRegisters::opcodeFenceWr, AluRegisters::opcodeNone, AluRegisters::opcodeNone},
+    }});
     aluHelper.setMocs(miMathMocs);
-    aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr1);
-    aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr8);
-    aluHelper.setNextAlu(AluRegisters::opcodeShl);
-    aluHelper.setNextAlu(AluRegisters::opcodeStore, AluRegisters::gpr8, AluRegisters::accu);
-    aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr8);
-    aluHelper.setNextAlu(AluRegisters::opcodeLoad, AluRegisters::srcb, AluRegisters::gpr6);
-    aluHelper.setNextAlu(AluRegisters::opcodeAdd);
-    aluHelper.setNextAlu(AluRegisters::opcodeStoreind, AluRegisters::accu, AluRegisters::gpr7);
-    aluHelper.setNextAlu(AluRegisters::opcodeFenceWr);
-
     aluHelper.copyToCmdStream(stream);
 
     EncodeMathMMIO<GfxFamily>::encodeIncrement(stream, AluRegisters::gpr1, isBcs);
@@ -1097,7 +1100,10 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::switchRingBuffersNeeded(size_t s
 
 template <typename GfxFamily, typename Dispatcher>
 inline uint64_t DirectSubmissionHw<GfxFamily, Dispatcher>::switchRingBuffers(ResidencyContainer *allocationsForResidency) {
-    GraphicsAllocation *nextRingBuffer = switchRingBuffersAllocations();
+    GraphicsAllocation *nextRingBuffer = switchRingBuffersAllocations(allocationsForResidency);
+
+    this->handleRingRestartForUllsLightResidency(allocationsForResidency);
+
     void *flushPtr = ringCommandStream.getSpace(0);
     uint64_t currentBufferGpuVa = ringCommandStream.getCurrentGpuAddressPosition();
 
@@ -1115,7 +1121,7 @@ inline uint64_t DirectSubmissionHw<GfxFamily, Dispatcher>::switchRingBuffers(Res
 }
 
 template <typename GfxFamily, typename Dispatcher>
-inline GraphicsAllocation *DirectSubmissionHw<GfxFamily, Dispatcher>::switchRingBuffersAllocations() {
+inline GraphicsAllocation *DirectSubmissionHw<GfxFamily, Dispatcher>::switchRingBuffersAllocations(ResidencyContainer *allocationsForResidency) {
     this->previousRingBuffer = this->currentRingBuffer;
     GraphicsAllocation *nextAllocation = nullptr;
     for (uint32_t ringBufferIndex = 0; ringBufferIndex < this->ringBuffers.size(); ringBufferIndex++) {
@@ -1142,8 +1148,10 @@ inline GraphicsAllocation *DirectSubmissionHw<GfxFamily, Dispatcher>::switchRing
             nextAllocation = memoryManager->allocateGraphicsMemoryWithProperties(commandStreamAllocationProperties);
             this->currentRingBuffer = static_cast<uint32_t>(this->ringBuffers.size());
             this->ringBuffers.emplace_back(0ull, nextAllocation);
-            auto ret = memoryOperationHandler->makeResidentWithinOsContext(&this->osContext, ArrayRef<GraphicsAllocation *>(&nextAllocation, 1u), false, false) == MemoryOperationsStatus::success;
+            auto ret = memoryOperationHandler->makeResidentWithinOsContext(&this->osContext, ArrayRef<GraphicsAllocation *>(&nextAllocation, 1u), false, false, false) == MemoryOperationsStatus::success;
             UNRECOVERABLE_IF(!ret);
+
+            this->handleResidencyContainerForUllsLightNewRingAllocation(allocationsForResidency);
         }
     }
     UNRECOVERABLE_IF(this->currentRingBuffer == this->previousRingBuffer);

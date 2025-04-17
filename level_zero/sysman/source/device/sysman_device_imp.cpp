@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -209,6 +209,10 @@ bool SysmanDeviceImp::deviceEventListen(zes_event_type_flags_t &pEvent, uint64_t
 
 ze_result_t SysmanDeviceImp::fabricPortGetMultiPortThroughput(uint32_t numPorts, zes_fabric_port_handle_t *phPort, zes_fabric_port_throughput_t **pThroughput) {
     return pFabricPortHandleContext->fabricPortGetMultiPortThroughput(numPorts, phPort, pThroughput);
+}
+
+void SysmanDeviceImp::getDeviceUuids(std::vector<std::string> &deviceUuids) {
+    return pOsSysman->getDeviceUuids(deviceUuids);
 }
 
 OsSysman *SysmanDeviceImp::deviceGetOsInterface() {

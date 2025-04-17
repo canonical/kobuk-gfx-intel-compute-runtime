@@ -25,6 +25,8 @@ struct _zet_metric_query_pool_handle_t {};
 struct _zet_metric_query_handle_t {};
 struct _zet_metric_programmable_exp_handle_t {};
 
+struct _zet_intel_metric_calculate_operation_exp_handle_t {};
+
 namespace L0 {
 
 struct METRICS_LOG_BITMASK {                    // NOLINT(readability-identifier-naming)
@@ -56,7 +58,7 @@ struct METRICS_LOG_BITMASK {                    // NOLINT(readability-identifier
 struct CommandList;
 struct MetricStreamer;
 struct MetricProgrammable;
-
+class MetricDeviceContext;
 class MetricSource {
   public:
     static constexpr uint32_t metricSourceTypeUndefined = 0u;
@@ -83,13 +85,20 @@ class MetricSource {
     uint32_t getType() const {
         return type;
     }
-    virtual ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup, void *pNext) = 0;
+    virtual ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup,
+                                                            zet_metric_group_properties_t *pBaseProperties,
+                                                            void *pNext) = 0;
     virtual ze_result_t createMetricGroupsFromMetrics(std::vector<zet_metric_handle_t> &metricList,
                                                       const char metricGroupNamePrefix[ZET_INTEL_MAX_METRIC_GROUP_NAME_PREFIX_EXP],
                                                       const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION],
                                                       uint32_t *maxMetricGroupCount,
                                                       std::vector<zet_metric_group_handle_t> &metricGroupList) = 0;
     virtual ze_result_t appendMarker(zet_command_list_handle_t hCommandList, zet_metric_group_handle_t hMetricGroup, uint32_t value) = 0;
+    virtual ze_result_t calcOperationCreate(MetricDeviceContext &metricDeviceContext,
+                                            zet_intel_metric_calculate_exp_desc_t *pCalculateDesc,
+                                            uint32_t *pCount,
+                                            zet_metric_handle_t *phExcludedMetrics,
+                                            zet_intel_metric_calculate_operation_exp_handle_t *phCalculateOperation) = 0;
 
   protected:
     uint32_t type = MetricSource::metricSourceTypeUndefined;
@@ -136,6 +145,7 @@ class MetricDeviceContext {
 
     static std::unique_ptr<MetricDeviceContext> create(Device &device);
     static ze_result_t enableMetricApi();
+    static void enableMetricApiForDevice(zet_device_handle_t hDevice, bool &isFailed);
     ze_result_t getConcurrentMetricGroups(uint32_t metricGroupCount, zet_metric_group_handle_t *phMetricGroups,
                                           uint32_t *pConcurrentGroupCount, uint32_t *pCountPerConcurrentGroup);
 
@@ -145,9 +155,18 @@ class MetricDeviceContext {
                                               const char description[ZET_MAX_METRIC_GROUP_DESCRIPTION],
                                               uint32_t *pMetricGroupCount,
                                               zet_metric_group_handle_t *phMetricGroups);
+    ze_result_t calcOperationCreate(zet_context_handle_t hContext,
+                                    zet_intel_metric_calculate_exp_desc_t *pCalculateDesc,
+                                    uint32_t *pCount,
+                                    zet_metric_handle_t *phExcludedMetrics,
+                                    zet_intel_metric_calculate_operation_exp_handle_t *phCalculateOperation);
     bool areMetricGroupsFromSameDeviceHierarchy(uint32_t count, zet_metric_group_handle_t *phMetricGroups);
 
   protected:
+    bool areMetricGroupsFromSameSource(uint32_t count, zet_metric_group_handle_t *phMetricGroups, uint32_t *sourceType);
+    bool areMetricsFromSameSource(uint32_t count, zet_metric_handle_t *phMetrics, uint32_t *sourceType);
+    bool areMetricsFromSameDeviceHierarchy(uint32_t count, zet_metric_handle_t *phMetrics);
+
     std::map<uint32_t, std::unique_ptr<MetricSource>> metricSources;
 
   private:
@@ -155,6 +174,8 @@ class MetricDeviceContext {
     struct Device &device;
     bool multiDeviceCapable = false;
     uint32_t subDeviceIndex = 0;
+    bool isEnableChecked = false;
+    std::mutex enableMetricsMutex;
 };
 
 struct Metric : _zet_metric_handle_t {
@@ -393,6 +414,30 @@ struct HomogeneousMultiDeviceMetricCreated : public MultiDeviceMetricImp {
     static MetricImp *create(MetricSource &metricSource, std::vector<MetricImp *> &subDeviceMetrics);
 };
 
+struct MetricCalcOp : _zet_intel_metric_calculate_operation_exp_handle_t {
+    virtual ~MetricCalcOp() = default;
+    MetricCalcOp() {}
+    virtual ze_result_t destroy() = 0;
+    virtual ze_result_t getReportFormat(uint32_t *pCount, zet_metric_handle_t *phMetrics) = 0;
+    static MetricCalcOp *fromHandle(zet_intel_metric_calculate_operation_exp_handle_t handle) {
+        return static_cast<MetricCalcOp *>(handle);
+    }
+    inline zet_intel_metric_calculate_operation_exp_handle_t toHandle() { return this; }
+    virtual ze_result_t metricCalculateMultipleValues(size_t rawDataSize, size_t *offset, const uint8_t *pRawData,
+                                                      uint32_t *pSetCount, uint32_t *pMetricsReportCountPerSet,
+                                                      uint32_t *pTotalMetricReportCount,
+                                                      zet_intel_metric_result_exp_t *pMetricResults) = 0;
+};
+
+struct MetricCalcOpImp : public MetricCalcOp {
+    ~MetricCalcOpImp() override = default;
+    MetricCalcOpImp(bool multiDevice) : isMultiDevice(multiDevice) {}
+    bool isRootDevice() { return isMultiDevice; }
+
+  protected:
+    bool isMultiDevice = false;
+};
+
 // MetricGroup.
 ze_result_t metricGroupGet(zet_device_handle_t hDevice, uint32_t *pCount, zet_metric_group_handle_t *phMetricGroups);
 
@@ -444,5 +489,15 @@ ze_result_t metricDecoderGetDecodableMetrics(zet_metric_decoder_exp_handle_t hMe
 ze_result_t metricTracerDecode(zet_metric_decoder_exp_handle_t hMetricDecoder, size_t *pRawDataSize, uint8_t *pRawData,
                                uint32_t metricsCount, zet_metric_handle_t *phMetrics, uint32_t *pSetCount, uint32_t *pMetricEntriesCountPerSet,
                                uint32_t *pMetricEntriesCount, zet_metric_entry_exp_t *pMetricEntries);
+
+ze_result_t metricCalculateOperationCreate(zet_context_handle_t hContext, zet_device_handle_t hDevice, zet_intel_metric_calculate_exp_desc_t *pCalculateDesc,
+                                           uint32_t *pCount, zet_metric_handle_t *phExcludedMetrics, zet_intel_metric_calculate_operation_exp_handle_t *phCalculateOperation);
+
+ze_result_t metricCalculateOperationDestroy(zet_intel_metric_calculate_operation_exp_handle_t hCalculateOperation);
+
+ze_result_t metricCalculateGetReportFormat(zet_intel_metric_calculate_operation_exp_handle_t hCalculateOperation,
+                                           uint32_t *pCount, zet_metric_handle_t *phMetrics);
+
+ze_result_t metricsEnable(zet_device_handle_t hDevice);
 
 } // namespace L0

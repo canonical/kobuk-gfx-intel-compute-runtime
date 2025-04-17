@@ -59,7 +59,7 @@ struct KernelImp : Kernel {
     ze_result_t setArgumentValue(uint32_t argIndex, size_t argSize, const void *pArgValue) override;
 
     void setGroupCount(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
-    void patchRegionParams(const CmdListKernelLaunchParams &launchParams) override;
+    void patchRegionParams(const CmdListKernelLaunchParams &launchParams, const ze_group_count_t &threadGroupDimensions) override;
 
     ze_result_t setGroupSize(uint32_t groupSizeX, uint32_t groupSizeY,
                              uint32_t groupSizeZ) override;
@@ -252,6 +252,7 @@ struct KernelImp : Kernel {
 
     const KernelImmutableData *kernelImmData = nullptr;
     Module *module = nullptr;
+    uint32_t implicitArgsVersion = 0;
 
     typedef ze_result_t (KernelImp::*KernelArgHandler)(uint32_t argIndex, size_t argSize, const void *argVal);
     std::vector<KernelArgInfo> kernelArgInfos;

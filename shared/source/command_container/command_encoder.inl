@@ -16,6 +16,7 @@
 #include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/bindless_heaps_helper.h"
 #include "shared/source/helpers/blit_commands_helper.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/definitions/command_encoder_args.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/hw_info.h"
@@ -56,23 +57,25 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
 
     dsh->align(NEO::EncodeDispatchKernel<Family>::getDefaultDshAlignment());
     uint32_t borderColorOffsetInDsh = 0;
+    auto borderColor = reinterpret_cast<const SAMPLER_BORDER_COLOR_STATE *>(ptrOffset(fnDynamicStateHeap, borderColorOffset));
+
+    auto &compilerProductHelper = rootDeviceEnvironment.getHelper<CompilerProductHelper>();
+    bool heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+
     if (!bindlessHeapHelper || (!bindlessHeapHelper->isGlobalDshSupported())) {
         borderColorOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
         // add offset of graphics allocation base address relative to heap base address
         if (bindlessHeapHelper) {
             borderColorOffsetInDsh += static_cast<uint32_t>(ptrDiff(dsh->getGpuBase(), bindlessHeapHelper->getGlobalHeapsBase()));
         }
-        auto borderColor = dsh->getSpace(borderColorSize);
-
-        memcpy_s(borderColor, borderColorSize, ptrOffset(fnDynamicStateHeap, borderColorOffset),
-                 borderColorSize);
+        auto borderColorDst = dsh->getSpace(borderColorSize);
+        memcpy_s(borderColorDst, borderColorSize, borderColor, borderColorSize);
 
         dsh->align(INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
         samplerStateOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
 
         dstSamplerState = reinterpret_cast<SAMPLER_STATE *>(dsh->getSpace(sizeSamplerState));
     } else {
-        auto borderColor = reinterpret_cast<const SAMPLER_BORDER_COLOR_STATE *>(ptrOffset(fnDynamicStateHeap, borderColorOffset));
         if (borderColor->getBorderColorRed() != 0.0f ||
             borderColor->getBorderColorGreen() != 0.0f ||
             borderColor->getBorderColorBlue() != 0.0f ||
@@ -95,13 +98,18 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
     SAMPLER_STATE state = {};
     for (uint32_t i = 0; i < samplerCount; i++) {
         state = srcSamplerState[i];
-        state.setIndirectStatePointer(static_cast<uint32_t>(borderColorOffsetInDsh));
+
+        if (heaplessEnabled) {
+            EncodeStates<Family>::adjustSamplerStateBorderColor(state, *borderColor);
+        } else {
+            state.setIndirectStatePointer(static_cast<uint32_t>(borderColorOffsetInDsh));
+        }
         helper.adjustSamplerState(&state, hwInfo);
         dstSamplerState[i] = state;
     }
 
     return samplerStateOffsetInDsh;
-} // namespace NEO
+}
 
 template <typename Family>
 void EncodeMathMMIO<Family>::encodeMulRegVal(CommandContainer &container, uint32_t offset, uint32_t val, uint64_t dstAddress, bool isBcs) {
@@ -577,11 +585,22 @@ void EncodeIndirectParams<Family>::encode(CommandContainer &container, uint64_t 
     UNRECOVERABLE_IF(NEO::isValidOffset(kernelDescriptor.payloadMappings.dispatchTraits.workDim) && (kernelDescriptor.payloadMappings.dispatchTraits.workDim & 0b11) != 0u);
     setWorkDimIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.workDim, crossThreadDataGpuVa, dispatchInterface->getGroupSize());
     if (implicitArgsGpuPtr) {
-        CrossThreadDataOffset groupCountOffset[] = {offsetof(ImplicitArgs, groupCountX), offsetof(ImplicitArgs, groupCountY), offsetof(ImplicitArgs, groupCountZ)};
-        CrossThreadDataOffset globalSizeOffset[] = {offsetof(ImplicitArgs, globalSizeX), offsetof(ImplicitArgs, globalSizeY), offsetof(ImplicitArgs, globalSizeZ)};
-        setGroupCountIndirect(container, groupCountOffset, implicitArgsGpuPtr);
-        setGlobalWorkSizeIndirect(container, globalSizeOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
-        setWorkDimIndirect(container, offsetof(ImplicitArgs, numWorkDim), implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+        const auto version = container.getDevice()->getGfxCoreHelper().getImplicitArgsVersion();
+        if (version == 0) {
+            constexpr CrossThreadDataOffset groupCountOffset[] = {offsetof(ImplicitArgsV0, groupCountX), offsetof(ImplicitArgsV0, groupCountY), offsetof(ImplicitArgsV0, groupCountZ)};
+            constexpr CrossThreadDataOffset globalSizeOffset[] = {offsetof(ImplicitArgsV0, globalSizeX), offsetof(ImplicitArgsV0, globalSizeY), offsetof(ImplicitArgsV0, globalSizeZ)};
+            constexpr auto numWorkDimOffset = offsetof(ImplicitArgsV0, numWorkDim);
+            setGroupCountIndirect(container, groupCountOffset, implicitArgsGpuPtr);
+            setGlobalWorkSizeIndirect(container, globalSizeOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+            setWorkDimIndirect(container, numWorkDimOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+        } else if (version == 1) {
+            constexpr CrossThreadDataOffset groupCountOffsetV1[] = {offsetof(ImplicitArgsV1, groupCountX), offsetof(ImplicitArgsV1, groupCountY), offsetof(ImplicitArgsV1, groupCountZ)};
+            constexpr CrossThreadDataOffset globalSizeOffsetV1[] = {offsetof(ImplicitArgsV1, globalSizeX), offsetof(ImplicitArgsV1, globalSizeY), offsetof(ImplicitArgsV1, globalSizeZ)};
+            constexpr auto numWorkDimOffsetV1 = offsetof(ImplicitArgsV1, numWorkDim);
+            setGroupCountIndirect(container, groupCountOffsetV1, implicitArgsGpuPtr);
+            setGlobalWorkSizeIndirect(container, globalSizeOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+            setWorkDimIndirect(container, numWorkDimOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+        }
     }
 }
 

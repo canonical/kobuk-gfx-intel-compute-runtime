@@ -254,8 +254,8 @@ ze_result_t ModuleTranslationUnit::staticLinkSpirV(std::vector<const char *> inp
     return this->compileGenBinary(linkInputArgs, true);
 }
 
-ze_result_t ModuleTranslationUnit::buildFromSpirV(const char *input, uint32_t inputSize, const char *buildOptions, const char *internalBuildOptions,
-                                                  const ze_module_constants_t *pConstants) {
+ze_result_t ModuleTranslationUnit::buildFromIntermediate(IGC::CodeType::CodeType_t intermediateType, const char *input, uint32_t inputSize, const char *buildOptions, const char *internalBuildOptions,
+                                                         const ze_module_constants_t *pConstants) {
     const auto &neoDevice = device->getNEODevice();
     auto compilerInterface = neoDevice->getCompilerInterface();
     const auto driverHandle = static_cast<DriverHandleImp *>(device->getDriverHandle());
@@ -283,7 +283,7 @@ ze_result_t ModuleTranslationUnit::buildFromSpirV(const char *input, uint32_t in
         }
     }
 
-    NEO::TranslationInput inputArgs = {IGC::CodeType::spirV, IGC::CodeType::oclGenBin};
+    NEO::TranslationInput inputArgs = {intermediateType, IGC::CodeType::oclGenBin};
 
     inputArgs.src = ArrayRef<const char>(input, inputSize);
     inputArgs.apiOptions = ArrayRef<const char>(this->options.c_str(), this->options.length());
@@ -503,9 +503,10 @@ void ModuleTranslationUnit::processDebugData() {
 ModuleImp::ModuleImp(Device *device, ModuleBuildLog *moduleBuildLog, ModuleType type)
     : device(device), translationUnit(std::make_unique<ModuleTranslationUnit>(device)),
       moduleBuildLog(moduleBuildLog), type(type) {
+    auto &gfxCoreHelper = device->getGfxCoreHelper();
     auto &hwInfo = device->getHwInfo();
+    this->isaAllocationPageSize = gfxCoreHelper.useSystemMemoryPlacementForISA(hwInfo) ? MemoryConstants::pageSize : MemoryConstants::pageSize64k;
     this->productFamily = hwInfo.platform.eProductFamily;
-    this->isaAllocationPageSize = getIsaAllocationPageSize();
 }
 
 ModuleImp::~ModuleImp() {
@@ -750,7 +751,14 @@ inline ze_result_t ModuleImp::initializeTranslationUnit(const ze_module_desc_t *
                                                          internalBuildOptions.c_str(),
                                                          desc->pConstants);
         } else {
-            return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+            this->precompiled = false;
+            this->isFunctionSymbolExportEnabled = true;
+            this->isGlobalSymbolExportEnabled = true;
+            return this->translationUnit->buildExt(desc->format,
+                                                   reinterpret_cast<const char *>(desc->pInputModule),
+                                                   static_cast<uint32_t>(desc->inputSize),
+                                                   buildOptions.c_str(),
+                                                   internalBuildOptions.c_str());
         }
     }
 }
@@ -1711,21 +1719,6 @@ NEO::GraphicsAllocation *ModuleImp::getKernelsIsaParentAllocation() const {
         return nullptr;
     }
     return sharedIsaAllocation->getGraphicsAllocation();
-}
-
-size_t ModuleImp::getIsaAllocationPageSize() const {
-    auto &gfxCoreHelper = device->getGfxCoreHelper();
-    auto &hwInfo = device->getHwInfo();
-
-    if (gfxCoreHelper.useSystemMemoryPlacementForISA(hwInfo)) {
-        return MemoryConstants::pageSize;
-    }
-
-    if (device->getProductHelper().is2MBLocalMemAlignmentEnabled()) {
-        return MemoryConstants::pageSize2M;
-    } else {
-        return MemoryConstants::pageSize64k;
-    }
 }
 
 } // namespace L0

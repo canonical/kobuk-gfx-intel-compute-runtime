@@ -34,7 +34,9 @@
 #include "shared/source/os_interface/os_time.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/release_helper/release_helper.h"
+#include "shared/source/sip_external_lib/sip_external_lib.h"
 #include "shared/source/utilities/software_tags_manager.h"
+#include "shared/source/utilities/wait_util.h"
 
 namespace NEO {
 
@@ -84,6 +86,8 @@ void RootDeviceEnvironment::setHwInfo(const HardwareInfo *hwInfo) {
     if (debugManager.flags.DisableSupportForL0Debugger.get() == 1) {
         this->hwInfo->capabilityTable.l0DebuggerSupported = false;
     }
+
+    WaitUtils::init(WaitUtils::WaitpkgUse::tpause, *hwInfo);
 }
 
 bool RootDeviceEnvironment::isFullRangeSvm() const {
@@ -153,6 +157,16 @@ CompilerInterface *RootDeviceEnvironment::getCompilerInterface() {
         }
     }
     return this->compilerInterface.get();
+}
+
+SipExternalLib *RootDeviceEnvironment::getSipExternalLibInterface() {
+    if (sipExternalLib.get() == nullptr) {
+        if (gfxCoreHelper->getSipBinaryFromExternalLib()) {
+            std::lock_guard<std::mutex> autolock(this->mtx);
+            sipExternalLib.reset(SipExternalLib::getSipExternalLibInstance());
+        }
+    }
+    return sipExternalLib.get();
 }
 
 void RootDeviceEnvironment::initHelpers() {
@@ -225,7 +239,7 @@ BuiltIns *RootDeviceEnvironment::getBuiltIns() {
     return this->builtins.get();
 }
 
-void RootDeviceEnvironment::limitNumberOfCcs(uint32_t numberOfCcs) {
+void RootDeviceEnvironment::setNumberOfCcs(uint32_t numberOfCcs) {
 
     hwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled = std::min(hwInfo->gtSystemInfo.CCSInfo.NumberOfCCSEnabled, numberOfCcs);
     limitedNumberOfCcs = true;

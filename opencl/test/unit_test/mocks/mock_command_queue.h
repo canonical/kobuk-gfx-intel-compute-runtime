@@ -190,6 +190,13 @@ class MockCommandQueue : public CommandQueue {
                              GraphicsAllocation *mapAllocation, cl_uint numEventsInWaitList,
                              const cl_event *eventWaitList, cl_event *event) override { return CL_SUCCESS; }
 
+    cl_int enqueueReadBufferImpl(Buffer *buffer, cl_bool blockingRead, size_t offset, size_t cb,
+                                 void *ptr, GraphicsAllocation *mapAllocation, cl_uint numEventsInWaitList,
+                                 const cl_event *eventWaitList, cl_event *event, CommandStreamReceiver &csr) override {
+        enqueueReadBufferImplCalledCount++;
+        return CL_SUCCESS;
+    }
+
     cl_int enqueueReadImage(Image *srcImage, cl_bool blockingRead, const size_t *origin, const size_t *region,
                             size_t rowPitch, size_t slicePitch, void *ptr,
                             GraphicsAllocation *mapAllocation, cl_uint numEventsInWaitList,
@@ -276,6 +283,7 @@ class MockCommandQueue : public CommandQueue {
     std::atomic<TaskCountType> latestTaskCountWaited{std::numeric_limits<TaskCountType>::max()};
     std::optional<WaitStatus> waitUntilCompleteReturnValue{};
     int waitUntilCompleteCalledCount{0};
+    size_t enqueueReadBufferImplCalledCount = 0;
 };
 
 template <typename GfxFamily>
@@ -433,6 +441,16 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
         return CL_INVALID_OPERATION;
     }
 
+    cl_int enqueueReadBufferImpl(Buffer *buffer, cl_bool blockingRead, size_t offset, size_t size, void *ptr, GraphicsAllocation *mapAllocation,
+                                 cl_uint numEventsInWaitList, const cl_event *eventWaitList, cl_event *event, CommandStreamReceiver &csr) override {
+        enqueueReadBufferCounter++;
+        blockingReadBuffer = blockingRead == CL_TRUE;
+        if (enqueueReadBufferCallBase) {
+            return BaseClass::enqueueReadBufferImpl(buffer, blockingRead, offset, size, ptr, mapAllocation, numEventsInWaitList, eventWaitList, event, csr);
+        }
+        return CL_INVALID_OPERATION;
+    }
+
     void enqueueHandlerHook(const unsigned int commandType, const MultiDispatchInfo &dispatchInfo) override {
         kernelParams = dispatchInfo.peekBuiltinOpParams();
         lastCommandType = commandType;
@@ -540,8 +558,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     bool enqueueReadImageCallBase = true;
     size_t enqueueWriteBufferCounter = 0;
     bool enqueueWriteBufferCallBase = true;
+    size_t enqueueReadBufferCounter = 0;
+    bool enqueueReadBufferCallBase = true;
     size_t requestedCmdStreamSize = 0;
     bool blockingWriteBuffer = false;
+    bool blockingReadBuffer = false;
     bool storeMultiDispatchInfo = false;
     bool notifyEnqueueReadBufferCalled = false;
     bool notifyEnqueueReadImageCalled = false;

@@ -71,6 +71,9 @@ int fsyncArgPassed = 0;
 int fsyncRetVal = 0;
 uint32_t mkfifoFuncCalled = 0;
 bool failMkfifo = 0;
+bool failFcntl = false;
+bool failFcntl1 = false;
+bool failAccess = false;
 
 std::vector<void *> mmapVector(64);
 std::vector<void *> mmapCapturedExtendedPointers(64);
@@ -235,6 +238,9 @@ unsigned long getNumThreads() {
 
 int access(const char *pathName, int mode) {
     accessFuncCalled++;
+    if (failAccess) {
+        return -1;
+    }
     if (F_OK == mode) {
         if (mkfifoPathNamePassed == pathName) {
             return 0;
@@ -383,13 +389,22 @@ int pipe(int pipeFd[2]) {
 }
 
 int fcntl(int fd, int cmd) {
+    if (failFcntl) {
+        return -1;
+    }
+
     if (cmd == F_GETFL) {
         getFileDescriptorFlagsCalled++;
         return O_RDWR;
     }
     return 0;
 }
+
 int fcntl(int fd, int cmd, int arg) {
+    if (failFcntl1) {
+        return -1;
+    }
+
     if (cmd == F_SETFL) {
         setFileDescriptorFlagsCalled++;
         passedFileDescriptorFlagsToSet = arg;
@@ -418,7 +433,7 @@ int mkstemp(char *fileName) {
 int flock(int fd, int flag) {
     flockCalled++;
 
-    if (fd > 0 && flockRetVal == 0) {
+    if (fd >= 0 && flockRetVal == 0) {
         return 0;
     }
 

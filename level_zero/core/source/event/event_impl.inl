@@ -268,7 +268,7 @@ ze_result_t EventImp<TagSizeT>::queryCounterBasedEventStatus() {
         bool signaled = true;
         const uint64_t *hostAddress = ptrOffset(inOrderExecInfo->getBaseHostAddress(), this->inOrderAllocationOffset);
         for (uint32_t i = 0; i < inOrderExecInfo->getNumHostPartitionsToWait(); i++) {
-            if (!NEO::WaitUtils::waitFunctionWithPredicate<const uint64_t>(hostAddress, waitValue, std::greater_equal<uint64_t>())) {
+            if (!NEO::WaitUtils::waitFunctionWithPredicate<const uint64_t>(hostAddress, waitValue, std::greater_equal<uint64_t>(), 0)) {
                 signaled = false;
                 break;
             }
@@ -362,7 +362,8 @@ ze_result_t EventImp<TagSizeT>::queryStatusEventPackets() {
             bool ready = NEO::WaitUtils::waitFunctionWithPredicate<const TagSizeT>(
                 static_cast<TagSizeT const *>(queryAddress),
                 queryVal,
-                std::not_equal_to<TagSizeT>());
+                std::not_equal_to<TagSizeT>(),
+                0);
             if (!ready) {
                 return ZE_RESULT_NOT_READY;
             }
@@ -378,7 +379,8 @@ ze_result_t EventImp<TagSizeT>::queryStatusEventPackets() {
                 bool ready = NEO::WaitUtils::waitFunctionWithPredicate<const TagSizeT>(
                     static_cast<TagSizeT const *>(queryAddress),
                     queryVal,
-                    std::not_equal_to<TagSizeT>());
+                    std::not_equal_to<TagSizeT>(),
+                    0);
                 if (!ready) {
                     return ZE_RESULT_NOT_READY;
                 }
@@ -446,7 +448,7 @@ bool EventImp<TagSizeT>::handlePreQueryStatusOperationsAndCheckCompletion() {
     if (this->tbxMode) {
         bool downloadedAllocation = (eventPoolAllocation == nullptr);
         bool downloadedInOrdedAllocation = (inOrderExecInfo.get() == nullptr);
-        if (inOrderExecInfo && inOrderExecInfo->isExternalMemoryExecInfo()) {
+        if (inOrderExecInfo && !inOrderExecInfo->getDeviceCounterAllocation()) {
             downloadedInOrdedAllocation = true;
             DEBUG_BREAK_IF(true); //  external allocation - not able to download
         }

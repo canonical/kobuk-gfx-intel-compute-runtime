@@ -1729,14 +1729,14 @@ HWTEST2_F(CommandListCreateTests, givenPlatformNotSupportsSharedHeapsWhenImmedia
 
 using PrimaryBatchBufferCmdListTest = Test<PrimaryBatchBufferCmdListFixture>;
 
-HWTEST_F(PrimaryBatchBufferCmdListTest, givenForcedPrimaryBatchBufferWhenRegularAndImmediateObjectCreatedThenRegularSetPrimaryFlagAndImmediateNot) {
+HWTEST_F(PrimaryBatchBufferCmdListTest, givenForcedPrimaryBatchBufferWhenRegularAndImmediateObjectCreatedThenRegularAndImmediateSetPrimaryFlag) {
     EXPECT_TRUE(commandList->dispatchCmdListBatchBufferAsPrimary);
     EXPECT_TRUE(commandQueue->dispatchCmdListBatchBufferAsPrimary);
 
-    EXPECT_FALSE(commandListImmediate->dispatchCmdListBatchBufferAsPrimary);
+    EXPECT_TRUE(commandListImmediate->dispatchCmdListBatchBufferAsPrimary);
     ASSERT_NE(nullptr, commandListImmediate->cmdQImmediate);
     auto immediateCmdQueue = static_cast<L0::ult::CommandQueue *>(commandListImmediate->cmdQImmediate);
-    EXPECT_FALSE(immediateCmdQueue->dispatchCmdListBatchBufferAsPrimary);
+    EXPECT_TRUE(immediateCmdQueue->dispatchCmdListBatchBufferAsPrimary);
 }
 
 HWTEST_F(PrimaryBatchBufferCmdListTest, givenPrimaryBatchBufferWhenAppendingKernelAndClosingCommandListThenExpectAlignedSpaceForBatchBufferStart) {
@@ -1851,6 +1851,46 @@ HWTEST_F(PrimaryBatchBufferCmdListTest, givenRegularCmdListWhenFlushingThenPassS
     EXPECT_TRUE(ultCsr->latestFlushedBatchBuffer.hasStallingCmds);
 }
 
+HWTEST_F(PrimaryBatchBufferCmdListTest, givenRegularCmdListWhenNoPreambleExpectedAndForceBbStartThenDispatchBbStart) {
+    using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
+
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    auto result = commandList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    result = commandList->close();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    auto cmdListHandle = commandList->toHandle();
+
+    auto regularCmdBufferAllocation = commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation();
+
+    // 1st dispatch can carry state preamble
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto &queueStream = commandQueue->commandStream;
+
+    auto offsetBefore = queueStream.getUsed();
+    commandQueue->triggerBbStartJump();
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    auto offsetAfter = queueStream.getUsed();
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
+        cmdList,
+        ptrOffset(queueStream.getCpuBase(), offsetBefore),
+        offsetAfter - offsetBefore));
+    ASSERT_NE(0u, cmdList.size());
+
+    auto firstCmdIt = cmdList.begin();
+    auto bbStartCmd = genCmdCast<MI_BATCH_BUFFER_START *>(*firstCmdIt);
+    ASSERT_NE(nullptr, bbStartCmd);
+
+    EXPECT_EQ(regularCmdBufferAllocation->getGpuAddress(), bbStartCmd->getBatchBufferStartAddress());
+    EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER::SECOND_LEVEL_BATCH_BUFFER_FIRST_LEVEL_BATCH, bbStartCmd->getSecondLevelBatchBuffer());
+}
+
 HWTEST2_F(PrimaryBatchBufferCmdListTest, givenRelaxedOrderingAndRegularCmdListAndSubmittedToImmediateWhenFlushingThenPassStallingCmdsInfo, IsAtLeastXeHpcCore) {
     DebugManagerStateRestore restore;
     debugManager.flags.DirectSubmissionRelaxedOrdering.set(1);
@@ -1863,7 +1903,11 @@ HWTEST2_F(PrimaryBatchBufferCmdListTest, givenRelaxedOrderingAndRegularCmdListAn
     ASSERT_NE(nullptr, immCommandList);
     auto whiteBoxCmdList = static_cast<CommandList *>(immCommandList.get());
     whiteBoxCmdList->enableInOrderExecution();
-
+    uint64_t *hostAddress = ptrOffset(whiteBoxCmdList->inOrderExecInfo->getBaseHostAddress(), whiteBoxCmdList->inOrderExecInfo->getAllocationOffset());
+    for (uint32_t i = 0; i < whiteBoxCmdList->inOrderExecInfo->getNumHostPartitionsToWait(); i++) {
+        *hostAddress = std::numeric_limits<uint64_t>::max();
+        hostAddress = ptrOffset(hostAddress, device->getL0GfxCoreHelper().getImmediateWritePostSyncOffset());
+    }
     auto ultCsr = static_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(whiteBoxCmdList->getCsr(false));
     ultCsr->recordFlushedBatchBuffer = true;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/command_container/cmdcontainer.h"
 #include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/command_stream/preemption_mode.h"
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/command_stream/submission_status.h"
 #include "shared/source/command_stream/task_count_helper.h"
 #include "shared/source/command_stream/wait_status.h"
@@ -110,6 +111,12 @@ struct CommandQueueImp : public CommandQueue {
     void clearHeapContainer() {
         heapContainer.clear();
     }
+    NEO::LinearStream *getStartingCmdBuffer() const {
+        return startingCmdBuffer;
+    }
+    void triggerBbStartJump() {
+        forceBbStartJump = true;
+    }
 
   protected:
     MOCKABLE_VIRTUAL NEO::SubmissionStatus submitBatchBuffer(size_t offset, NEO::ResidencyContainer &residencyContainer, void *endingCmdPtr,
@@ -167,6 +174,7 @@ struct CommandQueueImp : public CommandQueue {
 
     std::atomic<bool> cmdListWithAssertExecuted = false;
     bool useKmdWaitFunction = false;
+    bool forceBbStartJump = false;
 };
 
 } // namespace L0

@@ -26,11 +26,9 @@
 #include "shared/source/os_interface/os_environment.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/product_helper.h"
-#include "shared/source/utilities/wait_util.h"
 
 namespace NEO {
 ExecutionEnvironment::ExecutionEnvironment() {
-    WaitUtils::init();
     this->configureNeoEnvironment();
 }
 
@@ -89,6 +87,8 @@ bool ExecutionEnvironment::initializeMemoryManager() {
         memoryManager = MemoryManager::createMemoryManager(*this, driverModelType);
     } break;
     }
+
+    memoryManager->initUsmReuseMaxSize();
 
     return memoryManager->isInitialized();
 }
@@ -152,9 +152,9 @@ DirectSubmissionController *ExecutionEnvironment::initializeDirectSubmissionCont
     return directSubmissionController.get();
 }
 
-void ExecutionEnvironment::initializeUnifiedMemoryReuseCleaner() {
+void ExecutionEnvironment::initializeUnifiedMemoryReuseCleaner(bool enable) {
     std::lock_guard<std::mutex> lock(initializeUnifiedMemoryReuseCleanerMutex);
-    auto initializeUnifiedMemoryReuseCleaner = UnifiedMemoryReuseCleaner::isSupported();
+    auto initializeUnifiedMemoryReuseCleaner = UnifiedMemoryReuseCleaner::isSupported() && enable;
 
     if (debugManager.flags.ExperimentalUSMAllocationReuseCleaner.get() != -1) {
         initializeUnifiedMemoryReuseCleaner = debugManager.flags.ExperimentalUSMAllocationReuseCleaner.get() == 1;
@@ -371,7 +371,7 @@ void ExecutionEnvironment::adjustCcsCount(const uint32_t rootDeviceIndex) const 
     auto &rootDeviceEnvironment = rootDeviceEnvironments[rootDeviceIndex];
     UNRECOVERABLE_IF(!rootDeviceEnvironment);
     if (rootDeviceNumCcsMap.find(rootDeviceIndex) != rootDeviceNumCcsMap.end()) {
-        rootDeviceEnvironment->limitNumberOfCcs(rootDeviceNumCcsMap.at(rootDeviceIndex));
+        rootDeviceEnvironment->setNumberOfCcs(rootDeviceNumCcsMap.at(rootDeviceIndex));
     } else {
         adjustCcsCountImpl(rootDeviceEnvironment.get());
     }
@@ -385,21 +385,11 @@ void ExecutionEnvironment::parseCcsCountLimitations() {
         return;
     }
 
-    const uint32_t numRootDevices = static_cast<uint32_t>(rootDeviceEnvironments.size());
-
-    auto numberOfCcsEntries = StringHelpers::split(numberOfCcsString, ",");
-
-    for (const auto &entry : numberOfCcsEntries) {
-        auto subEntries = StringHelpers::split(entry, ":");
-        uint32_t rootDeviceIndex = StringHelpers::toUint32t(subEntries[0]);
-
-        if (rootDeviceIndex < numRootDevices) {
-            if (subEntries.size() > 1) {
-                uint32_t maxCcsCount = StringHelpers::toUint32t(subEntries[1]);
-                rootDeviceNumCcsMap.insert({rootDeviceIndex, maxCcsCount});
-                rootDeviceEnvironments[rootDeviceIndex]->limitNumberOfCcs(maxCcsCount);
-            }
-        }
+    for (auto rootDeviceIndex = 0u; rootDeviceIndex < rootDeviceEnvironments.size(); rootDeviceIndex++) {
+        auto &rootDeviceEnvironment = rootDeviceEnvironments[rootDeviceIndex];
+        UNRECOVERABLE_IF(!rootDeviceEnvironment);
+        auto &productHelper = rootDeviceEnvironment->getHelper<ProductHelper>();
+        productHelper.parseCcsMode(numberOfCcsString, rootDeviceNumCcsMap, rootDeviceIndex, rootDeviceEnvironment.get());
     }
 }
 

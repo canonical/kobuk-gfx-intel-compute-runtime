@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -21,10 +21,13 @@ using ClEnqueueReadBufferTests = ApiTests;
 namespace ULT {
 
 TEST_F(ClEnqueueReadBufferTests, GivenCorrectArgumentsWhenReadingBufferThenSuccessIsReturned) {
-    MockBuffer buffer{};
+    MockContext context{};
+    MockGraphicsAllocation allocation{};
+    MockBuffer buffer{&context, allocation};
+    MockCommandQueue commandQueue{context};
     auto data = 1;
     auto retVal = clEnqueueReadBuffer(
-        pCommandQueue,
+        &commandQueue,
         &buffer,
         false,
         0,
@@ -35,6 +38,34 @@ TEST_F(ClEnqueueReadBufferTests, GivenCorrectArgumentsWhenReadingBufferThenSucce
         nullptr);
 
     EXPECT_EQ(CL_SUCCESS, retVal);
+}
+
+TEST_F(ClEnqueueReadBufferTests, GivenNonUsmMemoryWhenReadingBufferThenNonUsmPointerIsNotImported) {
+    DebugManagerStateRestore restorer{};
+    // 1KB staging buffer size
+    debugManager.flags.StagingBufferSize.set(1);
+    debugManager.flags.EnableCopyWithStagingBuffers.set(1);
+
+    MockContext context{};
+    MockGraphicsAllocation allocation{};
+    MockBuffer buffer{&context, allocation};
+    MockCommandQueue commandQueue{context};
+    char data[2048];
+    auto retVal = clEnqueueReadBuffer(
+        &commandQueue,
+        &buffer,
+        false,
+        0,
+        sizeof(data),
+        data,
+        0,
+        nullptr,
+        nullptr);
+
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    // 2 * 1KB copies
+    EXPECT_EQ(2u, commandQueue.enqueueReadBufferImplCalledCount);
 }
 
 TEST_F(ClEnqueueReadBufferTests, GivenQueueIncapableArgumentsWhenReadingBufferThenInvalidOperationIsReturned) {

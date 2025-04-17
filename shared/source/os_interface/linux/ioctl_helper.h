@@ -238,6 +238,8 @@ class IoctlHelper {
     virtual uint32_t getNumProcesses() const { return 1; }
 
     virtual bool makeResidentBeforeLockNeeded() const { return false; }
+    virtual bool hasContextFreqHint() { return false; }
+    virtual void fillExtSetparamLowLatency(GemContextCreateExtSetParam &extSetparam) { return; }
 
   protected:
     Drm &drm;
@@ -273,7 +275,9 @@ class IoctlHelperI915 : public IoctlHelper {
     bool getGemTiling(void *setTiling) override;
     bool setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) override;
     void insertEngineToContextParams(ContextParamEngines<> &contextParamEngines, uint32_t engineId, const EngineClassInstance *engineClassInstance, uint32_t tileId, bool hasVirtualEngines) override;
-    int getTileIdFromGtId(int gtId) const override { return -1; }
+    int getTileIdFromGtId(int gtId) const override { return gtId; }
+    bool hasContextFreqHint() override;
+    void fillExtSetparamLowLatency(GemContextCreateExtSetParam &extSetparam) override;
 
   protected:
     virtual std::vector<MemoryRegion> translateToMemoryRegions(const std::vector<uint64_t> &regionInfo);

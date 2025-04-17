@@ -22,20 +22,6 @@ void ProductHelperHw<IGFX_UNKNOWN>::adjustSamplerState(void *sampler, const Hard
 }
 
 template <>
-const std::vector<uint32_t> ProductHelperHw<IGFX_UNKNOWN>::getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const {
-    return {};
-}
-template <>
-uint32_t ProductHelperHw<IGFX_UNKNOWN>::getMaxLocalRegionSize(const HardwareInfo &hwInfo) const {
-    return 0;
-}
-
-template <>
-uint32_t ProductHelperHw<IGFX_UNKNOWN>::getMaxLocalSubRegionSize(const HardwareInfo &hwInfo) const {
-    return 0;
-}
-
-template <>
 uint32_t ProductHelperHw<IGFX_UNKNOWN>::getMaxThreadsForWorkgroupInDSSOrSS(const HardwareInfo &hwInfo, uint32_t maxNumEUsPerSubSlice, uint32_t maxNumEUsPerDualSubSlice) const {
     return 0;
 }
@@ -164,11 +150,6 @@ bool ProductHelperHw<IGFX_UNKNOWN>::isDefaultEngineTypeAdjustmentRequired(const 
 
 template <>
 bool ProductHelperHw<IGFX_UNKNOWN>::isDisableOverdispatchAvailable(const HardwareInfo &hwInfo) const {
-    return false;
-}
-
-template <>
-bool ProductHelperHw<IGFX_UNKNOWN>::allowCompression(const HardwareInfo &hwInfo) const {
     return false;
 }
 
@@ -361,10 +342,6 @@ void ProductHelperHw<IGFX_UNKNOWN>::updateScmCommand(void *const commandPtr, con
 }
 
 template <>
-void ProductHelperHw<IGFX_UNKNOWN>::enableCompression(HardwareInfo *hwInfo) const {
-}
-
-template <>
 bool ProductHelperHw<IGFX_UNKNOWN>::isCooperativeEngineSupported(const HardwareInfo &hwInfo) const {
     return false;
 }
@@ -432,33 +409,33 @@ std::vector<uint32_t> ProductHelperHw<IGFX_UNKNOWN>::getSupportedNumGrfs(const R
     return {};
 }
 
-template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isBufferPoolAllocatorSupported() const {
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::isBufferPoolAllocatorSupported() const {
     return false;
 }
 
-template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isHostUsmPoolAllocatorSupported() const {
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::isHostUsmPoolAllocatorSupported() const {
     return false;
 }
 
-template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isDeviceUsmPoolAllocatorSupported() const {
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::isDeviceUsmPoolAllocatorSupported() const {
     return false;
 }
 
-template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isDeviceUsmAllocationReuseSupported() const {
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::isDeviceUsmAllocationReuseSupported() const {
     return false;
 }
 
-template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isHostUsmAllocationReuseSupported() const {
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::isHostUsmAllocationReuseSupported() const {
     return false;
 }
 
-template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::useLocalPreferredForCacheableBuffers() const {
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::useLocalPreferredForCacheableBuffers() const {
     return false;
 }
 
@@ -522,6 +499,14 @@ template <>
 bool ProductHelperHw<IGFX_UNKNOWN>::is48bResourceNeededForRayTracing() const {
     return true;
 }
+
+template <>
+bool ProductHelperHw<IGFX_UNKNOWN>::isCompressionForbidden(const HardwareInfo &hwInfo) const {
+    return false;
+}
+
+template <>
+void ProductHelperHw<IGFX_UNKNOWN>::setRenderCompressedFlags(HardwareInfo &hwInfo) const {}
 
 } // namespace NEO
 

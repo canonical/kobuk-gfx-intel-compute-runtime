@@ -64,7 +64,6 @@ const RuntimeCapabilityTable LNL::capabilityTable{
     true,                                                      // instrumentationEnabled
     false,                                                     // supportCacheFlushAfterWalker
     true,                                                      // supportsImages
-    false,                                                     // supportsPipes
     true,                                                      // supportsOcl21Features
     true,                                                      // supportsOnDemandPageFaults
     true,                                                      // supportsIndependentForwardProgress
@@ -91,6 +90,8 @@ void LNL::setupFeatureAndWorkaroundTable(HardwareInfo *hwInfo, const ReleaseHelp
     featureTable->flags.ftrPml5Support = true;
 
     featureTable->ftrBcsInfo = 1;
+    hwInfo->workaroundTable.flags.wa_14018976079 = true;
+    hwInfo->workaroundTable.flags.wa_14018984349 = true;
 }
 
 FeatureTable LNL::featureTable{};

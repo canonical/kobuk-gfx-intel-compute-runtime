@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,19 +8,18 @@
 #include "shared/source/utilities/wait_util.h"
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/hw_info.h"
 #include "shared/source/utilities/cpu_info.h"
 
 namespace NEO {
 
 namespace WaitUtils {
 
-constexpr uint64_t defaultCounterValue = 10000;
-constexpr uint32_t defaultControlValue = 0;
-constexpr bool defaultEnableWaitPkg = false;
+WaitpkgUse waitpkgUse = WaitpkgUse::uninitialized;
 
+int64_t waitPkgThresholdInMicroSeconds = defaultWaitPkgThresholdInMicroSeconds;
 uint64_t waitpkgCounterValue = defaultCounterValue;
 uint32_t waitpkgControlValue = defaultControlValue;
-
 uint32_t waitCount = defaultWaitCount;
 
 #ifdef SUPPORTS_WAITPKG
@@ -28,33 +27,45 @@ bool waitpkgSupport = SUPPORTS_WAITPKG;
 #else
 bool waitpkgSupport = false;
 #endif
-bool waitpkgUse = false;
 
-void init() {
-    bool enableWaitPkg = defaultEnableWaitPkg;
-    int32_t overrideEnableWaitPkg = debugManager.flags.EnableWaitpkg.get();
-    if (overrideEnableWaitPkg != -1) {
-        enableWaitPkg = !!(overrideEnableWaitPkg);
-    }
-    if (enableWaitPkg && waitpkgSupport) {
-        if (CpuInfo::getInstance().isFeatureSupported(CpuInfo::featureWaitPkg)) {
-            waitpkgUse = true;
-            waitCount = 0;
-        }
+void init(WaitpkgUse inputWaitpkgUse, const HardwareInfo &hwInfo) {
+    if (debugManager.flags.WaitLoopCount.get() != -1) {
+        waitCount = debugManager.flags.WaitLoopCount.get();
     }
 
-    int64_t overrideWaitPkgCounter = debugManager.flags.WaitpkgCounterValue.get();
-    if (overrideWaitPkgCounter != -1) {
-        waitpkgCounterValue = static_cast<uint64_t>(overrideWaitPkgCounter);
-    }
-    int32_t overrideWaitPkgControl = debugManager.flags.WaitpkgControlValue.get();
-    if (overrideWaitPkgControl != -1) {
-        waitpkgControlValue = static_cast<uint32_t>(overrideWaitPkgControl);
+    if (waitpkgUse > WaitpkgUse::noUse) {
+        return;
     }
 
-    int32_t overrideWaitCount = debugManager.flags.WaitLoopCount.get();
-    if (overrideWaitCount != -1) {
-        waitCount = static_cast<uint32_t>(overrideWaitCount);
+    if (!(waitpkgSupport && CpuInfo::getInstance().isFeatureSupported(CpuInfo::featureWaitPkg))) {
+        waitpkgUse = WaitpkgUse::noUse;
+        return;
+    }
+
+    if (debugManager.flags.EnableWaitpkg.get() != -1) {
+        inputWaitpkgUse = static_cast<WaitpkgUse>(debugManager.flags.EnableWaitpkg.get());
+    }
+
+    waitpkgUse = inputWaitpkgUse;
+
+    if (!hwInfo.capabilityTable.isIntegratedDevice) {
+        waitPkgThresholdInMicroSeconds = WaitUtils::defaultWaitPkgThresholdForDiscreteInMicroSeconds;
+    }
+
+    if (waitpkgUse == WaitpkgUse::umonitorAndUmwait) {
+        waitCount = 0u;
+    }
+
+    if (debugManager.flags.WaitpkgCounterValue.get() != -1) {
+        waitpkgCounterValue = debugManager.flags.WaitpkgCounterValue.get();
+    }
+
+    if (debugManager.flags.WaitpkgControlValue.get() != -1) {
+        waitpkgControlValue = debugManager.flags.WaitpkgControlValue.get();
+    }
+
+    if (debugManager.flags.WaitpkgThreshold.get() != -1) {
+        waitPkgThresholdInMicroSeconds = debugManager.flags.WaitpkgThreshold.get();
     }
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,6 +10,7 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_container/encode_surface_state.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/definitions/command_encoder_args.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
@@ -19,7 +20,9 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/event/event.h"
+#include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/source/image/image_hw.h"
 #include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.inl"
 #include "level_zero/core/test/unit_tests/fixtures/host_pointer_manager_fixture.h"
@@ -1032,7 +1035,7 @@ HWTEST2_F(HostPointerManagerCommandListTest, givenCommandListWhenMemoryFillWithS
 
     auto pc = genCmdCast<PIPE_CONTROL *>(*cmdList.rbegin());
 
-    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    if (!device->getProductHelper().isL3FlushAfterPostSyncRequired(device->getCompilerProductHelper().isHeaplessModeEnabled()) && NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
         EXPECT_NE(nullptr, pc);
         EXPECT_TRUE(pc->getDcFlushEnable());
     } else {
@@ -1408,6 +1411,31 @@ HWTEST2_F(ImmediateCommandListTest, givenCopyEngineSyncCmdListWhenAppendingCopyO
     EXPECT_TRUE(ultCsr->latestFlushedBatchBuffer.dispatchMonitorFence);
 }
 
+HWTEST2_F(ImmediateCommandListTest, givenCopyEngineAsyncCmdListWhenAppendingRegularCmdListThenFlushTaskRequired, IsAtLeastXeHpcCore) {
+    ze_result_t returnValue;
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::copy, 0u, returnValue, false));
+    auto cmdListHandle = commandList->toHandle();
+    commandList->close();
+
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+
+    auto commandListImmediate = zeUniquePtr(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::copy, returnValue));
+    ASSERT_NE(nullptr, commandListImmediate);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    auto whiteBoxCmdList = static_cast<CommandList *>(commandListImmediate.get());
+
+    auto ultCsr = static_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(whiteBoxCmdList->getCsr(false));
+    ultCsr->recordFlushedBatchBuffer = true;
+
+    returnValue = commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    EXPECT_TRUE(ultCsr->latestFlushedBatchBuffer.dispatchMonitorFence);
+    EXPECT_TRUE(ultCsr->latestFlushedBatchBuffer.hasStallingCmds);
+}
+
 HWTEST_F(CommandListCreateTests, givenDeviceWhenCreatingCommandListForInternalUsageThenInternalEngineGroupIsUsed) {
     ze_command_list_handle_t commandList = nullptr;
     ze_command_list_desc_t desc = {ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC};
@@ -1535,6 +1563,219 @@ HWTEST2_F(CommandListScratchPatchGlobalStatelessHeapsStateInitTest,
 HWTEST2_F(CommandListScratchPatchGlobalStatelessHeapsStateInitTest,
           givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithoutScratchAndExternalScratchFlagThenScratchIsPatched, IsAtLeastXeHpcCore) {
     testExternalScratchPatching<FamilyType>();
+}
+
+HWTEST2_F(ImmediateCommandListTest, givenImmediateCmdListWhenAppendingRegularThenImmediateStreamIsSelected, MatchAny) {
+    commandList->close();
+    auto cmdListHandle = commandList->toHandle();
+
+    auto &ultCsr = neoDevice->getUltCommandStreamReceiver<FamilyType>();
+    ultCsr.recursiveLockCounter = 0;
+
+    // first append can carry preamble
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+
+    EXPECT_EQ(1u, ultCsr.recursiveLockCounter);
+
+    // regular append can dispatch bb_start to secondary regular or primary directly regular
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+
+    EXPECT_EQ(2u, ultCsr.recursiveLockCounter);
+
+    auto startStream = static_cast<L0::CommandQueueImp *>(commandListImmediate->cmdQImmediate)->getStartingCmdBuffer();
+
+    if (commandListImmediate->getCmdListBatchBufferFlag()) {
+        auto expectedStreamAllocation = commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation();
+        EXPECT_EQ(expectedStreamAllocation, startStream->getGraphicsAllocation());
+    } else {
+        auto expectedStream = commandListImmediate->getCmdContainer().getCommandStream();
+        EXPECT_EQ(expectedStream, startStream);
+    }
+}
+
+HWTEST2_F(ImmediateCommandListTest,
+          givenImmediateCmdListWithPrimaryBatchBufferWhenAppendingRegularCmdListThenCorrectEpilogueCmdBufferIsUsed, MatchAny) {
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    auto &ultCsr = neoDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    commandList->close();
+    auto cmdListHandle = commandList->toHandle();
+
+    auto regularCmdBufferStream = commandList->getCmdContainer().getCommandStream();
+    auto regularCmdBufferAllocation = regularCmdBufferStream->getGraphicsAllocation();
+
+    auto cmdQImmediate = static_cast<WhiteBox<::L0::CommandQueue> *>(commandListImmediate->cmdQImmediate);
+
+    commandListImmediate->dispatchCmdListBatchBufferAsPrimary = true;
+    cmdQImmediate->dispatchCmdListBatchBufferAsPrimary = true;
+    auto dispatchRegularBufferLinearStream = &cmdQImmediate->firstCmdListStream;
+
+    // first append can carry preamble
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+
+    ultCsr.recordFlushedBatchBuffer = true;
+
+    auto immediateCmdBufferStream = commandListImmediate->getCmdContainer().getCommandStream();
+    auto immediateCmdBufferOffset = immediateCmdBufferStream->getUsed();
+
+    // no preamble - regular cmdlist buffer will be first and immediate cmd buffer will be epilogue
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+
+    if (L0GfxCoreHelper::useImmediateComputeFlushTask(device->getNEODevice()->getRootDeviceEnvironment())) {
+        EXPECT_EQ(NEO::AppendOperations::cmdList, ultCsr.recordedImmediateDispatchFlags.dispatchOperation);
+        EXPECT_EQ(dispatchRegularBufferLinearStream, ultCsr.lastFlushedImmediateCommandStream);
+        EXPECT_EQ(immediateCmdBufferStream, ultCsr.recordedImmediateDispatchFlags.optionalEpilogueCmdStream);
+    } else {
+        EXPECT_EQ(dispatchRegularBufferLinearStream, ultCsr.lastFlushedCommandStream);
+        EXPECT_EQ(immediateCmdBufferStream, ultCsr.recordedDispatchFlags.optionalEpilogueCmdStream);
+    }
+    EXPECT_EQ(regularCmdBufferAllocation, ultCsr.latestFlushedBatchBuffer.commandBufferAllocation);
+
+    auto startStream = static_cast<L0::CommandQueueImp *>(commandListImmediate->cmdQImmediate)->getStartingCmdBuffer();
+    EXPECT_EQ(dispatchRegularBufferLinearStream, startStream);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
+        cmdList,
+        ptrOffset(immediateCmdBufferStream->getCpuBase(), immediateCmdBufferOffset),
+        immediateCmdBufferStream->getUsed() - immediateCmdBufferOffset));
+
+    auto iterator = find<MI_BATCH_BUFFER_END *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), iterator);
+}
+
+HWTEST2_F(ImmediateCommandListTest,
+          givenCopyEngineImmediateCmdListWithPrimaryBatchBufferWhenAppendingRegularCmdListThenCorrectEpilogueCmdBufferIsUsed, MatchAny) {
+    using MI_BATCH_BUFFER_END = typename FamilyType::MI_BATCH_BUFFER_END;
+
+    ze_result_t returnValue;
+
+    commandList.reset(CommandList::whiteboxCast(CommandList::create(productFamily, device, NEO::EngineGroupType::copy, 0u, returnValue, false)));
+    commandList->close();
+    auto cmdListHandle = commandList->toHandle();
+
+    ze_command_queue_desc_t desc = {};
+    commandListImmediate.reset(CommandList::whiteboxCast(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::copy, returnValue)));
+
+    auto regularCmdBufferStream = commandList->getCmdContainer().getCommandStream();
+    auto regularCmdBufferAllocation = regularCmdBufferStream->getGraphicsAllocation();
+
+    auto cmdQImmediate = static_cast<WhiteBox<::L0::CommandQueue> *>(commandListImmediate->cmdQImmediate);
+    auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(cmdQImmediate->csr);
+
+    commandListImmediate->dispatchCmdListBatchBufferAsPrimary = true;
+    cmdQImmediate->dispatchCmdListBatchBufferAsPrimary = true;
+    auto dispatchRegularBufferLinearStream = &cmdQImmediate->firstCmdListStream;
+
+    // first append can carry preamble
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+
+    ultCsr->recordFlushedBatchBuffer = true;
+
+    auto immediateCmdBufferStream = commandListImmediate->getCmdContainer().getCommandStream();
+    auto immediateCmdBufferOffset = immediateCmdBufferStream->getUsed();
+
+    // no preamble - regular cmdlist buffer will be first and immediate cmd buffer will be epilogue
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+
+    EXPECT_EQ(NEO::AppendOperations::cmdList, ultCsr->recordedBcsDispatchFlags.dispatchOperation);
+    EXPECT_EQ(dispatchRegularBufferLinearStream, ultCsr->lastFlushedBcsCommandStream);
+    EXPECT_EQ(immediateCmdBufferStream, ultCsr->recordedBcsDispatchFlags.optionalEpilogueCmdStream);
+    EXPECT_EQ(regularCmdBufferAllocation, ultCsr->latestFlushedBatchBuffer.commandBufferAllocation);
+
+    auto startStream = static_cast<L0::CommandQueueImp *>(commandListImmediate->cmdQImmediate)->getStartingCmdBuffer();
+    EXPECT_EQ(dispatchRegularBufferLinearStream, startStream);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
+        cmdList,
+        ptrOffset(immediateCmdBufferStream->getCpuBase(), immediateCmdBufferOffset),
+        immediateCmdBufferStream->getUsed() - immediateCmdBufferOffset));
+
+    auto iterator = find<MI_BATCH_BUFFER_END *>(cmdList.begin(), cmdList.end());
+    EXPECT_NE(cmdList.end(), iterator);
+}
+
+HWTEST2_F(ImmediateCommandListTest,
+          givenImmediateCmdListWithPrimaryBatchBufferWhenAppendingRegularCmdListWithWaitEventThenDispatchSemaphoreAndJumpFromImmediateToRegular, MatchAny) {
+    using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+
+    ze_event_pool_desc_t eventPoolDesc = {ZE_STRUCTURE_TYPE_EVENT_POOL_DESC};
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+    eventPoolDesc.count = 2;
+
+    ze_event_desc_t eventDesc = {ZE_STRUCTURE_TYPE_EVENT_DESC};
+    eventDesc.index = 0;
+    eventDesc.wait = 0;
+    eventDesc.signal = 0;
+
+    ze_result_t returnValue;
+    std::unique_ptr<EventPool> eventPool = std::unique_ptr<EventPool>(static_cast<EventPool *>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue)));
+    std::unique_ptr<L0::Event> event = std::unique_ptr<L0::Event>(getHelper<L0GfxCoreHelper>().createEvent(eventPool.get(), &eventDesc, device));
+    auto eventHandle = event->toHandle();
+
+    commandList->close();
+    auto cmdListHandle = commandList->toHandle();
+
+    auto regularCmdBufferStream = commandList->getCmdContainer().getCommandStream();
+    auto regularCmdBufferAllocation = regularCmdBufferStream->getGraphicsAllocation();
+
+    auto cmdQImmediate = static_cast<WhiteBox<::L0::CommandQueue> *>(commandListImmediate->cmdQImmediate);
+
+    commandListImmediate->dispatchCmdListBatchBufferAsPrimary = true;
+    cmdQImmediate->dispatchCmdListBatchBufferAsPrimary = true;
+
+    // first append can carry preamble
+    returnValue = commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    auto immediateCmdBufferStream = commandListImmediate->getCmdContainer().getCommandStream();
+    auto offsetBefore = immediateCmdBufferStream->getUsed();
+
+    // no preamble but wait event as first, then bb_start jumping to regular cmdlist
+    returnValue = commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 1, &eventHandle);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    auto offsetAfter = immediateCmdBufferStream->getUsed();
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
+        cmdList,
+        ptrOffset(immediateCmdBufferStream->getCpuBase(), offsetBefore),
+        offsetAfter - offsetBefore));
+
+    auto iteratorWait = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+    ASSERT_NE(cmdList.end(), iteratorWait);
+
+    auto iteratorBbStart = find<MI_BATCH_BUFFER_START *>(iteratorWait, cmdList.end());
+    ASSERT_NE(cmdList.end(), iteratorBbStart);
+
+    auto bbStart = genCmdCast<MI_BATCH_BUFFER_START *>(*iteratorBbStart);
+
+    EXPECT_EQ(regularCmdBufferAllocation->getGpuAddress(), bbStart->getBatchBufferStartAddress());
+    EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER::SECOND_LEVEL_BATCH_BUFFER_FIRST_LEVEL_BATCH, bbStart->getSecondLevelBatchBuffer());
+}
+
+HWTEST2_F(ImmediateCommandListTest, givenAsyncCmdlistWhenCmdlistIsDestroyedThenHostSynchronizeCalled, MatchAny) {
+    ze_command_queue_desc_t queueDesc{ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC};
+    queueDesc.ordinal = 0u;
+    queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+
+    ze_result_t returnValue;
+    auto immediateCmdList = CommandList::whiteboxCast(CommandList::createImmediate(productFamily, device, &queueDesc, false, engineGroupType, returnValue));
+
+    immediateCmdList->cmdQImmediate->registerCsrClient();
+    auto csr = immediateCmdList->getCsr(false);
+
+    auto clientCount = csr->getNumClients();
+    EXPECT_EQ(1u, clientCount);
+
+    immediateCmdList->destroy();
+
+    clientCount = csr->getNumClients();
+    EXPECT_EQ(0u, clientCount);
 }
 
 } // namespace ult

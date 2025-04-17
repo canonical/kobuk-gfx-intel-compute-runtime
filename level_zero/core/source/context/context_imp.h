@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/memory_manager/gfx_partition.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/utilities/stackvec.h"
@@ -22,9 +23,13 @@ struct DriverHandleImp;
 struct Device;
 struct IpcCounterBasedEventData;
 
-struct ContextImp : Context {
+ContextExt *createContextExt(DriverHandle *driverHandle);
+void destroyContextExt(ContextExt *ctxExt);
+
+struct ContextImp : Context, NEO::NonCopyableAndNonMovableClass {
     ContextImp(DriverHandle *driverHandle);
-    ~ContextImp() override = default;
+    ContextImp(const ContextImp &) = delete;
+    ~ContextImp() override;
     ze_result_t destroy() override;
     ze_result_t getStatus() override;
     DriverHandle *getDriverHandle() override;
@@ -187,6 +192,10 @@ struct ContextImp : Context {
         unsigned int elementSizeInBytes,
         size_t *rowPitch) override;
 
+    ContextExt *getContextExt() override {
+        return contextExt;
+    }
+
   protected:
     ze_result_t getIpcMemHandlesImpl(const void *ptr, uint32_t *numIpcHandles, ze_ipc_mem_handle_t *pIpcHandles);
     void setIPCHandleData(NEO::GraphicsAllocation *graphicsAllocation, uint64_t handle, IpcMemoryData &ipcData, uint64_t ptrAddress, uint8_t type);
@@ -197,6 +206,9 @@ struct ContextImp : Context {
     std::vector<ze_device_handle_t> deviceHandles;
     DriverHandleImp *driverHandle = nullptr;
     uint32_t numDevices = 0;
+    ContextExt *contextExt = nullptr;
 };
+
+static_assert(NEO::NonCopyableAndNonMovable<ContextImp>);
 
 } // namespace L0

@@ -96,7 +96,7 @@ class DirectSubmissionHw {
         return relaxedOrderingEnabled;
     }
 
-    virtual void flushMonitorFence(){};
+    virtual void flushMonitorFence(bool notifyKmd){};
 
     QueueThrottle getLastSubmittedThrottle() {
         return this->lastSubmittedThrottle;
@@ -115,6 +115,7 @@ class DirectSubmissionHw {
     virtual bool submit(uint64_t gpuAddress, size_t size, const ResidencyContainer *allocationsForResidency) = 0;
     virtual bool handleResidency() = 0;
     virtual void handleRingRestartForUllsLightResidency(const ResidencyContainer *allocationsForResidency){};
+    virtual void handleResidencyContainerForUllsLightNewRingAllocation(ResidencyContainer *allocationsForResidency){};
     void handleNewResourcesSubmission();
     bool isNewResourceHandleNeeded();
     size_t getSizeNewResourceHandler();
@@ -123,7 +124,7 @@ class DirectSubmissionHw {
     void switchRingBuffersNeeded(size_t size, ResidencyContainer *allocationsForResidency);
     uint64_t switchRingBuffers(ResidencyContainer *allocationsForResidency);
     virtual void handleSwitchRingBuffers(ResidencyContainer *allocationsForResidency) = 0;
-    GraphicsAllocation *switchRingBuffersAllocations();
+    GraphicsAllocation *switchRingBuffersAllocations(ResidencyContainer *allocationsForResidency);
 
     constexpr static uint64_t updateTagValueFail = std::numeric_limits<uint64_t>::max();
     virtual uint64_t updateTagValue(bool requireMonitorFence) = 0;
@@ -264,5 +265,6 @@ class DirectSubmissionHw {
     bool relaxedOrderingInitialized = false;
     bool relaxedOrderingSchedulerRequired = false;
     bool inputMonitorFenceDispatchRequirement = true;
+    bool notifyKmdDuringMonitorFence = false;
 };
 } // namespace NEO

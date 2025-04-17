@@ -58,7 +58,7 @@
 #include <sstream>
 
 #ifndef DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR
-#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 4)
+#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 5)
 #endif
 
 namespace NEO {
@@ -119,6 +119,9 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
         if (measureTime) {
             end = std::chrono::steady_clock::now();
             long long elapsedTime = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+
+            static std::mutex mtx;
+            std::lock_guard lock(mtx);
 
             IoctlStatisticsEntry ioctlData{};
             auto ioctlDataIt = this->ioctlStatistics.find(request);
@@ -374,11 +377,15 @@ int Drm::createDrmContext(uint32_t drmVmId, bool isDirectSubmissionRequested, bo
     }
 
     GemContextCreateExtSetParam extSetparam = {};
-
+    GemContextCreateExtSetParam extSetparamLowLatency = {};
     if (drmVmId > 0) {
         extSetparam.base.name = ioctlHelper->getDrmParamValue(DrmParam::contextCreateExtSetparam);
         extSetparam.param.param = ioctlHelper->getDrmParamValue(DrmParam::contextParamVm);
         extSetparam.param.value = drmVmId;
+        if (ioctlHelper->hasContextFreqHint()) {
+            extSetparam.base.nextExtension = reinterpret_cast<uint64_t>(&extSetparamLowLatency.base);
+            ioctlHelper->fillExtSetparamLowLatency(extSetparamLowLatency);
+        }
         gcc.extensions = reinterpret_cast<uint64_t>(&extSetparam);
         gcc.flags |= ioctlHelper->getDrmParamValue(DrmParam::contextCreateFlagsUseExtensions);
     }
@@ -461,6 +468,7 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
 
     rootDeviceEnvironment.initProductHelper();
     rootDeviceEnvironment.initGfxCoreHelper();
+    rootDeviceEnvironment.initializeGfxCoreHelperFromProductHelper();
     rootDeviceEnvironment.initApiGfxCoreHelper();
     rootDeviceEnvironment.initCompilerProductHelper();
     rootDeviceEnvironment.initAilConfigurationHelper();
@@ -862,13 +870,14 @@ int Drm::waitHandle(uint32_t waitHandle, int64_t timeout) {
     wait.boHandle = waitHandle;
     wait.timeoutNs = timeout;
 
+    StackVec<std::unique_lock<NEO::CommandStreamReceiver::MutexType>, 1> locks{};
     if (this->rootDeviceEnvironment.executionEnvironment.memoryManager) {
         const auto &mulitEngines = this->rootDeviceEnvironment.executionEnvironment.memoryManager->getRegisteredEngines();
         for (const auto &engines : mulitEngines) {
             for (const auto &engine : engines) {
                 if (engine.osContext->isDirectSubmissionLightActive()) {
-                    auto lock = engine.commandStreamReceiver->obtainUniqueOwnership();
-                    engine.commandStreamReceiver->stopDirectSubmission(false);
+                    locks.push_back(engine.commandStreamReceiver->obtainUniqueOwnership());
+                    engine.commandStreamReceiver->stopDirectSubmission(false, false);
                 }
             }
         }
@@ -977,19 +986,12 @@ bool Drm::getDeviceMemoryMaxClockRateInMhz(uint32_t tileId, uint32_t &clkRate) {
 }
 
 bool Drm::getDeviceMemoryPhysicalSizeInBytes(uint32_t tileId, uint64_t &physicalSize) {
-    const std::string relativefilePath = "/gt/gt" + std::to_string(tileId) + "/addr_range";
-    std::string readString(64, '\0');
-    errno = 0;
-    if (readSysFsAsString(relativefilePath, readString) == false) {
+    if (memoryInfo == nullptr || memoryInfo->getLocalMemoryRegions().size() == 0U) {
+        physicalSize = 0U;
         return false;
     }
 
-    char *endPtr = nullptr;
-    uint64_t retSize = static_cast<uint64_t>(std::strtoull(readString.data(), &endPtr, 16));
-    if ((endPtr == readString.data()) || (errno != 0)) {
-        return false;
-    }
-    physicalSize = retSize;
+    physicalSize = memoryInfo->getLocalMemoryRegionSize(tileId);
     return true;
 }
 
@@ -1017,15 +1019,36 @@ void Drm::setupSystemInfo(HardwareInfo *hwInfo, SystemInfo *sysInfo) {
 void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
     auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
 
+    if (debugManager.flags.ForceStaticL2ClosReservation.get()) {
+        if (debugManager.flags.L2ClosNumCacheWays.get() == -1) {
+            debugManager.flags.L2ClosNumCacheWays.set(2U);
+        }
+    }
+
+    auto getL2CacheReservationLimits{[&productHelper]() {
+        CacheReservationParameters out{};
+        if (productHelper.getNumCacheRegions() == 0) {
+            return out;
+        }
+
+        if (auto numCacheWays{debugManager.flags.L2ClosNumCacheWays.get()}; numCacheWays != -1) {
+            out.maxSize = 1U;
+            out.maxNumRegions = 1U;
+            out.maxNumWays = static_cast<uint16_t>(numCacheWays);
+            return out;
+        }
+        return out;
+    }};
+
     auto getL3CacheReservationLimits{[&hwInfo, &productHelper]() {
         CacheReservationParameters out{};
         if (debugManager.flags.ClosEnabled.get() == 0 || productHelper.getNumCacheRegions() == 0) {
             return out;
         }
 
-        constexpr uint16_t totalMaxNumWays = 32;
-        constexpr uint16_t globalReservationLimit = 16;
-        constexpr uint16_t clientReservationLimit = 8;
+        constexpr uint16_t totalMaxNumWays = 32U;
+        constexpr uint16_t globalReservationLimit = 16U;
+        constexpr uint16_t clientReservationLimit = 8U;
         const size_t totalCacheSize = hwInfo.gtSystemInfo.L3CacheSizeInKb * MemoryConstants::kiloByte;
 
         out.maxNumWays = std::min(globalReservationLimit, clientReservationLimit);
@@ -1035,7 +1058,12 @@ void Drm::setupCacheInfo(const HardwareInfo &hwInfo) {
         return out;
     }};
 
-    this->cacheInfo.reset(new CacheInfo(*ioctlHelper, getL3CacheReservationLimits()));
+    this->cacheInfo.reset(new CacheInfo(*ioctlHelper, getL2CacheReservationLimits(), getL3CacheReservationLimits()));
+
+    if (debugManager.flags.ForceStaticL2ClosReservation.get()) {
+        [[maybe_unused]] bool isReserved{this->cacheInfo->getCacheRegion(getL2CacheReservationLimits().maxSize, CacheRegion::region3)};
+        DEBUG_BREAK_IF(!isReserved);
+    }
 }
 
 void Drm::getPrelimVersion(std::string &prelimVersion) {

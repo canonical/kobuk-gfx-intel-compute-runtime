@@ -36,7 +36,7 @@ MTLTEST_F(MtlProductHelperLinux, GivenMtlWhenConfigureHardwareCustomThenKmdNotif
     EXPECT_TRUE(pInHwInfo.capabilityTable.kmdNotifyProperties.enableKmdNotify);
     EXPECT_EQ(150ll, pInHwInfo.capabilityTable.kmdNotifyProperties.delayKmdNotifyMicroseconds);
     EXPECT_TRUE(pInHwInfo.capabilityTable.kmdNotifyProperties.enableQuickKmdSleepForDirectSubmission);
-    EXPECT_EQ(20ll, pInHwInfo.capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds);
+    EXPECT_EQ(28000ll, pInHwInfo.capabilityTable.kmdNotifyProperties.delayQuickKmdSleepForDirectSubmissionMicroseconds);
 }
 
 MTLTEST_F(MtlProductHelperLinux, givenMtlWhenIsBlitterForImagesSupportedIsCalledThenTrueIsReturned) {
@@ -74,12 +74,7 @@ MTLTEST_F(MtlProductHelperLinux, givenBooleanUncachedWhenCallOverridePatIndexThe
     EXPECT_EQ(3u, productHelper->overridePatIndex(isUncached, patIndex, AllocationType::commandBuffer));
 }
 
-MTLTEST_F(MtlProductHelperLinux, givenProductHelperWhenCallConfigureHardwareCustomThenCompressionIsDisabled) {
+MTLTEST_F(MtlProductHelperLinux, givenProductHelperThenCompressionIsForbidden) {
     auto hwInfo = *defaultHwInfo;
-    hwInfo.featureTable.flags.ftrE2ECompression = true;
-
-    productHelper->configureHardwareCustom(&hwInfo, nullptr);
-
-    EXPECT_FALSE(hwInfo.capabilityTable.ftrRenderCompressedBuffers);
-    EXPECT_FALSE(hwInfo.capabilityTable.ftrRenderCompressedImages);
+    EXPECT_TRUE(productHelper->isCompressionForbidden(hwInfo));
 }

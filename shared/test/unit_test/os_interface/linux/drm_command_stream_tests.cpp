@@ -8,6 +8,7 @@
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/tag_allocation_layout.h"
 #include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/flush_stamp.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/test/common/helpers/batch_buffer_helper.h"
@@ -25,6 +26,8 @@ extern ApiSpecificConfig::ApiType apiTypeForUlts;
 using namespace NEO;
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenL0ApiConfigWhenCreatingDrmCsrThenEnableImmediateDispatch) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
     VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::L0);
     MockDrmCsr<FamilyType> csr(executionEnvironment, 0, 1);
     EXPECT_EQ(DispatchMode::immediateDispatch, csr.dispatchMode);
@@ -84,6 +87,9 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenNoTagAddressWhenGettingCompletionA
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenExecBufferErrorWhenFlushInternalThenProperErrorIsReturned) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     mock->execBufferResult = -1;
     mock->baseErrno = false;
     mock->errnoRetVal = EWOULDBLOCK;
@@ -1134,8 +1140,9 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest,
         drmCtxIds[i] = 5u + i;
     }
 
+    const auto hasFirstSubmission = device->getCompilerProductHelper().isHeaplessModeEnabled() ? 1 : 0;
     FlushStamp handleToWait = 123;
-    *testedCsr->getTagAddress() = 0;
+    *testedCsr->getTagAddress() = hasFirstSubmission;
     testedCsr->waitForFlushStamp(handleToWait);
 
     EXPECT_EQ(0, mock->ioctlCnt.gemWait);
@@ -1284,8 +1291,9 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest,
     mock->ioctlCnt.gemWait = 0;
     mock->isVmBindAvailableCall.called = 0u;
 
+    const auto hasFirstSubmission = device->getCompilerProductHelper().isHeaplessModeEnabled() ? 1 : 0;
     FlushStamp handleToWait = 123;
-    *testedCsr->getTagAddress() = 0;
+    *testedCsr->getTagAddress() = hasFirstSubmission;
     testedCsr->waitForFlushStamp(handleToWait);
 
     EXPECT_EQ(0, mock->ioctlCnt.gemWait);
@@ -1353,6 +1361,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest,
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableUserFenceForCompletionWait.set(0);
     debugManager.flags.OverrideNotifyEnableForTagUpdatePostSync.set(1);
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
 
     mock->isVmBindAvailableCall.callParent = false;
     mock->isVmBindAvailableCall.returnValue = true;
@@ -1425,7 +1434,7 @@ struct MockMergeResidencyContainerMemoryOperationsHandler : public DrmMemoryOper
                      (OsContext * osContext, ResidencyContainer &residencyContainer));
 
     ADDMETHOD_NOBASE(makeResidentWithinOsContext, NEO::MemoryOperationsStatus, NEO::MemoryOperationsStatus::success,
-                     (OsContext * osContext, ArrayRef<GraphicsAllocation *> gfxAllocations, bool evictable, const bool forcePagingFence));
+                     (OsContext * osContext, ArrayRef<GraphicsAllocation *> gfxAllocations, bool evictable, const bool forcePagingFence, const bool acquireLock));
 };
 
 HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTest, givenMergeWithResidencyContainerFailsThenFlushReturnsError) {

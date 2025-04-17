@@ -62,6 +62,7 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     using MemoryManager::latestContextId;
     using MemoryManager::localMemAllocsSize;
     using MemoryManager::localMemorySupported;
+    using MemoryManager::maxAllocationsSavedForReuseSize;
     using MemoryManager::reservedMemory;
     using MemoryManager::secondaryEngines;
 
@@ -218,6 +219,12 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
         return MemoryManager::setMemPrefetch(gfxAllocation, subDeviceIds, rootDeviceIndex);
     }
 
+    bool prefetchSharedSystemAlloc(const void *ptr, const size_t size, SubDeviceIdsVec &subDeviceIds, uint32_t rootDeviceIndex) override {
+        memPrefetchSubDeviceIds = subDeviceIds;
+        prefetchSharedSystemAllocCalled = true;
+        return MemoryManager::prefetchSharedSystemAlloc(ptr, size, subDeviceIds, rootDeviceIndex);
+    }
+
     bool hasPageFaultsEnabled(const Device &neoDevice) override;
     bool isKmdMigrationAvailable(uint32_t rootDeviceIndex) override;
 
@@ -330,6 +337,7 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     bool failLockResource = false;
     bool failSetMemAdvise = false;
     bool setMemPrefetchCalled = false;
+    bool prefetchSharedSystemAllocCalled = false;
     bool cpuCopyRequired = false;
     bool forceCompressed = false;
     bool forceFailureInPrimaryAllocation = false;
@@ -346,7 +354,6 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     bool failMapPhysicalToVirtualMemory = false;
     bool returnMockGAFromDevicePool = false;
     bool returnMockGAFromHostPool = false;
-    bool shouldStoreLastAllocationProperties = false;
     std::unique_ptr<MockExecutionEnvironment> mockExecutionEnvironment;
     DeviceBitfield recentlyPassedDeviceBitfield{};
     std::unique_ptr<MultiGraphicsAllocation> waitAllocations = nullptr;
@@ -355,7 +362,6 @@ class MockMemoryManager : public MemoryManagerCreate<OsAgnosticMemoryManager> {
     MemoryManager::AllocationStatus populateOsHandlesResult = MemoryManager::AllocationStatus::Success;
     GraphicsAllocation *allocateGraphicsMemoryForNonSvmHostPtrResult = nullptr;
     std::unique_ptr<AllocationProperties> lastAllocationProperties = nullptr;
-    std::unique_ptr<AllocationProperties> lastAllocationPropertiesWithPtr = nullptr;
     std::function<void(const AllocationProperties &)> validateAllocateProperties = [](const AllocationProperties &) -> void {};
     AddressRange reserveGpuAddressOnHeapResult = AddressRange{0u, 0u};
 };

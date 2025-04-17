@@ -22,6 +22,11 @@
 
 using GfxCoreHelperTestsXe3Core = GfxCoreHelperTest;
 
+XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, whenGettingMetricsLibraryGenIdThenXe3IsReturned) {
+    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    EXPECT_EQ(static_cast<uint32_t>(MetricsLibraryApi::ClientGen::Xe3), gfxCoreHelper.getMetricsLibraryGenId());
+}
+
 XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenCommandBufferAllocationTypeWhenGetAllocationDataIsCalledThenSystemMemoryIsRequested) {
     AllocationData allocData;
     AllocationProperties properties(mockRootDeviceIndex, true, 10, AllocationType::commandBuffer, false, mockDeviceBitfield);
@@ -42,11 +47,6 @@ XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenGfxCoreHelperWhenAskingForTimesta
     constexpr auto expectedAlignment = MemoryConstants::cacheLineSize;
 
     EXPECT_EQ(expectedAlignment, gfxCoreHelper.getTimestampPacketAllocatorAlignment());
-}
-
-XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenGfxCoreHelperWhenCheckTimestampWaitSupportThenReturnTrue) {
-    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
-    EXPECT_TRUE(gfxCoreHelper.isTimestampWaitSupportedForQueues());
 }
 
 XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenXe3CoreWhenAskedForMinimialSimdThen16IsReturned) {
@@ -608,6 +608,11 @@ XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenProgramGlobalFenceAsMiMemFenceCom
 }
 
 using ProductHelperTestXe3Core = Test<DeviceFixture>;
+
+XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenCheckTimestampWaitForQueuesSupportThenReturnTrue) {
+    auto &productHelper = getHelper<ProductHelper>();
+    EXPECT_TRUE(productHelper.isTimestampWaitSupportedForQueues(false));
+}
 
 XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenCheckTimestampWaitSupportThenReturnTrue) {
     auto &productHelper = getHelper<ProductHelper>();

@@ -642,6 +642,9 @@ HWTEST_F(CommandListCreate, givenCommandListyWhenAppendWaitEventsWithDcFlushThen
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     ze_result_t returnValue;
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     auto &commandContainer = commandList->getCmdContainer();
@@ -688,7 +691,9 @@ HWTEST_F(CommandListCreate, givenCommandListWhenAppendWaitEventsWithDcFlushThenP
     auto itor = find<SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
     EXPECT_NE(cmdList.end(), itor);
 
-    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    auto whiteBoxCmdList = static_cast<CommandList *>(commandList.get());
+
+    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment()) && !whiteBoxCmdList->l3FlushAfterPostSyncRequired) {
         itor--;
         EXPECT_NE(nullptr, genCmdCast<PIPE_CONTROL *>(*itor));
     } else {
@@ -720,7 +725,7 @@ HWTEST_F(CommandListCreate, givenAsyncCmdQueueAndImmediateCommandListWhenAppendW
     EXPECT_NE(nullptr, whiteBoxCmdList->cmdQImmediate);
 
     size_t expectedUsed = 2 * NEO::EncodeSemaphore<FamilyType>::getSizeMiSemaphoreWait() + sizeof(MI_BATCH_BUFFER_END);
-    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment()) && !whiteBoxCmdList->l3FlushAfterPostSyncRequired) {
         expectedUsed += sizeof(PIPE_CONTROL);
     }
     expectedUsed = alignUp(expectedUsed, 64);
@@ -929,7 +934,7 @@ HWTEST2_F(CommandListCreate, givenSecondaryCommandStreamForImmediateCmdListWhenC
     auto immediateCmdList = static_cast<CommandListCoreFamilyImmediate<gfxCoreFamily> *>(commandList.get());
     auto secondaryCmdStream = reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList.get();
 
-    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize);
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
 
     EXPECT_EQ(commandList->getCmdContainer().getCommandStream(), secondaryCmdStream);
     EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
@@ -938,6 +943,114 @@ HWTEST2_F(CommandListCreate, givenSecondaryCommandStreamForImmediateCmdListWhenC
 
     EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
     EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList->getGraphicsAllocation()->getMemoryPool()));
+}
+
+HWTEST2_F(CommandListCreate, givenSystemAndLocalCommandStreamForImmediateCmdListWhenLocalIsRequiredAtCheckAvailableSpaceThenSwapCommandStreams, IsAtLeastXeHpcCore) {
+    auto mutableHwInfo = device->getNEODevice()->getRootDeviceEnvironmentRef().getMutableHardwareInfo();
+    VariableBackup<NEO::HardwareInfo> backupHwInfo(mutableHwInfo);
+    mutableHwInfo->featureTable.flags.ftrLocalMemory = true;
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.DirectSubmissionFlatRingBuffer.set(1);
+
+    static_cast<MockMemoryManager *>(device->getNEODevice()->getMemoryManager())->localMemorySupported[0] = true;
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+    ze_result_t returnValue;
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::compute, returnValue));
+    ASSERT_NE(nullptr, commandList);
+    EXPECT_NE(reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList.get(), nullptr);
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList->getGraphicsAllocation()->getMemoryPool()));
+
+    auto immediateCmdList = static_cast<CommandListCoreFamilyImmediate<gfxCoreFamily> *>(commandList.get());
+    auto primaryCmdStream = commandList->getCmdContainer().getCommandStream();
+
+    // make sure system is current
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
+
+    // switch to local
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, true);
+
+    // expect primary
+    EXPECT_EQ(commandList->getCmdContainer().getCommandStream(), primaryCmdStream);
+    // primary in local
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+
+    // exhaust primary local
+    primaryCmdStream->getSpace(primaryCmdStream->getAvailableSpace() - 4);
+
+    // check correct allocation is refreshed
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, true);
+    EXPECT_EQ(primaryCmdStream->getAvailableSpace(), primaryCmdStream->getMaxAvailableSpace());
+
+    // check still in local
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+
+    // exhaust local but switch to system
+    primaryCmdStream->getSpace(primaryCmdStream->getAvailableSpace() - 4);
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
+    // current in system
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+
+    // ask for local - verify new allocation is created
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, true);
+    EXPECT_EQ(primaryCmdStream->getAvailableSpace(), primaryCmdStream->getMaxAvailableSpace());
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+}
+
+HWTEST2_F(CommandListCreate, givenSystemAndLocalCommandStreamForImmediateCmdListWhenSystemIsRequiredAtCheckAvailableSpaceThenSwapCommandStreams, IsAtLeastXeHpcCore) {
+    auto mutableHwInfo = device->getNEODevice()->getRootDeviceEnvironmentRef().getMutableHardwareInfo();
+    VariableBackup<NEO::HardwareInfo> backupHwInfo(mutableHwInfo);
+    mutableHwInfo->featureTable.flags.ftrLocalMemory = true;
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.DirectSubmissionFlatRingBuffer.set(1);
+
+    static_cast<MockMemoryManager *>(device->getNEODevice()->getMemoryManager())->localMemorySupported[0] = true;
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+    ze_result_t returnValue;
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::compute, returnValue));
+    ASSERT_NE(nullptr, commandList);
+    EXPECT_NE(reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList.get(), nullptr);
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList->getGraphicsAllocation()->getMemoryPool()));
+
+    auto immediateCmdList = static_cast<CommandListCoreFamilyImmediate<gfxCoreFamily> *>(commandList.get());
+    auto secondaryCmdStream = reinterpret_cast<CmdContainerMock *>(&commandList->getCmdContainer())->secondaryCommandStreamForImmediateCmdList.get();
+
+    // make sure local is current
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, true);
+
+    // switch to system
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
+
+    // expect secondary
+    EXPECT_EQ(commandList->getCmdContainer().getCommandStream(), secondaryCmdStream);
+    // secondary in system
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+
+    // exhaust system
+    secondaryCmdStream->getSpace(secondaryCmdStream->getAvailableSpace() - 4);
+
+    // check correct allocation is refreshed
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
+    EXPECT_EQ(secondaryCmdStream->getAvailableSpace(), secondaryCmdStream->getMaxAvailableSpace());
+
+    // still in system
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+
+    // exhaust system but switch to local
+    secondaryCmdStream->getSpace(secondaryCmdStream->getAvailableSpace() - 4);
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, true);
+    // current in local
+    EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
+
+    // ask for system - verify new allocation is created
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
+    EXPECT_EQ(secondaryCmdStream->getAvailableSpace(), secondaryCmdStream->getMaxAvailableSpace());
+    EXPECT_TRUE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));
 }
 
 HWTEST2_F(CommandListCreate, givenNoSecondaryCommandStreamForImmediateCmdListWhenCheckAvailableSpaceThenNotSwapCommandStreams, MatchAny) {
@@ -958,7 +1071,7 @@ HWTEST2_F(CommandListCreate, givenNoSecondaryCommandStreamForImmediateCmdListWhe
     auto immediateCmdList = static_cast<CommandListCoreFamilyImmediate<gfxCoreFamily> *>(commandList.get());
     auto cmdStream = commandList->getCmdContainer().getCommandStream();
 
-    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize);
+    immediateCmdList->checkAvailableSpace(0u, false, commonImmediateCommandSize, false);
 
     EXPECT_EQ(commandList->getCmdContainer().getCommandStream(), cmdStream);
     EXPECT_FALSE(MemoryPoolHelper::isSystemMemoryPool(commandList->getCmdContainer().getCommandStream()->getGraphicsAllocation()->getMemoryPool()));

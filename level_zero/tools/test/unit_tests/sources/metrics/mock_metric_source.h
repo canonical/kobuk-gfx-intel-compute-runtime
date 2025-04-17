@@ -15,12 +15,15 @@ namespace ult {
 
 class MockMetricSource : public L0::MetricSource {
   public:
+    uint32_t enableCallCount = 0;
     bool isAvailableReturn = false;
-    void enable() override {}
+    void enable() override { enableCallCount++; }
     bool isAvailable() override { return isAvailableReturn; }
     ze_result_t appendMetricMemoryBarrier(L0::CommandList &commandList) override { return ZE_RESULT_ERROR_UNKNOWN; }
     ze_result_t metricGroupGet(uint32_t *pCount, zet_metric_group_handle_t *phMetricGroups) override { return ZE_RESULT_ERROR_UNKNOWN; }
-    ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup, void *pNext) override { return ZE_RESULT_ERROR_UNKNOWN; }
+    ze_result_t handleMetricGroupExtendedProperties(zet_metric_group_handle_t hMetricGroup,
+                                                    zet_metric_group_properties_t *pBaseProperties,
+                                                    void *pNext) override { return ZE_RESULT_ERROR_UNKNOWN; }
     ze_result_t activateMetricGroupsPreferDeferred(uint32_t count, zet_metric_group_handle_t *phMetricGroups) override { return ZE_RESULT_ERROR_UNKNOWN; }
     ze_result_t activateMetricGroupsAlreadyDeferred() override { return ZE_RESULT_ERROR_UNKNOWN; }
     ze_result_t metricProgrammableGet(uint32_t *pCount, zet_metric_programmable_exp_handle_t *phMetricProgrammables) override {
@@ -44,6 +47,14 @@ class MockMetricSource : public L0::MetricSource {
 
     void setType(uint32_t type) {
         this->type = type;
+    }
+
+    ze_result_t calcOperationCreate(MetricDeviceContext &metricDeviceContext,
+                                    zet_intel_metric_calculate_exp_desc_t *pCalculateDesc,
+                                    uint32_t *pCount,
+                                    zet_metric_handle_t *phExcludedMetrics,
+                                    zet_intel_metric_calculate_operation_exp_handle_t *phCalculateOperation) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
     ~MockMetricSource() override = default;
@@ -140,6 +151,35 @@ class MockMetric : public L0::MetricImp {
 
     void setMultiDevice(bool status) {
         isMultiDevice = status;
+    }
+};
+
+class MockMetricCalcOp : public MetricCalcOpImp {
+  public:
+    ~MockMetricCalcOp() override = default;
+    MockMetricCalcOp() : MetricCalcOpImp(false){};
+    ze_result_t destroy() override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    };
+    ze_result_t getReportFormat(uint32_t *pCount, zet_metric_handle_t *phMetrics) override {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    };
+    ze_result_t metricCalculateMultipleValues(size_t rawDataSize, size_t *offset, const uint8_t *pRawData,
+                                              uint32_t *pSetCount, uint32_t *pMetricReportCountPerSet,
+                                              uint32_t *pTotalMetricReportCount,
+                                              zet_intel_metric_result_exp_t *pMetricResults) override { return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE; };
+};
+
+class MockMetricDeviceContext : public MetricDeviceContext {
+  public:
+    MockMetricDeviceContext(Device &device) : MetricDeviceContext(device) {}
+
+    void clearAllSources() {
+        metricSources.clear();
+    }
+
+    void setMockMetricSource(MockMetricSource *metricSource) {
+        metricSources[MetricSource::metricSourceTypeOa] = std::unique_ptr<MockMetricSource>(metricSource);
     }
 };
 

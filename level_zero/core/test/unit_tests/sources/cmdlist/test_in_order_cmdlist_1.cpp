@@ -294,20 +294,23 @@ HWTEST2_F(InOrderCmdListTests, givenCmdListsWhenDispatchingThenUseInternalTaskCo
         CmdListMemoryCopyParams copyParams = {};
         immCmdList0->appendMemoryCopy(deviceAlloc, &hostCopyData, 1, nullptr, 0, nullptr, copyParams);
 
-        auto expectedLatestTaskCount = immCmdList0->dcFlushSupport || !heapless ? 1u : 2u;
+        auto expectedLatestTaskCount = immCmdList0->dcFlushSupport || (!heapless && immCmdList0->latestOperationHasOptimizedCbEvent) ? 1u : 2u;
         expectedLatestTaskCount += (heapless ? 1u : 0u);
         EXPECT_EQ(expectedLatestTaskCount, ultCsr->latestWaitForCompletionWithTimeoutTaskCount.load());
-        EXPECT_EQ(immCmdList0->dcFlushSupport || !heapless ? 3u : 2u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
+        EXPECT_EQ(immCmdList0->dcFlushSupport || (!heapless && immCmdList0->latestOperationHasOptimizedCbEvent) ? 3u : 2u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
 
         immCmdList1->appendMemoryCopy(deviceAlloc, &hostCopyData, 1, nullptr, 0, nullptr, copyParams);
 
         expectedLatestTaskCount = 2u;
         expectedLatestTaskCount += (heapless ? 1u : 0u);
         EXPECT_EQ(expectedLatestTaskCount, ultCsr->latestWaitForCompletionWithTimeoutTaskCount.load());
-        EXPECT_EQ(immCmdList0->dcFlushSupport || !heapless ? 4u : 2u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
+        EXPECT_EQ(immCmdList0->dcFlushSupport || (!heapless && immCmdList0->latestOperationHasOptimizedCbEvent) ? 4u : 2u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
 
         context->freeMem(deviceAlloc);
     }
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList0.get());
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList1.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenCounterBasedEventsWhenHostWaitsAreCalledThenLatestWaitIsRecorded, MatchAny) {
@@ -343,6 +346,8 @@ HWTEST2_F(InOrderCmdListTests, givenCounterBasedEventsWhenHostWaitsAreCalledThen
     inOrderExecInfo->setAllocationOffset(4u);
     EXPECT_FALSE(inOrderExecInfo->isCounterAlreadyDone(0u));
     EXPECT_FALSE(inOrderExecInfo->isCounterAlreadyDone(counterValue));
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenDebugFlagSetWhenEventHostSyncCalledThenCallWaitUserFence, IsAtLeastXeHpCore) {
@@ -811,6 +816,10 @@ HWTEST2_F(InOrderCmdListTests, givenRegularEventWithTemporaryInOrderDataAssignme
 
     auto hostAddress = static_cast<uint64_t *>(cmdList->inOrderExecInfo->getDeviceCounterAllocation()->getUnderlyingBuffer());
 
+    if (cmdList->isHeaplessModeEnabled() && cmdList->inOrderExecInfo->isHostStorageDuplicated()) {
+        hostAddress = static_cast<uint64_t *>(cmdList->inOrderExecInfo->getBaseHostAddress());
+    }
+
     auto eventPool = createEvents<FamilyType>(1, true);
     events[0]->makeCounterBasedImplicitlyDisabled(eventPool->getAllocation());
 
@@ -975,6 +984,8 @@ HWTEST2_F(InOrderCmdListTests, givenInOrderModeWhenSubmittingThenProgramSemaphor
     }
 
     ASSERT_TRUE(verifyInOrderDependency<FamilyType>(itor, 1, immCmdList->inOrderExecInfo->getBaseDeviceAddress() + counterOffset, immCmdList->isQwordInOrderCounter(), false));
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenResolveDependenciesViaPipeControlsForInOrderModeWhenSubmittingThenProgramPipeControlInBetweenDispatches, IsAtLeastXeHpCore) {
@@ -1002,6 +1013,78 @@ HWTEST2_F(InOrderCmdListTests, givenResolveDependenciesViaPipeControlsForInOrder
 
     auto itor = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(cmdList.end(), itor);
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
+}
+
+HWTEST2_F(InOrderCmdListTests, givenOptimizedCbEventWhenSubmittingThenProgramPipeControlOrSemaphoreInBetweenDispatches, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.ResolveDependenciesViaPipeControls.set(-1);
+
+    uint32_t counterOffset = 64;
+
+    auto immCmdList = createImmCmdList<gfxCoreFamily>();
+    immCmdList->inOrderExecInfo->setAllocationOffset(counterOffset);
+
+    auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
+
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+
+    auto offset = cmdStream->getUsed();
+    immCmdList->latestOperationHasOptimizedCbEvent = true;
+
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
+        cmdList,
+        ptrOffset(cmdStream->getCpuBase(), offset),
+        cmdStream->getUsed() - offset));
+
+    if (immCmdList->dcFlushSupport || !immCmdList->isHeaplessModeEnabled()) {
+        auto itor = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+        ASSERT_NE(cmdList.end(), itor);
+    } else {
+        auto itor = find<typename FamilyType::MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+        ASSERT_NE(cmdList.end(), itor);
+    }
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
+}
+
+HWTEST2_F(InOrderCmdListTests, givenInOrderCmdListWhenSubmittingThenProgramPipeControlOrSemaphoreInBetweenDispatches, IsAtLeastXeHpCore) {
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.ResolveDependenciesViaPipeControls.set(-1);
+
+    uint32_t counterOffset = 64;
+
+    auto immCmdList = createImmCmdList<gfxCoreFamily>();
+    immCmdList->inOrderExecInfo->setAllocationOffset(counterOffset);
+
+    auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
+
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+
+    auto offset = cmdStream->getUsed();
+    immCmdList->latestOperationHasOptimizedCbEvent = false;
+
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+
+    GenCmdList cmdList;
+    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
+        cmdList,
+        ptrOffset(cmdStream->getCpuBase(), offset),
+        cmdStream->getUsed() - offset));
+
+    if (immCmdList->dcFlushSupport) {
+        auto itor = find<typename FamilyType::PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
+        ASSERT_NE(cmdList.end(), itor);
+    } else {
+        auto itor = find<typename FamilyType::MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+        ASSERT_NE(cmdList.end(), itor);
+    }
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenDependencyFromDifferentRootDeviceWhenAppendCalledThenCreatePeerAllocation, MatchAny) {
@@ -1041,6 +1124,11 @@ HWTEST2_F(InOrderCmdListTests, givenDependencyFromDifferentRootDeviceWhenAppendC
         cmdList->initialize(inputDevice, NEO::EngineGroupType::renderCompute, 0u);
         cmdList->commandContainer.setImmediateCmdListCsr(csr);
         cmdList->enableInOrderExecution();
+        uint64_t *hostAddress = ptrOffset(cmdList->inOrderExecInfo->getBaseHostAddress(), cmdList->inOrderExecInfo->getAllocationOffset());
+        for (uint32_t i = 0; i < cmdList->inOrderExecInfo->getNumHostPartitionsToWait(); i++) {
+            *hostAddress = std::numeric_limits<uint64_t>::max();
+            hostAddress = ptrOffset(hostAddress, device->getL0GfxCoreHelper().getImmediateWritePostSyncOffset());
+        }
 
         createdCmdLists++;
 
@@ -1352,6 +1440,9 @@ HWTEST2_F(InOrderCmdListTests, givenInOrderEventModeWhenSubmittingThenProgramSem
 
     itor = find<MI_SEMAPHORE_WAIT *>(itor, cmdList.end());
     EXPECT_EQ(cmdList.end(), itor);
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList2.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenImplicitEventConvertionEnabledWhenUsingImmediateCmdListThenConvertEventToCounterBased, MatchAny) {
@@ -1904,11 +1995,11 @@ HWTEST2_F(InOrderCmdListTests, givenCmdsChainingFromAppendCopyWhenDispatchingKer
 
     offset = cmdStream->getUsed();
     immCmdList->appendMemoryCopyRegion(alloc, &region, 1, 1, alloc, &region, 1, 1, eventHandle, 0, nullptr, copyParams);
-    findSemaphores((heaplessEnabled && !immCmdList->dcFlushSupport) ? 1 : 2); // implicit dependency + chaining
+    findSemaphores(heaplessEnabled ? 1 : 2); // implicit dependency + chaining
 
     offset = cmdStream->getUsed();
     immCmdList->appendMemoryCopyRegion(alloc, &region, 1, 1, alloc, &region, 1, 1, nullptr, 0, nullptr, copyParams);
-    findSemaphores((heaplessEnabled && !immCmdList->dcFlushSupport) ? 1 : 0); // no implicit dependency
+    findSemaphores(heaplessEnabled ? 1 : 0); // no implicit dependency
 
     context->freeMem(alloc);
 }
@@ -1948,11 +2039,11 @@ HWTEST2_F(InOrderCmdListTests, givenCmdsChainingFromAppendCopyAndFlushRequiredWh
 
     offset = cmdStream->getUsed();
     immCmdList->appendMemoryCopyRegion(&copyData, &region, 1, 1, &copyData, &region, 1, 1, eventHandle, 0, nullptr, copyParams);
-    findSemaphores((heaplessEnabled && !immCmdList->dcFlushSupport) ? 1 : 2); // implicit dependency + chaining
+    findSemaphores(heaplessEnabled ? 1 : 2); // implicit dependency + chaining
 
     offset = cmdStream->getUsed();
     immCmdList->appendMemoryCopyRegion(&copyData, &region, 1, 1, &copyData, &region, 1, 1, nullptr, 0, nullptr, copyParams);
-    findSemaphores((heaplessEnabled && !immCmdList->dcFlushSupport) ? 1 : 0); // no implicit dependency
+    findSemaphores(heaplessEnabled ? 1 : 0); // no implicit dependency
 }
 
 HWTEST2_F(InOrderCmdListTests, givenEventWithRequiredPipeControlWhenDispatchingCopyThenSignalInOrderAllocation, IsAtLeastXeHpCore) {
@@ -2006,6 +2097,7 @@ HWTEST2_F(InOrderCmdListTests, givenEventWithRequiredPipeControlWhenDispatchingC
 HWTEST2_F(InOrderCmdListTests, givenEventWithRequiredPipeControlAndAllocFlushWhenDispatchingCopyThenSignalInOrderAllocation, IsAtLeastXeHpCore) {
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
     using WalkerVariant = typename FamilyType::WalkerVariant;
+    using MI_ATOMIC = typename FamilyType::MI_ATOMIC;
 
     auto immCmdList = createImmCmdList<gfxCoreFamily>();
     auto eventPool = createEvents<FamilyType>(1, false);
@@ -2019,34 +2111,45 @@ HWTEST2_F(InOrderCmdListTests, givenEventWithRequiredPipeControlAndAllocFlushWhe
     immCmdList->appendMemoryCopy(&copyData, &copyData, 1, eventHandle, 0, nullptr, copyParams);
 
     auto dcFlushRequired = immCmdList->getDcFlushRequired(true);
+    auto inOrderExecInfo = immCmdList->inOrderExecInfo;
+    auto gpuAddress = inOrderExecInfo->getBaseDeviceAddress();
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(cmdList, ptrOffset(cmdStream->getCpuBase(), offset), cmdStream->getUsed() - offset));
+
+    auto miAtomicItor = find<MI_ATOMIC *>(cmdList.begin(), cmdList.end());
+    if (device->getProductHelper().isDcFlushAllowed() && inOrderExecInfo->isHostStorageDuplicated()) {
+        EXPECT_NE(cmdList.end(), miAtomicItor);
+        auto miAtomicCmd = genCmdCast<MI_ATOMIC *>(*miAtomicItor);
+        EXPECT_EQ(gpuAddress, miAtomicCmd->getMemoryAddress());
+    } else {
+        EXPECT_EQ(cmdList.end(), miAtomicItor);
+    }
+
     auto sdiItor = find<MI_STORE_DATA_IMM *>(cmdList.begin(), cmdList.end());
     if (immCmdList->eventSignalPipeControl(false, immCmdList->getDcFlushRequired(events[0]->isSignalScope()))) {
         EXPECT_NE(cmdList.end(), sdiItor);
     } else {
         if (dcFlushRequired) {
             EXPECT_NE(cmdList.end(), sdiItor);
-
+            if (inOrderExecInfo->isHostStorageDuplicated()) {
+                gpuAddress = reinterpret_cast<uint64_t>(inOrderExecInfo->getBaseHostAddress());
+            }
             auto sdiCmd = genCmdCast<MI_STORE_DATA_IMM *>(*sdiItor);
-
-            EXPECT_EQ(immCmdList->inOrderExecInfo->getBaseDeviceAddress(), sdiCmd->getAddress());
-
+            EXPECT_EQ(gpuAddress, sdiCmd->getAddress());
         } else {
             EXPECT_EQ(cmdList.end(), sdiItor);
         }
-
         auto walkerItor = NEO::UnitTestHelper<FamilyType>::findWalkerTypeCmd(cmdList.begin(), cmdList.end());
         ASSERT_NE(cmdList.end(), walkerItor);
 
         WalkerVariant walkerVariant = NEO::UnitTestHelper<FamilyType>::getWalkerVariant(*walkerItor);
-        std::visit([&immCmdList, &dcFlushRequired](auto &&walker) {
+        std::visit([gpuAddress, &dcFlushRequired](auto &&walker) {
             auto &postSync = walker->getPostSync();
             if (dcFlushRequired) {
-                EXPECT_NE(immCmdList->inOrderExecInfo->getBaseDeviceAddress(), postSync.getDestinationAddress());
+                EXPECT_NE(gpuAddress, postSync.getDestinationAddress());
             } else {
-                EXPECT_EQ(immCmdList->inOrderExecInfo->getBaseDeviceAddress(), postSync.getDestinationAddress());
+                EXPECT_EQ(gpuAddress, postSync.getDestinationAddress());
             }
         },
                    walkerVariant);
@@ -2703,7 +2806,9 @@ HWTEST2_F(InOrderCmdListTests, givenRelaxedOrderingWhenProgrammingTimestampEvent
         using BaseClass = WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>;
         using BaseClass::BaseClass;
 
-        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate) override {
+        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies,
+                                   NEO::AppendOperations appendOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate,
+                                   MutexLock *outerLock) override {
             flushData.push_back(this->cmdListCurrentStartOffset);
 
             this->cmdListCurrentStartOffset = this->commandContainer.getCommandStream()->getUsed();
@@ -2834,7 +2939,9 @@ HWTEST2_F(InOrderCmdListTests, givenRelaxedOrderingWhenProgrammingTimestampEvent
             return ret;
         }
 
-        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate) override {
+        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies,
+                                   NEO::AppendOperations appendOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate,
+                                   MutexLock *outerLock) override {
             auto hostAddr = reinterpret_cast<uint32_t *>(usedEvent->getCompletionFieldHostAddress());
             eventCompletionData.push_back(*hostAddr);
 
@@ -2899,7 +3006,9 @@ HWTEST2_F(InOrderCmdListTests, givenRegularNonTimestampEventWhenSkipItsConverted
         using BaseClass = WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>;
         using BaseClass::BaseClass;
 
-        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate) override {
+        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies,
+                                   NEO::AppendOperations appendOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate,
+                                   MutexLock *outerLock) override {
             flushCounter++;
 
             this->cmdListCurrentStartOffset = this->commandContainer.getCommandStream()->getUsed();
@@ -2950,7 +3059,9 @@ HWTEST2_F(InOrderCmdListTests, givenDebugFlagSetWhenChainingWithRelaxedOrderingT
         using BaseClass = WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>;
         using BaseClass::BaseClass;
 
-        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate) override {
+        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies,
+                                   NEO::AppendOperations appendOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate,
+                                   MutexLock *outerLock) override {
             flushCount++;
 
             return ZE_RESULT_SUCCESS;
@@ -3074,7 +3185,7 @@ HWTEST2_F(InOrderCmdListTests, givenHostVisibleEventOnLatestFlushWhenCallingSync
 
     immCmdList->hostSynchronize(0, false);
 
-    if (immCmdList->dcFlushSupport || !immCmdList->isHeaplessModeEnabled()) {
+    if (immCmdList->dcFlushSupport || (!immCmdList->isHeaplessModeEnabled() && immCmdList->latestOperationHasOptimizedCbEvent)) {
         EXPECT_EQ(0u, immCmdList->synchronizeInOrderExecutionCalled);
         EXPECT_EQ(1u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled);
     } else {
@@ -3088,7 +3199,7 @@ HWTEST2_F(InOrderCmdListTests, givenHostVisibleEventOnLatestFlushWhenCallingSync
 
     immCmdList->hostSynchronize(0, false);
 
-    if (!immCmdList->isHeaplessModeEnabled()) {
+    if (!immCmdList->isHeaplessModeEnabled() && immCmdList->latestOperationHasOptimizedCbEvent) {
         EXPECT_EQ(0u, immCmdList->synchronizeInOrderExecutionCalled);
         EXPECT_EQ(2u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled);
     } else if (immCmdList->dcFlushSupport) {
@@ -3102,7 +3213,7 @@ HWTEST2_F(InOrderCmdListTests, givenHostVisibleEventOnLatestFlushWhenCallingSync
     // handle post sync operations
     immCmdList->hostSynchronize(0, true);
 
-    if (!immCmdList->isHeaplessModeEnabled()) {
+    if (!immCmdList->isHeaplessModeEnabled() && immCmdList->latestOperationHasOptimizedCbEvent) {
         EXPECT_EQ(0u, immCmdList->synchronizeInOrderExecutionCalled);
         EXPECT_EQ(3u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled);
     } else if (immCmdList->dcFlushSupport) {
@@ -3134,7 +3245,7 @@ HWTEST2_F(InOrderCmdListTests, givenEmptyTempAllocationsStorageWhenCallingSynchr
 
     immCmdList->hostSynchronize(0, true);
 
-    if (!immCmdList->isHeaplessModeEnabled()) {
+    if (!immCmdList->isHeaplessModeEnabled() && immCmdList->latestOperationHasOptimizedCbEvent) {
         EXPECT_EQ(0u, immCmdList->synchronizeInOrderExecutionCalled);
         EXPECT_EQ(1u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled);
     } else {
@@ -3146,7 +3257,7 @@ HWTEST2_F(InOrderCmdListTests, givenEmptyTempAllocationsStorageWhenCallingSynchr
 
     immCmdList->hostSynchronize(0, true);
 
-    if (!immCmdList->isHeaplessModeEnabled()) {
+    if (!immCmdList->isHeaplessModeEnabled() && immCmdList->latestOperationHasOptimizedCbEvent) {
         EXPECT_EQ(0u, immCmdList->synchronizeInOrderExecutionCalled);
         EXPECT_EQ(2u, ultCsr->waitForCompletionWithTimeoutTaskCountCalled);
     } else {
@@ -3859,9 +3970,10 @@ HWTEST2_F(InOrderCmdListTests, givenInOrderModeWhenProgrammingComputeCopyThenDon
     context->freeMem(alloc);
 }
 
-HWTEST2_F(InOrderCmdListTests, givenAlocFlushRequiredhenProgrammingComputeCopyThenSingalFromSdi, IsAtLeastXeHpCore) {
+HWTEST2_F(InOrderCmdListTests, givenAllocFlushRequiredWhenProgrammingComputeCopyThenSignalFromSdi, IsAtLeastXeHpCore) {
     using WalkerVariant = typename FamilyType::WalkerVariant;
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
+    using MI_ATOMIC = typename FamilyType::MI_ATOMIC;
     auto immCmdList = createImmCmdList<gfxCoreFamily>();
 
     auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
@@ -3890,13 +4002,28 @@ HWTEST2_F(InOrderCmdListTests, givenAlocFlushRequiredhenProgrammingComputeCopyTh
     },
                walkerVariant);
 
-    auto sdiItor = find<MI_STORE_DATA_IMM *>(walkerItor, cmdList.end());
+    auto inOrderExecInfo = immCmdList->inOrderExecInfo;
+    auto gpuAddress = inOrderExecInfo->getBaseDeviceAddress();
 
+    auto miAtomicItor = find<MI_ATOMIC *>(walkerItor, cmdList.end());
+    if (device->getProductHelper().isDcFlushAllowed() && inOrderExecInfo->isHostStorageDuplicated()) {
+        EXPECT_NE(cmdList.end(), miAtomicItor);
+        auto miAtomicCmd = genCmdCast<MI_ATOMIC *>(*miAtomicItor);
+        EXPECT_EQ(gpuAddress, miAtomicCmd->getMemoryAddress());
+    } else {
+        EXPECT_EQ(cmdList.end(), miAtomicItor);
+    }
+
+    auto sdiItor = find<MI_STORE_DATA_IMM *>(walkerItor, cmdList.end());
     if (dcFlushRequired) {
         EXPECT_NE(cmdList.end(), sdiItor);
-        auto sdiCmd = genCmdCast<MI_STORE_DATA_IMM *>(*sdiItor);
+        auto inOrderExecInfo = immCmdList->inOrderExecInfo;
+        if (inOrderExecInfo->isHostStorageDuplicated()) {
+            gpuAddress = reinterpret_cast<uint64_t>(inOrderExecInfo->getBaseHostAddress());
+        }
 
-        EXPECT_EQ(immCmdList->inOrderExecInfo->getBaseDeviceAddress(), sdiCmd->getAddress());
+        auto sdiCmd = genCmdCast<MI_STORE_DATA_IMM *>(*sdiItor);
+        EXPECT_EQ(gpuAddress, sdiCmd->getAddress());
     } else {
         EXPECT_EQ(cmdList.end(), sdiItor);
     }
@@ -4329,6 +4456,8 @@ HWTEST2_F(InOrderCmdListTests, givenInOrderModeWhenProgrammingCounterWithOverflo
 
         useZeroOffset = !useZeroOffset;
     }
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenInOrderModeWhenProgrammingCounterWithOverflowThenHandleItCorrectly, IsAtLeastXeHpCore) {
@@ -4429,6 +4558,8 @@ HWTEST2_F(InOrderCmdListTests, givenInOrderModeWhenProgrammingCounterWithOverflo
 
     EXPECT_EQ(expectedCounter, events[0]->inOrderExecSignalValue);
     EXPECT_EQ(offset, events[0]->inOrderAllocationOffset);
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
 }
 
 HWTEST2_F(InOrderCmdListTests, givenCopyOnlyInOrderModeWhenProgrammingBarrierThenSignalInOrderAllocation, IsAtLeastXeHpCore) {
@@ -5048,7 +5179,7 @@ HWTEST2_F(InOrderCmdListTests, givenAubModeWhenSyncCalledAlwaysPollForCompletion
 
     immCmdList->hostSynchronize(0, false);
 
-    auto expectPollForCompletion = immCmdList->isHeaplessModeEnabled() ? 1u : 0u;
+    auto expectPollForCompletion = (immCmdList->isHeaplessModeEnabled() || !immCmdList->latestOperationHasOptimizedCbEvent) ? 1u : 0u;
     EXPECT_EQ(expectPollForCompletion++, ultCsr->pollForAubCompletionCalled);
 
     events[0]->hostSynchronize(std::numeric_limits<uint64_t>::max());
@@ -5652,7 +5783,7 @@ HWTEST2_F(InOrderCmdListTests, givenMitigateHostVisibleSignalWhenCallingSynchron
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, eventObj->hostSynchronize(-1));
 
-    if (device->getProductHelper().isDcFlushAllowed()) {
+    if (device->getProductHelper().isDcFlushAllowed() && !ultCsr->heaplessModeEnabled) {
         EXPECT_TRUE(ultCsr->waitForTaskCountCalled);
         EXPECT_TRUE(ultCsr->flushTagUpdateCalled);
     } else {
@@ -5903,6 +6034,8 @@ HWTEST2_F(InOrderCmdListTests, givenInOrderModeWhenGpuHangDetectedInCpuCopyPathT
     EXPECT_EQ(ZE_RESULT_ERROR_DEVICE_LOST, status);
 
     ultCsr->forceReturnGpuHang = false;
+
+    *hostAddress = std::numeric_limits<uint64_t>::max();
 
     context->freeMem(deviceAlloc);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -13,6 +13,7 @@
 #include "shared/source/command_stream/preemption_mode.h"
 #include "shared/source/command_stream/queue_throttle.h"
 #include "shared/source/command_stream/thread_arbitration_policy.h"
+#include "shared/source/helpers/append_operations.h"
 #include "shared/source/helpers/pipeline_select_args.h"
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/kernel/kernel_execution_type.h"
@@ -20,6 +21,7 @@
 #include <limits>
 
 namespace NEO {
+class LinearStream;
 struct FlushStampTrackingObj;
 struct StreamProperties;
 
@@ -44,6 +46,8 @@ struct DispatchBcsFlags {
     DispatchBcsFlags(bool flushTaskCount, bool hasStallingCmds, bool hasRelaxedOrderingDependencies)
         : flushTaskCount(flushTaskCount), hasStallingCmds(hasStallingCmds), hasRelaxedOrderingDependencies(hasRelaxedOrderingDependencies) {}
 
+    LinearStream *optionalEpilogueCmdStream = nullptr;
+    AppendOperations dispatchOperation = AppendOperations::none;
     bool flushTaskCount = false;
     bool hasStallingCmds = false;
     bool hasRelaxedOrderingDependencies = false;
@@ -93,6 +97,7 @@ struct DispatchFlags {
     TimestampPacketContainer *barrierTimestampPacketNodes = nullptr;
     PipelineSelectArgs pipelineSelectArgs;
     FlushStampTrackingObj *flushStampReference = nullptr;
+    LinearStream *optionalEpilogueCmdStream = nullptr;
     QueueThrottle throttle = QueueThrottle::MEDIUM;
     PreemptionMode preemptionMode = PreemptionMode::Disabled;
     uint32_t numGrfRequired = GrfConfig::defaultGrfNumber;
@@ -136,6 +141,8 @@ struct CsrSizeRequestFlags {
 struct ImmediateDispatchFlags {
     StreamProperties *requiredState = nullptr;
     void *sshCpuBase = nullptr;
+    LinearStream *optionalEpilogueCmdStream = nullptr;
+    AppendOperations dispatchOperation = AppendOperations::none;
     bool blockingAppend = false;
     bool requireTaskCountUpdate = false;
     bool hasRelaxedOrderingDependencies = false;

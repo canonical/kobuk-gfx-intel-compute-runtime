@@ -994,7 +994,14 @@ TaskCountType CommandQueue::peekBcsTaskCount(aub_stream::EngineType bcsEngineTyp
 }
 
 bool CommandQueue::isTextureCacheFlushNeeded(uint32_t commandType) const {
-    return (commandType == CL_COMMAND_COPY_IMAGE || commandType == CL_COMMAND_WRITE_IMAGE) && getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled();
+    switch (commandType) {
+    case CL_COMMAND_COPY_IMAGE:
+    case CL_COMMAND_WRITE_IMAGE:
+    case CL_COMMAND_FILL_IMAGE:
+        return getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled();
+    default:
+        return false;
+    }
 }
 
 IndirectHeap &CommandQueue::getIndirectHeap(IndirectHeapType heapType, size_t minRequiredSize) {
@@ -1331,11 +1338,17 @@ void CommandQueue::assignDataToOverwrittenBcsNode(TagNodeBase *node) {
 }
 
 bool CommandQueue::isWaitForTimestampsEnabled() const {
-    const auto &gfxCoreHelper = getDevice().getGfxCoreHelper();
     auto &productHelper = getDevice().getProductHelper();
+
     auto enabled = CommandQueue::isTimestampWaitEnabled();
-    enabled &= gfxCoreHelper.isTimestampWaitSupportedForQueues();
-    enabled &= !productHelper.isDcFlushAllowed();
+    enabled &= productHelper.isTimestampWaitSupportedForQueues(this->heaplessModeEnabled);
+
+    if (productHelper.isL3FlushAfterPostSyncRequired(this->heaplessModeEnabled)) {
+        enabled &= true;
+    } else {
+        enabled &= !productHelper.isDcFlushAllowed();
+    }
+
     enabled &= !getDevice().getRootDeviceEnvironment().isWddmOnLinux();
     enabled &= !this->isOOQEnabled(); // TSP for OOQ dispatch is optional. We need to wait for task count.
 

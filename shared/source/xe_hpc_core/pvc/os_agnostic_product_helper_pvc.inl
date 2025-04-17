@@ -7,7 +7,10 @@
 
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/definitions/indirect_detection_versions.h"
-#include "shared/source/os_interface/product_helper_xe_hpg_and_xe_hpc.inl"
+#include "shared/source/helpers/string_helpers.h"
+#include "shared/source/os_interface/product_helper.inl"
+#include "shared/source/os_interface/product_helper_before_xe2.inl"
+#include "shared/source/os_interface/product_helper_xe_hpg_and_later.inl"
 
 #include "aubstream/product_family.h"
 
@@ -145,6 +148,24 @@ bool ProductHelperHw<gfxProduct>::isBlitCopyRequiredForLocalMemory(const RootDev
 }
 
 template <>
+void ProductHelperHw<gfxProduct>::parseCcsMode(std::string ccsModeString, std::unordered_map<uint32_t, uint32_t> &rootDeviceNumCcsMap, uint32_t rootDeviceIndex, RootDeviceEnvironment *rootDeviceEnvironment) const {
+    auto numberOfCcsEntries = StringHelpers::split(ccsModeString, ",");
+
+    for (const auto &entry : numberOfCcsEntries) {
+        auto subEntries = StringHelpers::split(entry, ":");
+        uint32_t rootDeviceIndexParsed = StringHelpers::toUint32t(subEntries[0]);
+
+        if (rootDeviceIndexParsed == rootDeviceIndex) {
+            if (subEntries.size() > 1) {
+                uint32_t maxCcsCount = StringHelpers::toUint32t(subEntries[1]);
+                rootDeviceNumCcsMap.insert({rootDeviceIndex, maxCcsCount});
+                rootDeviceEnvironment->setNumberOfCcs(maxCcsCount);
+            }
+        }
+    }
+}
+
+template <>
 bool ProductHelperHw<gfxProduct>::isTlbFlushRequired() const {
     bool tlbFlushRequired = false;
     if (debugManager.flags.ForceTlbFlush.get() != -1) {
@@ -235,13 +256,26 @@ bool ProductHelperHw<gfxProduct>::supportReadOnlyAllocations() const {
 }
 
 template <>
-std::optional<bool> ProductHelperHw<gfxProduct>::isCoherentAllocation(uint64_t patIndex) const {
-    return std::nullopt;
+bool ProductHelperHw<gfxProduct>::isSharingWith3dOrMediaAllowed() const {
+    return false;
 }
 
 template <>
-bool ProductHelperHw<gfxProduct>::isSharingWith3dOrMediaAllowed() const {
+uint64_t ProductHelperHw<gfxProduct>::getHostMemCapabilitiesValue() const {
+    return (UnifiedSharedMemoryFlags::access);
+}
+
+template <>
+bool ProductHelperHw<gfxProduct>::isTile64With3DSurfaceOnBCSSupported(const HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <>
+uint32_t ProductHelperHw<gfxProduct>::getMaxThreadsForWorkgroupInDSSOrSS(const HardwareInfo &hwInfo, uint32_t maxNumEUsPerSubSlice, uint32_t maxNumEUsPerDualSubSlice) const {
+    if (isMaxThreadsForWorkgroupWARequired(hwInfo)) {
+        return std::min(getMaxThreadsForWorkgroup(hwInfo, maxNumEUsPerDualSubSlice), 64u);
+    }
+    return getMaxThreadsForWorkgroup(hwInfo, maxNumEUsPerDualSubSlice);
 }
 
 } // namespace NEO

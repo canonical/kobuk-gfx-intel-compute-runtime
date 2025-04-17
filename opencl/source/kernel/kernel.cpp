@@ -59,7 +59,6 @@
 #include "opencl/source/kernel/kernel_info_cl.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
-#include "opencl/source/mem_obj/pipe.h"
 #include "opencl/source/memory_manager/mem_obj_surface.h"
 #include "opencl/source/program/program.h"
 #include "opencl/source/sampler/sampler.h"
@@ -93,6 +92,7 @@ Kernel::Kernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &c
         maxKernelWorkGroupSize = static_cast<uint32_t>(deviceInfo.maxWorkGroupSize);
     }
     slmTotalSize = kernelInfoArg.kernelDescriptor.kernelAttributes.slmInlineSize;
+    this->implicitArgsVersion = getDevice().getGfxCoreHelper().getImplicitArgsVersion();
 }
 
 Kernel::~Kernel() {
@@ -205,9 +205,8 @@ cl_int Kernel::initialize() {
     if (kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs) {
         pImplicitArgs = std::make_unique<ImplicitArgs>();
         *pImplicitArgs = {};
-        pImplicitArgs->structSize = ImplicitArgs::getSize();
-        pImplicitArgs->structVersion = 0;
-        pImplicitArgs->simdWidth = maxSimdSize;
+        pImplicitArgs->initializeHeader(this->implicitArgsVersion);
+        pImplicitArgs->setSimdWidth(maxSimdSize);
     }
     auto ret = KernelHelper::checkIfThereIsSpaceForScratchOrPrivate(kernelDescriptor.kernelAttributes, &pClDevice->getDevice());
     if (ret == NEO::KernelHelper::ErrorCode::invalidKernel) {
@@ -246,7 +245,7 @@ cl_int Kernel::initialize() {
     // allocate our own SSH, if necessary
     sshLocalSize = heapInfo.surfaceStateHeapSize;
     if (sshLocalSize) {
-        pSshLocal = std::make_unique<char[]>(sshLocalSize);
+        pSshLocal = std::make_unique_for_overwrite<char[]>(sshLocalSize);
 
         // copy the ssh into our local copy
         memcpy_s(pSshLocal.get(), sshLocalSize,
@@ -457,7 +456,7 @@ cl_int Kernel::cloneKernel(Kernel *pSourceKernel) {
     }
 
     if (pImplicitArgs) {
-        memcpy_s(pImplicitArgs.get(), ImplicitArgs::getSize(), pSourceKernel->getImplicitArgs(), ImplicitArgs::getSize());
+        memcpy_s(pImplicitArgs.get(), pImplicitArgs->getSize(), pSourceKernel->getImplicitArgs(), pImplicitArgs->getSize());
     }
     this->isBuiltIn = pSourceKernel->isBuiltIn;
 
@@ -1625,47 +1624,7 @@ cl_int Kernel::setArgPipe(uint32_t argIndex,
         return CL_INVALID_ARG_SIZE;
     }
 
-    auto clMem = reinterpret_cast<const cl_mem *>(argVal);
-
-    if (clMem && *clMem) {
-        auto clMemObj = *clMem;
-        DBG_LOG_INPUTS("setArgPipe cl_mem", clMemObj);
-
-        storeKernelArg(argIndex, PIPE_OBJ, clMemObj, argVal, argSize);
-
-        auto memObj = castToObject<MemObj>(clMemObj);
-        if (!memObj) {
-            return CL_INVALID_MEM_OBJECT;
-        }
-
-        auto pipe = castToObject<Pipe>(clMemObj);
-        if (!pipe) {
-            return CL_INVALID_ARG_VALUE;
-        }
-
-        if (memObj->getContext() != &(this->getContext())) {
-            return CL_INVALID_MEM_OBJECT;
-        }
-
-        auto rootDeviceIndex = getDevice().getRootDeviceIndex();
-        const auto &argAsPtr = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex].as<ArgDescPointer>();
-
-        auto patchLocation = ptrOffset(getCrossThreadData(), argAsPtr.stateless);
-        pipe->setPipeArg(patchLocation, argAsPtr.pointerSize, rootDeviceIndex);
-
-        if (isValidOffset(argAsPtr.bindful)) {
-            auto graphicsAllocation = pipe->getGraphicsAllocation(rootDeviceIndex);
-            auto surfaceState = ptrOffset(getSurfaceStateHeap(), argAsPtr.bindful);
-            Buffer::setSurfaceState(&getDevice().getDevice(), surfaceState, false, false,
-                                    pipe->getSize(), pipe->getCpuAddress(), 0,
-                                    graphicsAllocation, 0, 0,
-                                    areMultipleSubDevicesInContext());
-        }
-
-        return CL_SUCCESS;
-    } else {
-        return CL_INVALID_MEM_OBJECT;
-    }
+    return CL_INVALID_MEM_OBJECT;
 }
 
 cl_int Kernel::setArgImage(uint32_t argIndex,
@@ -2275,7 +2234,7 @@ const HardwareInfo &Kernel::getHardwareInfo() const {
 void Kernel::setWorkDim(uint32_t workDim) {
     patchNonPointer<uint32_t, uint32_t>(getCrossThreadDataRef(), getDescriptor().payloadMappings.dispatchTraits.workDim, workDim);
     if (pImplicitArgs) {
-        pImplicitArgs->numWorkDim = workDim;
+        pImplicitArgs->setNumWorkDim(workDim);
     }
 }
 
@@ -2284,9 +2243,7 @@ void Kernel::setGlobalWorkOffsetValues(uint32_t globalWorkOffsetX, uint32_t glob
                        getDescriptor().payloadMappings.dispatchTraits.globalWorkOffset,
                        {globalWorkOffsetX, globalWorkOffsetY, globalWorkOffsetZ});
     if (pImplicitArgs) {
-        pImplicitArgs->globalOffsetX = globalWorkOffsetX;
-        pImplicitArgs->globalOffsetY = globalWorkOffsetY;
-        pImplicitArgs->globalOffsetZ = globalWorkOffsetZ;
+        pImplicitArgs->setGlobalOffset(globalWorkOffsetX, globalWorkOffsetY, globalWorkOffsetZ);
     }
 }
 
@@ -2295,9 +2252,7 @@ void Kernel::setGlobalWorkSizeValues(uint32_t globalWorkSizeX, uint32_t globalWo
                        getDescriptor().payloadMappings.dispatchTraits.globalWorkSize,
                        {globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ});
     if (pImplicitArgs) {
-        pImplicitArgs->globalSizeX = globalWorkSizeX;
-        pImplicitArgs->globalSizeY = globalWorkSizeY;
-        pImplicitArgs->globalSizeZ = globalWorkSizeZ;
+        pImplicitArgs->setGlobalSize(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ);
     }
 }
 
@@ -2306,9 +2261,7 @@ void Kernel::setLocalWorkSizeValues(uint32_t localWorkSizeX, uint32_t localWorkS
                        getDescriptor().payloadMappings.dispatchTraits.localWorkSize,
                        {localWorkSizeX, localWorkSizeY, localWorkSizeZ});
     if (pImplicitArgs) {
-        pImplicitArgs->localSizeX = localWorkSizeX;
-        pImplicitArgs->localSizeY = localWorkSizeY;
-        pImplicitArgs->localSizeZ = localWorkSizeZ;
+        pImplicitArgs->setLocalSize(localWorkSizeX, localWorkSizeY, localWorkSizeZ);
     }
 }
 
@@ -2329,9 +2282,7 @@ void Kernel::setNumWorkGroupsValues(uint32_t numWorkGroupsX, uint32_t numWorkGro
                        getDescriptor().payloadMappings.dispatchTraits.numWorkGroups,
                        {numWorkGroupsX, numWorkGroupsY, numWorkGroupsZ});
     if (pImplicitArgs) {
-        pImplicitArgs->groupCountX = numWorkGroupsX;
-        pImplicitArgs->groupCountY = numWorkGroupsY;
-        pImplicitArgs->groupCountZ = numWorkGroupsZ;
+        pImplicitArgs->setGroupCount(numWorkGroupsX, numWorkGroupsY, numWorkGroupsZ);
     }
 }
 

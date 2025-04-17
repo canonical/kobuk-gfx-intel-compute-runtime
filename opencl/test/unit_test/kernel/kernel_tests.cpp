@@ -22,6 +22,7 @@
 #include "shared/test/common/fixtures/memory_management_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
+#include "shared/test/common/helpers/raii_gfx_core_helper.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_bindless_heaps_helper.h"
@@ -3914,8 +3915,17 @@ TEST_F(KernelImplicitArgsTest, WhenKernelRequiresImplicitArgsThenImplicitArgsStr
 
         ASSERT_NE(nullptr, pImplicitArgs);
 
-        ImplicitArgs expectedImplicitArgs = {ImplicitArgs::getSize(), 0, 0, 32};
-        EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, ImplicitArgs::getSize()));
+        ImplicitArgs expectedImplicitArgs = {};
+        if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 0) {
+            expectedImplicitArgs.v0.header.structVersion = 0;
+            expectedImplicitArgs.v0.header.structSize = ImplicitArgsV0::getSize();
+        } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 1) {
+            expectedImplicitArgs.v1.header.structVersion = 1;
+            expectedImplicitArgs.v1.header.structSize = ImplicitArgsV1::getSize();
+        }
+        expectedImplicitArgs.setSimdWidth(32);
+
+        EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, pImplicitArgs->getSize()));
     }
 }
 
@@ -3933,9 +3943,55 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenSettingKernelParam
 
     ASSERT_NE(nullptr, pImplicitArgs);
 
-    ImplicitArgs expectedImplicitArgs = {ImplicitArgs::getSize()};
+    ImplicitArgs expectedImplicitArgs = {};
+    if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 0) {
+        expectedImplicitArgs.v0.header.structVersion = 0;
+        expectedImplicitArgs.v0.header.structSize = ImplicitArgsV0::getSize();
+    } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 1) {
+        expectedImplicitArgs.v1.header.structVersion = 1;
+        expectedImplicitArgs.v1.header.structSize = ImplicitArgsV1::getSize();
+    }
+
+    expectedImplicitArgs.setNumWorkDim(3);
+    expectedImplicitArgs.setSimdWidth(32);
+    expectedImplicitArgs.setLocalSize(4, 5, 6);
+    expectedImplicitArgs.setGlobalSize(7, 8, 9);
+    expectedImplicitArgs.setGlobalOffset(1, 2, 3);
+    expectedImplicitArgs.setGroupCount(3, 2, 1);
+
+    kernel.setWorkDim(3);
+    kernel.setLocalWorkSizeValues(4, 5, 6);
+    kernel.setGlobalWorkSizeValues(7, 8, 9);
+    kernel.setGlobalWorkOffsetValues(1, 2, 3);
+    kernel.setNumWorkGroupsValues(3, 2, 1);
+
+    EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, ImplicitArgsV0::getSize()));
+}
+
+HWTEST_F(KernelImplicitArgsTest, givenGfxCoreRequiringImplicitArgsV1WhenSettingKernelParamsThenImplicitArgsAreProperlySet) {
+    auto pKernelInfo = std::make_unique<MockKernelInfo>();
+    pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
+    pKernelInfo->kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs = true;
+
+    struct MockGfxCoreHelper : NEO::GfxCoreHelperHw<FamilyType> {
+        uint32_t getImplicitArgsVersion() const override {
+            return 1;
+        }
+    };
+
+    RAIIGfxCoreHelperFactory<MockGfxCoreHelper> raii(*pClDevice->getDevice().getExecutionEnvironment()->rootDeviceEnvironments[0]);
+
+    MockContext context(pClDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
+
+    MockKernel kernel(&program, *pKernelInfo, *pClDevice);
+    ASSERT_EQ(CL_SUCCESS, kernel.initialize());
+    auto pImplicitArgs = kernel.getImplicitArgs();
+
+    ASSERT_NE(nullptr, pImplicitArgs);
+
+    ImplicitArgsV1 expectedImplicitArgs = {{ImplicitArgsV1::getSize(), 1}};
     expectedImplicitArgs.numWorkDim = 3;
-    expectedImplicitArgs.simdWidth = 32;
     expectedImplicitArgs.localSizeX = 4;
     expectedImplicitArgs.localSizeY = 5;
     expectedImplicitArgs.localSizeZ = 6;
@@ -3955,7 +4011,7 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenSettingKernelParam
     kernel.setGlobalWorkOffsetValues(1, 2, 3);
     kernel.setNumWorkGroupsValues(3, 2, 1);
 
-    EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, ImplicitArgs::getSize()));
+    EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, ImplicitArgsV1::getSize()));
 }
 
 TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenCloneKernelThenImplicitArgsAreCopied) {
@@ -3971,21 +4027,21 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenCloneKernelThenImp
     ASSERT_EQ(CL_SUCCESS, kernel.initialize());
     ASSERT_EQ(CL_SUCCESS, kernel2.initialize());
 
-    ImplicitArgs expectedImplicitArgs = {ImplicitArgs::getSize()};
-    expectedImplicitArgs.numWorkDim = 3;
-    expectedImplicitArgs.simdWidth = 32;
-    expectedImplicitArgs.localSizeX = 4;
-    expectedImplicitArgs.localSizeY = 5;
-    expectedImplicitArgs.localSizeZ = 6;
-    expectedImplicitArgs.globalSizeX = 7;
-    expectedImplicitArgs.globalSizeY = 8;
-    expectedImplicitArgs.globalSizeZ = 9;
-    expectedImplicitArgs.globalOffsetX = 1;
-    expectedImplicitArgs.globalOffsetY = 2;
-    expectedImplicitArgs.globalOffsetZ = 3;
-    expectedImplicitArgs.groupCountX = 3;
-    expectedImplicitArgs.groupCountY = 2;
-    expectedImplicitArgs.groupCountZ = 1;
+    ImplicitArgs expectedImplicitArgs = {};
+    if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 0) {
+        expectedImplicitArgs.v0.header.structVersion = 0;
+        expectedImplicitArgs.v0.header.structSize = ImplicitArgsV0::getSize();
+    } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 1) {
+        expectedImplicitArgs.v1.header.structVersion = 1;
+        expectedImplicitArgs.v1.header.structSize = ImplicitArgsV1::getSize();
+    }
+
+    expectedImplicitArgs.setNumWorkDim(3);
+    expectedImplicitArgs.setSimdWidth(32);
+    expectedImplicitArgs.setLocalSize(4, 5, 6);
+    expectedImplicitArgs.setGlobalSize(7, 8, 9);
+    expectedImplicitArgs.setGlobalOffset(1, 2, 3);
+    expectedImplicitArgs.setGroupCount(3, 2, 1);
 
     kernel.setWorkDim(3);
     kernel.setLocalWorkSizeValues(4, 5, 6);
@@ -3999,7 +4055,7 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenCloneKernelThenImp
 
     ASSERT_NE(nullptr, pImplicitArgs);
 
-    EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, ImplicitArgs::getSize()));
+    EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, pImplicitArgs->getSize()));
 }
 
 TEST_F(KernelImplicitArgsTest, givenKernelWithoutImplicitArgsWhenSettingKernelParamsThenImplicitArgsAreNotSet) {

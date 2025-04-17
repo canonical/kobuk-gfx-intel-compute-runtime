@@ -627,7 +627,9 @@ HWTEST2_F(CopyOffloadInOrderTests, givenCopyOperationWithHostVisibleEventThenMar
 HWTEST2_F(CopyOffloadInOrderTests, givenRelaxedOrderingEnabledWhenDispatchingThenUseCorrectCsr, IsAtLeastXeHpcCore) {
     class MyMockCmdList : public WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>> {
       public:
-        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate) override {
+        ze_result_t flushImmediate(ze_result_t inputRet, bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies,
+                                   NEO::AppendOperations appendOperation, bool copyOffloadSubmission, ze_event_handle_t hSignalEvent, bool requireTaskCountUpdate,
+                                   MutexLock *outerLock) override {
             latestRelaxedOrderingMode = hasRelaxedOrderingDependencies;
 
             return ZE_RESULT_SUCCESS;
@@ -761,6 +763,7 @@ HWTEST2_F(CopyOffloadInOrderTests, givenInOrderModeWhenCallingSyncThenHandleComp
         EXPECT_EQ(0u, mainQueueCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
         EXPECT_EQ(0u, offloadCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
     }
+    *hostAddress = std::numeric_limits<uint64_t>::max();
 }
 
 HWTEST2_F(CopyOffloadInOrderTests, givenTbxModeWhenSyncCalledAlwaysDownloadAllocationsFromBothCsrs, IsAtLeastXeHpCore) {
@@ -842,6 +845,7 @@ HWTEST2_F(CopyOffloadInOrderTests, givenNonInOrderModeWaitWhenCallingSyncThenHan
     immCmdList->hostSynchronize(0, true);
     EXPECT_EQ(1u, mainQueueCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
     EXPECT_EQ(1u, offloadCsr->waitForCompletionWithTimeoutTaskCountCalled.load());
+    *hostAddress = std::numeric_limits<uint64_t>::max();
 }
 
 HWTEST2_F(CopyOffloadInOrderTests, givenNonInOrderModeWaitWhenCallingSyncThenHandleCompletionAndTempAllocations, IsAtLeastXeHpCore) {
@@ -916,6 +920,7 @@ HWTEST2_F(CopyOffloadInOrderTests, givenNonInOrderModeWaitWhenCallingSyncThenHan
     immCmdList->hostSynchronize(0, true);
     EXPECT_TRUE(mainInternalStorage->getTemporaryAllocations().peekIsEmpty());
     EXPECT_TRUE(offloadInternalStorage->getTemporaryAllocations().peekIsEmpty());
+    *hostAddress = std::numeric_limits<uint64_t>::max();
 }
 
 HWTEST2_F(CopyOffloadInOrderTests, givenInterruptEventWhenDispatchingTheProgramUserInterrupt, IsAtLeastXeHpcCore) {
@@ -1861,6 +1866,10 @@ HWTEST2_F(StandaloneInOrderTimestampAllocationTests, givenDebugFlagSetToZeroWhen
 }
 
 HWTEST2_F(StandaloneInOrderTimestampAllocationTests, givenNonWalkerCounterSignalingWhenPassedNonProfilingEventThenNotAssignAllocation, IsAtLeastXeHpCore) {
+
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     auto eventPool = createEvents<FamilyType>(1, false);
     auto eventHandle = events[0]->toHandle();
 
@@ -1964,8 +1973,7 @@ HWTEST2_F(StandaloneInOrderTimestampAllocationTests, givenTimestampEventWhenDisp
 
     cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, eventHandle, 0, nullptr, launchParams, false);
 
-    // mark as not ready, to make sure that destructor will release everything anyway
-    *hostAddress = 0;
+    *hostAddress = std::numeric_limits<uint64_t>::max();
 }
 
 using SynchronizedDispatchTests = InOrderCmdListFixture;
@@ -3199,6 +3207,8 @@ HWTEST2_F(MultiTileInOrderCmdListTests, givenMultiTileInOrderModeWhenCallingSync
     *hostAddress1 = 3;
     EXPECT_EQ(ZE_RESULT_SUCCESS, immCmdList->hostSynchronize(0, false));
     EXPECT_EQ(ZE_RESULT_SUCCESS, events[0]->hostSynchronize(0));
+
+    completeHostAddress<gfxCoreFamily, WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>>(immCmdList.get());
 }
 
 HWTEST2_F(MultiTileInOrderCmdListTests, whenUsingRegularCmdListThenAddWalkerToPatch, IsAtLeastXeHpCore) {
@@ -3341,7 +3351,7 @@ void BcsSplitInOrderCmdListTests::verifySplitCmds(LinearStream &cmdStream, size_
 
     auto inOrderExecInfo = immCmdList.inOrderExecInfo;
 
-    auto counterGpuAddress = inOrderExecInfo->isHostStorageDuplicated() ? reinterpret_cast<uint64_t>(inOrderExecInfo->getBaseHostAddress()) : inOrderExecInfo->getBaseDeviceAddress();
+    auto counterGpuAddress = inOrderExecInfo->getBaseDeviceAddress();
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(cmdList, ptrOffset(cmdStream.getCpuBase(), streamOffset), (cmdStream.getUsed() - streamOffset)));
@@ -3431,6 +3441,10 @@ void BcsSplitInOrderCmdListTests::verifySplitCmds(LinearStream &cmdStream, size_
     auto implicitCounterSdi = genCmdCast<MI_STORE_DATA_IMM *>(*(++itor));
     ASSERT_NE(nullptr, implicitCounterSdi);
 
+    if (inOrderExecInfo->isHostStorageDuplicated()) {
+        counterGpuAddress = reinterpret_cast<uint64_t>(inOrderExecInfo->getBaseHostAddress());
+    }
+
     EXPECT_EQ(counterGpuAddress, implicitCounterSdi->getAddress());
     EXPECT_EQ(submissionId + 1, implicitCounterSdi->getDataDword0());
 
@@ -3443,6 +3457,7 @@ void BcsSplitInOrderCmdListTests::verifySplitCmds(LinearStream &cmdStream, size_
 HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenDispatchingCopyThenHandleInOrderSignaling, IsAtLeastXeHpcCore) {
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_ATOMIC = typename FamilyType::MI_ATOMIC;
 
     auto immCmdList = createBcsSplitImmCmdList<gfxCoreFamily>();
 
@@ -3465,6 +3480,18 @@ HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenDispatchingCopyTh
     auto semaphoreItor = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(cmdList.end(), semaphoreItor);
 
+    auto inOrderExecInfo = immCmdList->inOrderExecInfo;
+    auto gpuAddress = inOrderExecInfo->getBaseDeviceAddress();
+
+    auto miAtomicItor = find<MI_ATOMIC *>(semaphoreItor, cmdList.end());
+    if (inOrderExecInfo->isHostStorageDuplicated()) {
+        EXPECT_NE(cmdList.end(), miAtomicItor);
+        auto miAtomicCmd = genCmdCast<MI_ATOMIC *>(*miAtomicItor);
+        EXPECT_EQ(gpuAddress, miAtomicCmd->getMemoryAddress());
+    } else {
+        EXPECT_EQ(cmdList.end(), miAtomicItor);
+    }
+
     auto sdiItor = find<MI_STORE_DATA_IMM *>(semaphoreItor, cmdList.end());
     ASSERT_NE(cmdList.end(), sdiItor);
 
@@ -3472,7 +3499,9 @@ HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenDispatchingCopyTh
 
     ASSERT_NE(nullptr, sdiCmd);
 
-    auto gpuAddress = immCmdList->inOrderExecInfo->getBaseDeviceAddress();
+    if (inOrderExecInfo->isHostStorageDuplicated()) {
+        gpuAddress = reinterpret_cast<uint64_t>(inOrderExecInfo->getBaseHostAddress());
+    }
 
     EXPECT_EQ(gpuAddress, sdiCmd->getAddress());
     EXPECT_EQ(immCmdList->isQwordInOrderCounter(), sdiCmd->getStoreQword());
@@ -3558,6 +3587,7 @@ HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenAppendingMemoryCo
 HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenDispatchingCopyRegionThenHandleInOrderSignaling, IsAtLeastXeHpcCore) {
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+    using MI_ATOMIC = typename FamilyType::MI_ATOMIC;
 
     auto immCmdList = createBcsSplitImmCmdList<gfxCoreFamily>();
 
@@ -3582,6 +3612,18 @@ HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenDispatchingCopyRe
     auto semaphoreItor = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(cmdList.end(), semaphoreItor);
 
+    auto inOrderExecInfo = immCmdList->inOrderExecInfo;
+    auto gpuAddress = inOrderExecInfo->getBaseDeviceAddress();
+
+    auto miAtomicItor = find<MI_ATOMIC *>(semaphoreItor, cmdList.end());
+    if (inOrderExecInfo->isHostStorageDuplicated()) {
+        EXPECT_NE(cmdList.end(), miAtomicItor);
+        auto miAtomicCmd = genCmdCast<MI_ATOMIC *>(*miAtomicItor);
+        EXPECT_EQ(gpuAddress, miAtomicCmd->getMemoryAddress());
+    } else {
+        EXPECT_EQ(cmdList.end(), miAtomicItor);
+    }
+
     auto sdiItor = find<MI_STORE_DATA_IMM *>(semaphoreItor, cmdList.end());
     ASSERT_NE(cmdList.end(), sdiItor);
 
@@ -3589,7 +3631,9 @@ HWTEST2_F(BcsSplitInOrderCmdListTests, givenBcsSplitEnabledWhenDispatchingCopyRe
 
     ASSERT_NE(nullptr, sdiCmd);
 
-    auto gpuAddress = immCmdList->inOrderExecInfo->getBaseDeviceAddress();
+    if (inOrderExecInfo->isHostStorageDuplicated()) {
+        gpuAddress = reinterpret_cast<uint64_t>(inOrderExecInfo->getBaseHostAddress());
+    }
 
     EXPECT_EQ(gpuAddress, sdiCmd->getAddress());
     EXPECT_EQ(immCmdList->isQwordInOrderCounter(), sdiCmd->getStoreQword());

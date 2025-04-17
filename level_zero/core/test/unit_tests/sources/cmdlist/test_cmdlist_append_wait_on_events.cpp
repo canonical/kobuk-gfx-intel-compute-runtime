@@ -214,16 +214,23 @@ HWTEST2_F(CommandListAppendWaitOnEvent, givenImmediateCmdListAndAppendingRegular
     std::unique_ptr<L0::CommandList> commandListRegular(CommandList::create(productFamily, device, NEO::EngineGroupType::compute, 0u, returnValue, false));
     commandListRegular->close();
     auto commandListHandle = commandListRegular->toHandle();
-    auto result = immCommandList->appendCommandLists(1u, &commandListHandle, nullptr, 1u, &hEventHandle);
 
+    // 1st append can carry preamble
+    auto result = immCommandList->appendCommandLists(1u, &commandListHandle, nullptr, 1u, &hEventHandle);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    // 2nd append should carry only wait events and bb_start to regular command list
+    auto usedSpaceBefore = immCommandList->getCmdContainer().getCommandStream()->getUsed();
+
+    result = immCommandList->appendCommandLists(1u, &commandListHandle, nullptr, 1u, &hEventHandle);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto usedSpaceAfter = immCommandList->getCmdContainer().getCommandStream()->getUsed();
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(cmdList,
-                                                      immCommandList->getCmdContainer().getCommandStream()->getCpuBase(),
-                                                      usedSpaceAfter));
+                                                      ptrOffset(immCommandList->getCmdContainer().getCommandStream()->getCpuBase(), usedSpaceBefore),
+                                                      usedSpaceAfter - usedSpaceBefore));
 
     auto itor = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
     ASSERT_NE(cmdList.end(), itor);
@@ -277,10 +284,12 @@ class MockCommandListImmediateHwWithWaitEventFail : public WhiteBox<::L0::Comman
         return executeCommandListImmediateReturnValue;
     }
 
-    ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, bool kernelOperation, bool copyOffloadSubmission, bool requireTaskCountUpdate) override {
+    ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, NEO::AppendOperations appendOperation,
+                                                         bool copyOffloadSubmission, bool requireTaskCountUpdate,
+                                                         MutexLock *outerLock) override {
         ++executeCommandListImmediateWithFlushTaskCalledCount;
         if (callBaseExecute) {
-            return BaseClass::executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, kernelOperation, copyOffloadSubmission, requireTaskCountUpdate);
+            return BaseClass::executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, appendOperation, copyOffloadSubmission, requireTaskCountUpdate, outerLock);
         }
         return executeCommandListImmediateWithFlushTaskReturnValue;
     }
@@ -329,14 +338,13 @@ HWTEST2_F(CommandListImmediateAppendRegularTest, givenImmediateCommandListAndApp
     MockCommandStreamReceiver mockCommandStreamReceiver(*neoDevice->executionEnvironment, neoDevice->getRootDeviceIndex(), neoDevice->getDeviceBitfield());
     MockCommandQueueExecute queue(device, &mockCommandStreamReceiver, &queueDesc);
 
-    ze_event_handle_t hEventHandle = event->toHandle();
     auto cmdList = new MockCommandListImmediateHwWithWaitEventFail<gfxCoreFamily>;
     cmdList->cmdListType = CommandList::CommandListType::typeImmediate;
     cmdList->forceWaitEventError = true;
     cmdList->cmdQImmediate = &queue;
     cmdList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
-    auto result = cmdList->appendCommandLists(0u, nullptr, nullptr, 1u, &hEventHandle);
+    auto result = cmdList->appendCommandLists(0u, nullptr, nullptr, 1u, nullptr);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
     EXPECT_EQ(queue.executeCalledCount, 0u);
 
@@ -356,10 +364,8 @@ HWTEST2_F(CommandListImmediateAppendRegularTest, givenImmediateCommandListAndApp
     cmdList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
     auto result = cmdList->appendCommandLists(0u, nullptr, nullptr, 1u, &hEventHandle);
-    EXPECT_EQ(cmdList->appendWaitEventCalled, 1u);
     EXPECT_EQ(ZE_RESULT_ERROR_DEVICE_LOST, result);
     EXPECT_EQ(queue.executeCalledCount, 0u);
-    EXPECT_EQ(cmdList->appendSignalEventCalled, 0u);
 
     cmdList->destroy();
 }
@@ -386,7 +392,6 @@ HWTEST2_F(CommandListImmediateAppendRegularTest, givenImmediateCommandListAndApp
     cmdList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
     auto result = cmdList->appendCommandLists(0u, nullptr, hSignalEventHandle, 1u, &hEventHandle);
-    EXPECT_EQ(cmdList->appendWaitEventCalled, 1u);
     EXPECT_EQ(queue.executeCalledCount, 1u);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -560,7 +565,9 @@ HWTEST_F(CommandListAppendWaitOnEvent, givenEventWithWaitScopeFlagDeviceWhenAppe
     auto itor = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
     EXPECT_NE(cmdList.end(), itor);
 
-    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    auto whiteBoxCmdList = static_cast<CommandList *>(commandList.get());
+
+    if (NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment()) && !whiteBoxCmdList->l3FlushAfterPostSyncRequired) {
         itor--;
         auto cmd = genCmdCast<PIPE_CONTROL *>(*itor);
 
@@ -757,7 +764,7 @@ HWTEST_F(CommandListAppendWaitOnSecondaryBatchBufferEvent, givenCommandBufferIsE
     commandList->getCmdContainer().getCommandStream()->getSpace(consumeSpace);
 
     size_t expectedConsumedSpace = NEO::EncodeSemaphore<FamilyType>::getSizeMiSemaphoreWait();
-    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment()) && !commandList->l3FlushAfterPostSyncRequired) {
         expectedConsumedSpace += sizeof(PIPE_CONTROL);
     }
 
@@ -789,7 +796,7 @@ HWTEST_F(CommandListAppendWaitOnSecondaryBatchBufferEvent, givenCommandBufferIsE
                                                       usedSpaceAfter));
 
     auto itorPC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
-    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    if (MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment()) && !commandList->l3FlushAfterPostSyncRequired) {
         ASSERT_NE(cmdList.end(), itorPC);
         {
             auto cmd = genCmdCast<PIPE_CONTROL *>(*itorPC);

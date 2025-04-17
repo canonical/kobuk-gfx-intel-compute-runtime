@@ -17,6 +17,7 @@
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/helpers/dispatch_flags_helper.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/test_macros/mock_method_macros.h"
 
 #include <map>
 #include <optional>
@@ -177,7 +178,8 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
                              uint32_t rootDeviceIndex,
                              const DeviceBitfield deviceBitfield)
         : BaseClass(executionEnvironment, rootDeviceIndex, deviceBitfield), recursiveLockCounter(0),
-          recordedDispatchFlags(DispatchFlagsHelper::createDefaultDispatchFlags()) {
+          recordedDispatchFlags(DispatchFlagsHelper::createDefaultDispatchFlags()),
+          recordedBcsDispatchFlags(DispatchFlagsHelper::createDefaultBcsDispatchFlags()) {
         this->downloadAllocationImpl = [this](GraphicsAllocation &graphicsAllocation) {
             this->downloadAllocationUlt(graphicsAllocation);
         };
@@ -238,6 +240,7 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
                                        Device &device) override {
         recordedImmediateDispatchFlags = dispatchFlags;
         this->lastFlushedCommandStream = &commandStream;
+        this->lastFlushedImmediateCommandStream = &immediateCommandStream;
         return BaseClass::flushImmediateTask(immediateCommandStream, immediateCommandStreamStart, dispatchFlags, device);
     }
 
@@ -247,7 +250,15 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
                                                 Device &device) override {
         recordedImmediateDispatchFlags = dispatchFlags;
         this->lastFlushedCommandStream = &commandStream;
+        this->lastFlushedImmediateCommandStream = &immediateCommandStream;
         return BaseClass::flushImmediateTaskStateless(immediateCommandStream, immediateCommandStreamStart, dispatchFlags, device);
+    }
+
+    CompletionStamp flushBcsTask(LinearStream &commandStreamTask, size_t commandStreamTaskStart,
+                                 const DispatchBcsFlags &dispatchBcsFlags, const HardwareInfo &hwInfo) override {
+        this->recordedBcsDispatchFlags = dispatchBcsFlags;
+        this->lastFlushedBcsCommandStream = &commandStreamTask;
+        return BaseClass::flushBcsTask(commandStreamTask, commandStreamTaskStart, dispatchBcsFlags, hwInfo);
     }
 
     SubmissionStatus initializeDeviceWithFirstSubmission(Device &device) override {
@@ -514,11 +525,11 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
         return *flushReturnValue;
     }
 
-    void stopDirectSubmission(bool blocking) override {
+    void stopDirectSubmission(bool blocking, bool needsLock) override {
         stopDirectSubmissionCalled = true;
         stopDirectSubmissionCalledBlocking = blocking;
         if (this->callBaseStopDirectSubmission) {
-            BaseClass::stopDirectSubmission(blocking);
+            BaseClass::stopDirectSubmission(blocking, needsLock);
         }
     }
 
@@ -553,7 +564,12 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
         flushHandlerCalled++;
         return BaseClass::flushHandler(batchBuffer, allocationsForResidency);
     }
-
+    bool isAnyDirectSubmissionEnabled() const override {
+        if (isAnyDirectSubmissionEnabledCallBase) {
+            return BaseClass::isAnyDirectSubmissionEnabled();
+        }
+        return isAnyDirectSubmissionEnabledResult;
+    }
     std::vector<std::string> aubCommentMessages;
 
     BatchBuffer latestFlushedBatchBuffer = {};
@@ -566,6 +582,8 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     TaskCountType flushBcsTaskReturnValue{};
 
     LinearStream *lastFlushedCommandStream = nullptr;
+    LinearStream *lastFlushedImmediateCommandStream = nullptr;
+    LinearStream *lastFlushedBcsCommandStream = nullptr;
     LinearStream *commandStreamHeaplessStateInit = nullptr;
 
     const IndirectHeap *recordedSsh = nullptr;
@@ -585,9 +603,11 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     uint32_t initializeDeviceWithFirstSubmissionCalled = 0;
     uint32_t drainPagingFenceQueueCalled = 0;
     uint32_t flushHandlerCalled = 0;
+    uint32_t obtainUniqueOwnershipCalledTimes = 0;
     mutable uint32_t checkGpuHangDetectedCalled = 0;
     int ensureCommandBufferAllocationCalled = 0;
     DispatchFlags recordedDispatchFlags;
+    DispatchBcsFlags recordedBcsDispatchFlags;
     ImmediateDispatchFlags recordedImmediateDispatchFlags = {};
     BlitPropertiesContainer receivedBlitProperties = {};
     uint32_t createAllocationForHostSurfaceCalled = 0;
@@ -632,6 +652,8 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     bool stopDirectSubmissionCalledBlocking = false;
     bool registeredDcFlushForDcFlushMitigation = false;
     bool isUserFenceWaitSupported = false;
+    bool isAnyDirectSubmissionEnabledCallBase = true;
+    bool isAnyDirectSubmissionEnabledResult = true;
 };
 
 } // namespace NEO

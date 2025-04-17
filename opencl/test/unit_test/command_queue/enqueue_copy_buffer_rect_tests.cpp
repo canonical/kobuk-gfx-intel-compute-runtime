@@ -137,7 +137,12 @@ HWTEST_F(EnqueueCopyBufferRectTest, WhenCopyingBufferRect2DThenTaskCountIsAligne
 
     enqueueCopyBufferRect2D<FamilyType>();
     EXPECT_EQ(csr.peekTaskCount(), pCmdQ->taskCount);
-    EXPECT_EQ(csr.peekTaskLevel(), pCmdQ->taskLevel + 1);
+
+    auto cmdQtaskLevel = pCmdQ->taskLevel;
+    if (!csr.isUpdateTagFromWaitEnabled()) {
+        cmdQtaskLevel++;
+    }
+    EXPECT_EQ(csr.peekTaskLevel(), cmdQtaskLevel);
 }
 
 HWCMDTEST_F(IGFX_GEN12LP_CORE, EnqueueCopyBufferRectTest, WhenCopyingBufferRect2DThenGpgpuWalkerIsCorrect) {
@@ -545,7 +550,7 @@ HWTEST_F(EnqueueCopyBufferRectStateless, GivenValidParametersWhenCopyingBufferRe
 
 using EnqueueCopyBufferRectStateful = EnqueueCopyBufferRectHw;
 
-HWTEST_F(EnqueueCopyBufferRectStateful, GivenValidParametersWhenCopyingBufferRectStatefulThenSuccessIsReturned) {
+HWTEST2_F(EnqueueCopyBufferRectStateful, GivenValidParametersWhenCopyingBufferRectStatefulThenSuccessIsReturned, IsStatefulBufferPreferredForProduct) {
 
     std::unique_ptr<CommandQueueHw<FamilyType>> cmdQ(new CommandQueueStateful<FamilyType>(context.get(), device.get()));
     if (cmdQ->getHeaplessModeEnabled()) {

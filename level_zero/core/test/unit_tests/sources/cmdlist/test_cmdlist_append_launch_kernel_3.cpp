@@ -938,7 +938,7 @@ struct CommandListAppendLaunchKernelWithImplicitArgs : CommandListAppendLaunchKe
         if (FamilyType::supportsCmdSet(IGFX_XE_HP_CORE)) {
             const auto &rootDeviceEnvironment = device->getNEODevice()->getRootDeviceEnvironment();
             auto implicitArgsProgrammingSize = ImplicitArgsHelper::getSizeForImplicitArgsPatching(kernel.pImplicitArgs.get(), kernel.getKernelDescriptor(), !kernel.kernelRequiresGenerationOfLocalIdsByRuntime, rootDeviceEnvironment);
-            return implicitArgsProgrammingSize - ImplicitArgs::getSize();
+            return implicitArgsProgrammingSize - kernel.pImplicitArgs->v0.header.structSize;
         } else {
             return 0u;
         }
@@ -956,6 +956,8 @@ HWTEST_F(CommandListAppendLaunchKernelWithImplicitArgs, givenIndirectDispatchWit
     kernel.module = pMockModule.get();
     kernel.immutableData.crossThreadDataSize = sizeof(uint64_t);
     kernel.pImplicitArgs.reset(new ImplicitArgs());
+    kernel.pImplicitArgs->v0.header.structVersion = 0;
+    kernel.pImplicitArgs->v0.header.structSize = ImplicitArgsV0::getSize();
     UnitTestHelper<FamilyType>::adjustKernelDescriptorForImplicitArgs(*kernel.immutableData.kernelDescriptor);
 
     kernel.setGroupSize(1, 1, 1);
@@ -981,27 +983,27 @@ HWTEST_F(CommandListAppendLaunchKernelWithImplicitArgs, givenIndirectDispatchWit
 
     auto groupCountXStoreRegisterMemCmd = FamilyType::cmdInitStoreRegisterMem;
     groupCountXStoreRegisterMemCmd.setRegisterAddress(RegisterOffsets::gpgpuDispatchDimX);
-    groupCountXStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgs, groupCountX));
+    groupCountXStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgsV0, groupCountX));
 
     auto groupCountYStoreRegisterMemCmd = FamilyType::cmdInitStoreRegisterMem;
     groupCountYStoreRegisterMemCmd.setRegisterAddress(RegisterOffsets::gpgpuDispatchDimY);
-    groupCountYStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgs, groupCountY));
+    groupCountYStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgsV0, groupCountY));
 
     auto groupCountZStoreRegisterMemCmd = FamilyType::cmdInitStoreRegisterMem;
     groupCountZStoreRegisterMemCmd.setRegisterAddress(RegisterOffsets::gpgpuDispatchDimZ);
-    groupCountZStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgs, groupCountZ));
+    groupCountZStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgsV0, groupCountZ));
 
     auto globalSizeXStoreRegisterMemCmd = FamilyType::cmdInitStoreRegisterMem;
     globalSizeXStoreRegisterMemCmd.setRegisterAddress(RegisterOffsets::csGprR1);
-    globalSizeXStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgs, globalSizeX));
+    globalSizeXStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgsV0, globalSizeX));
 
     auto globalSizeYStoreRegisterMemCmd = FamilyType::cmdInitStoreRegisterMem;
     globalSizeYStoreRegisterMemCmd.setRegisterAddress(RegisterOffsets::csGprR1);
-    globalSizeYStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgs, globalSizeY));
+    globalSizeYStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgsV0, globalSizeY));
 
     auto globalSizeZStoreRegisterMemCmd = FamilyType::cmdInitStoreRegisterMem;
     globalSizeZStoreRegisterMemCmd.setRegisterAddress(RegisterOffsets::csGprR1);
-    globalSizeZStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgs, globalSizeZ));
+    globalSizeZStoreRegisterMemCmd.setMemoryAddress(pImplicitArgsGPUVA + offsetof(ImplicitArgsV0, globalSizeZ));
 
     GenCmdList cmdList;
     ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
@@ -1199,52 +1201,5 @@ HWTEST2_F(MultiTileImmediateCommandListAppendLaunchKernelXeHpCoreTest, givenImpl
     EXPECT_EQ(cmdList.end(), itorSemaphoreWait);
 }
 
-HWTEST2_F(MultiTileImmediateCommandListAppendLaunchKernelXeHpCoreTest, givenImplicitScalingWhenUsingImmediateCommandListWithoutFlushTaskThenUseSecondaryBuffer, IsAtLeastXeHpCore) {
-    using WalkerVariant = typename FamilyType::WalkerVariant;
-
-    using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
-
-    debugManager.flags.UsePipeControlAfterPartitionedWalker.set(1);
-
-    ze_group_count_t groupCount{128, 1, 1};
-
-    ze_command_queue_desc_t queueDesc = {};
-    auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
-
-    auto immediateCmdList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    immediateCmdList->cmdListType = ::L0::CommandList::CommandListType::typeImmediate;
-    immediateCmdList->isFlushTaskSubmissionEnabled = false;
-    immediateCmdList->cmdQImmediate = queue.get();
-    auto result = immediateCmdList->initialize(device, NEO::EngineGroupType::compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
-    auto cmdStream = immediateCmdList->getCmdContainer().getCommandStream();
-
-    auto sizeBefore = cmdStream->getUsed();
-    CmdListKernelLaunchParams launchParams = {};
-    result = immediateCmdList->appendLaunchKernelWithParams(kernel.get(), groupCount, nullptr, launchParams);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-    auto sizeAfter = cmdStream->getUsed();
-
-    GenCmdList cmdList;
-    ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
-        cmdList,
-        ptrOffset(cmdStream->getCpuBase(), sizeBefore),
-        sizeAfter - sizeBefore));
-
-    auto itorWalker = NEO::UnitTestHelper<FamilyType>::findWalkerTypeCmd(cmdList.begin(), cmdList.end());
-    ASSERT_NE(cmdList.end(), itorWalker);
-
-    WalkerVariant walkerCmd = NEO::UnitTestHelper<FamilyType>::getWalkerVariant(*itorWalker);
-    std::visit([](auto &&walker) {
-        EXPECT_TRUE(walker->getWorkloadPartitionEnable());
-    },
-               walkerCmd);
-
-    auto itorBbStart = find<MI_BATCH_BUFFER_START *>(cmdList.begin(), cmdList.end());
-    ASSERT_NE(cmdList.end(), itorBbStart);
-    auto cmdBbStart = genCmdCast<MI_BATCH_BUFFER_START *>(*itorBbStart);
-    EXPECT_EQ(MI_BATCH_BUFFER_START::SECOND_LEVEL_BATCH_BUFFER::SECOND_LEVEL_BATCH_BUFFER_SECOND_LEVEL_BATCH, cmdBbStart->getSecondLevelBatchBuffer());
-}
 } // namespace ult
 } // namespace L0

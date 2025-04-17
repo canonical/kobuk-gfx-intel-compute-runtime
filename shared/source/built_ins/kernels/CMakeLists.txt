@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2018-2024 Intel Corporation
+# Copyright (C) 2018-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -8,7 +8,7 @@ add_custom_target(builtins)
 set_target_properties(builtins PROPERTIES FOLDER "${SHARED_SOURCE_PROJECTS_FOLDER}/${SHARED_BUILTINS_PROJECTS_FOLDER}")
 set(BUILTINS_OUTDIR_WITH_ARCH "${TargetDir}/built_ins/${NEO_ARCH}")
 add_dependencies(${BUILTINS_BINARIES_STATELESS_LIB_NAME} builtins)
-add_dependencies(${BUILTINS_BINARIES_STATELESS_HEAPLESS_LIB_NAME} builtins)
+add_dependencies(${BUILTINS_BINARIES_HEAPLESS_LIB_NAME} builtins)
 add_dependencies(${BUILTINS_BINARIES_BINDFUL_LIB_NAME} builtins)
 add_dependencies(${BUILTINS_BINARIES_BINDLESS_LIB_NAME} builtins)
 
@@ -21,9 +21,11 @@ set(BUILTIN_OPTIONS_STATELESS "-cl-intel-greater-than-4GB-buffer-required")
 set(BUILTIN_OPTIONS_STATEFUL "-force_stos_opt")
 
 set(stateless_INTERNAL_OPTIONS "")
-set(stateless_heapless_INTERNAL_OPTIONS -internal_options "")
+set(heapless_INTERNAL_OPTIONS -internal_options "")
 set(bindful_INTERNAL_OPTIONS "")
 set(bindless_INTERNAL_OPTIONS -internal_options "-cl-intel-use-bindless-mode -cl-intel-use-bindless-advanced-mode")
+macro(additional_heapless_checker)
+endmacro()
 
 add_subdirectories()
 
@@ -34,7 +36,7 @@ endif()
 function(get_builtin_options core_type neo_arch mode_type)
   if("${neo_arch}" STREQUAL "x32")
     set(BUILTIN_OPTIONS "${BUILTIN_OPTIONS_STATELESS}" PARENT_SCOPE)
-  elseif("${mode_type}" STREQUAL "stateless" OR "${mode_type}" STREQUAL "stateless_heapless")
+  elseif("${mode_type}" STREQUAL "stateless" OR "${mode_type}" STREQUAL "heapless")
     set(BUILTIN_OPTIONS "${BUILTIN_OPTIONS_STATELESS}" PARENT_SCOPE)
   else()
     set(BUILTIN_OPTIONS "${BUILTIN_OPTIONS_STATEFUL}" PARENT_SCOPE)
@@ -49,7 +51,7 @@ function(get_generated_builtins core_type mode_type)
   elseif(${mode_type} STREQUAL "stateless")
     set(generated_builtins "${GENERATED_BUILTINS_STATELESS}" PARENT_SCOPE)
     set(generated_builtins_images "${GENERATED_BUILTINS_IMAGES_STATELESS}" PARENT_SCOPE)
-  elseif(${mode_type} STREQUAL "stateless_heapless")
+  elseif(${mode_type} STREQUAL "heapless")
     set(generated_builtins "${GENERATED_BUILTINS_STATELESS}" PARENT_SCOPE)
     set(generated_builtins_images "${GENERATED_BUILTINS_IMAGES};${GENERATED_BUILTINS_IMAGES_STATELESS}" PARENT_SCOPE)
   else()
@@ -72,11 +74,17 @@ function(compile_builtin core_type platform_it builtin bits builtin_options mode
   set(OUTPUT_FILE_SPV
       ${OUTPUTDIR}/${mode}_${BASENAME}_${platform_it_lower}.spv
   )
+
+  set(heapless_mode "disable")
+  if(${mode} STREQUAL "heapless")
+    set(heapless_mode "enable")
+  endif()
+
   list(APPEND __ocloc__options__ "-cl-kernel-arg-info")
   set(INTERNAL_OPTIONS "${${mode}_INTERNAL_OPTIONS}")
   add_custom_command(
                      OUTPUT ${OUTPUT_FILE_SPV}
-                     COMMAND ${ocloc_cmd_prefix} -q -file ${absolute_filepath} -spv_only -device ${platform_it_lower} ${builtin_options} -${bits} -output ${mode}_${BASENAME} -out_dir ${OUTPUTDIR} ${INTERNAL_OPTIONS} -options "$<JOIN:${__ocloc__options__}, >"
+                     COMMAND ${ocloc_cmd_prefix} -q -file ${absolute_filepath} -spv_only -device ${platform_it_lower} -heapless_mode ${heapless_mode} ${builtin_options} -${bits} -output ${mode}_${BASENAME} -out_dir ${OUTPUTDIR} ${INTERNAL_OPTIONS} -options "$<JOIN:${__ocloc__options__}, >"
                      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                      DEPENDS ${builtin} ocloc copy_compiler_files
   )
@@ -107,7 +115,7 @@ function(compile_builtin core_type platform_it builtin bits builtin_options mode
       get_filename_component(absolute_filepath_spv ${OUTPUT_FILE_SPV} ABSOLUTE)
       add_custom_command(
                          OUTPUT ${OUTPUT_FILES_BINARIES}
-                         COMMAND ${ocloc_cmd_prefix} -q -file ${absolute_filepath_spv} -spirv_input -device ${RELEASE} ${builtin_options} -${bits} -stateful_address_mode ${stateful_address_mode} -output ${mode}_${BASENAME}_${RELEASE_FILENAME} -output_no_suffix -out_dir ${OUTPUTDIR} ${INTERNAL_OPTIONS} -options "$<JOIN:${__ocloc__options__}, >"
+                         COMMAND ${ocloc_cmd_prefix} -q -file ${absolute_filepath_spv} -spirv_input -device ${RELEASE} -heapless_mode ${heapless_mode} ${builtin_options} -${bits} -stateful_address_mode ${stateful_address_mode} -output ${mode}_${BASENAME}_${RELEASE_FILENAME} -output_no_suffix -out_dir ${OUTPUTDIR} ${INTERNAL_OPTIONS} -options "$<JOIN:${__ocloc__options__}, >"
                          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
                          DEPENDS ${OUTPUT_FILE_SPV} ocloc copy_compiler_files ${OUTPUT_FILES_BINARIES_PREV}
       )
@@ -210,6 +218,8 @@ macro(macro_for_each_platform)
   foreach(MODE ${ADDRESSING_MODES})
     unset(BUILTINS_COMMANDS)
 
+    additional_heapless_checker()
+
     if((${MODE} STREQUAL "bindless") AND (NOT BUILD_WITH_L0 OR("${CORE_TYPE}" STREQUAL "GEN8")))
       continue()
     endif()
@@ -219,7 +229,7 @@ macro(macro_for_each_platform)
       continue()
     endif()
 
-    if(${MODE} STREQUAL "stateless_heapless" AND(NOT ${HEAPLESS_SUPPORT} OR ${NEO_BITS} STREQUAL "32"))
+    if(${MODE} STREQUAL "heapless" AND(NOT ${HEAPLESS_SUPPORT} OR ${NEO_BITS} STREQUAL "32"))
       continue()
     endif()
 

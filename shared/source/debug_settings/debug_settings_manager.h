@@ -125,11 +125,11 @@ class DebugSettingsManager : NEO::NonCopyableAndNonMovableClass {
     DebugSettingsManager(const char *registryPath);
     ~DebugSettingsManager();
 
-    static constexpr bool registryReadAvailable() {
+    static consteval bool registryReadAvailable() {
         return (debugLevel == DebugFunctionalityLevel::full) || (debugLevel == DebugFunctionalityLevel::regKeys);
     }
 
-    static constexpr bool disabled() {
+    static consteval bool disabled() {
         return debugLevel == DebugFunctionalityLevel::none;
     }
 
@@ -147,7 +147,7 @@ class DebugSettingsManager : NEO::NonCopyableAndNonMovableClass {
         return readerImpl.get();
     }
 
-    static constexpr const char *getNonReleaseKeyName(const char *key) {
+    static consteval const char *getNonReleaseKeyName(const char *key) {
         return (disabled() && PURGE_DEBUG_KEY_NAMES) ? "" : key;
     }
 
@@ -162,9 +162,10 @@ class DebugSettingsManager : NEO::NonCopyableAndNonMovableClass {
 
     inline bool isTbxPageFaultManagerEnabled() {
         auto setCsr = flags.SetCommandStreamReceiver.get();
-        auto tbxMngrFlag = flags.EnableTbxPageFaultManager.get();
-        auto isTbxMode = (setCsr == static_cast<int32_t>(CommandStreamReceiverType::tbx)) || (setCsr == static_cast<int32_t>(CommandStreamReceiverType::tbxWithAub));
-        return tbxMngrFlag && isTbxMode;
+        auto isTbxMode = (setCsr == static_cast<int32_t>(CommandStreamReceiverType::tbx)) ||
+                         (setCsr == static_cast<int32_t>(CommandStreamReceiverType::tbxWithAub));
+        auto isFaultManagerEnabledInEnvVars = flags.EnableTbxPageFaultManager.get();
+        return isFaultManagerEnabledInEnvVars && isTbxMode;
     }
 
   protected:

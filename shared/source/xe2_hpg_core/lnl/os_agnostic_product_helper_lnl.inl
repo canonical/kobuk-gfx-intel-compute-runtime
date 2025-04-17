@@ -6,6 +6,8 @@
  */
 
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/direct_submission/direct_submission_controller.h"
+#include "shared/source/memory_manager/allocation_properties.h"
 
 #include "aubstream/product_family.h"
 
@@ -43,11 +45,6 @@ bool ProductHelperHw<gfxProduct>::blitEnqueuePreferred(bool isWriteToImageFromBu
 template <>
 bool ProductHelperHw<gfxProduct>::isCachingOnCpuAvailable() const {
     return false;
-}
-
-template <>
-bool ProductHelperHw<gfxProduct>::isAdjustDirectSubmissionTimeoutOnThrottleAndAcLineStatusEnabled() const {
-    return true;
 }
 
 template <>
@@ -94,7 +91,7 @@ TimeoutParams ProductHelperHw<gfxProduct>::getDirectSubmissionControllerTimeoutP
 }
 
 template <>
-bool ProductHelperHw<gfxProduct>::isDeviceUsmAllocationReuseSupported() const {
+bool ProductHelperHw<gfxProduct>::isMisalignedUserPtr2WayCoherent() const {
     return true;
 }
 

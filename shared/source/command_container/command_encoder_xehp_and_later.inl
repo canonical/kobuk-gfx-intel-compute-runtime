@@ -264,7 +264,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
             offsetThreadData = (is64bit ? heap->getHeapGpuStartOffset() : heap->getHeapGpuBase()) + static_cast<uint64_t>(heap->getUsed() - sizeThreadData - args.reserveExtraPayloadSpace);
             if (pImplicitArgs) {
                 offsetThreadData -= sizeForImplicitArgsStruct;
-                pImplicitArgs->localIdTablePtr = heap->getGraphicsAllocation()->getGpuAddress() + heap->getUsed() - iohRequiredSize;
+                pImplicitArgs->setLocalIdTablePtr(heap->getGraphicsAllocation()->getGpuAddress() + heap->getUsed() - iohRequiredSize);
                 EncodeDispatchKernel<Family>::patchScratchAddressInImplicitArgs<heaplessModeEnabled>(*pImplicitArgs, scratchAddressForImmediatePatching, args.immediateScratchAddressPatching);
 
                 ptr = NEO::ImplicitArgsHelper::patchImplicitArgs(ptr, *pImplicitArgs, kernelDescriptor, std::make_pair(localIdsGenerationByRuntime, requiredWorkgroupOrder), rootDeviceEnvironment, &args.outImplicitArgsPtr);
@@ -504,6 +504,7 @@ void EncodeDispatchKernel<Family>::setupPostSyncForRegularEvent(WalkerType &walk
     postSync.setImmediateData(immData);
     postSync.setDestinationAddress(gpuVa);
 
+    EncodeDispatchKernel<Family>::encodeL3FlushAfterPostSync(walkerCmd, args);
     EncodeDispatchKernel<Family>::setupPostSyncMocs(walkerCmd, args.device->getRootDeviceEnvironment(), args.dcFlushEnable);
     EncodeDispatchKernel<Family>::adjustTimestampPacket(walkerCmd, args);
 }

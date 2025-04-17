@@ -38,11 +38,6 @@ void EncodeDispatchKernel<Family>::setScratchAddress(uint64_t &scratchAddress, u
 }
 
 template <typename Family>
-template <typename InterfaceDescriptorType>
-void EncodeDispatchKernel<Family>::encodeEuSchedulingPolicy(InterfaceDescriptorType *pInterfaceDescriptor, const KernelDescriptor &kernelDesc, int32_t defaultPipelinedThreadArbitrationPolicy) {
-}
-
-template <typename Family>
 bool EncodeDispatchKernel<Family>::singleTileExecImplicitScalingRequired(bool cooperativeKernel) {
     return cooperativeKernel;
 }
@@ -87,6 +82,10 @@ void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const RootDevice
 template <typename Family>
 template <typename WalkerType>
 void EncodeDispatchKernel<Family>::adjustTimestampPacket(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
+
+template <typename Family>
+template <typename WalkerType>
+void EncodeDispatchKernel<Family>::encodeL3FlushAfterPostSync(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
 
 template <typename Family>
 template <typename WalkerType>

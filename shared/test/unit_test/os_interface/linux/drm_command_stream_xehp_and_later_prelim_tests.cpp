@@ -7,6 +7,7 @@
 
 #include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/csr_definitions.h"
+#include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/memory_manager/memory_banks.h"
 #include "shared/source/os_interface/sys_calls_common.h"
 #include "shared/test/common/helpers/batch_buffer_helper.h"
@@ -141,8 +142,9 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTestDrmPrelim, givenWaitUserFenceEnab
     testDrmCsr->useUserFenceWait = true;
     testDrmCsr->activePartitions = static_cast<uint32_t>(drmCtxSize);
 
+    const auto hasFirstSubmission = device->getCompilerProductHelper().isHeaplessModeEnabled() ? 1 : 0;
     auto tagPtr = const_cast<TagAddressType *>(testDrmCsr->getTagAddress());
-    *tagPtr = 0;
+    *tagPtr = hasFirstSubmission;
     uint64_t tagAddress = castToUint64(tagPtr);
     FlushStamp handleToWait = 123;
     testDrmCsr->waitForFlushStamp(handleToWait);
@@ -373,6 +375,8 @@ class DrmCommandStreamForceTileTest : public ::testing::Test {
     };
     template <typename GfxFamily>
     void setUpT() {
+        debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
         mock = new DrmMock(mockFd, *executionEnvironment.rootDeviceEnvironments[0]);
 
         auto hwInfo = executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo();
@@ -421,6 +425,7 @@ class DrmCommandStreamForceTileTest : public ::testing::Test {
     const uint32_t rootDeviceIndex = 0u;
     const uint32_t expectedHandleId = 1u;
 
+    DebugManagerStateRestore restorer;
     CommandStreamReceiver *csr = nullptr;
     DrmMemoryManager *memoryManager = nullptr;
     DrmMock *mock = nullptr;
@@ -475,6 +480,8 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenPrintIndicesEnabledWhenFlushThenPr
 
 struct DrmImplicitScalingCommandStreamTest : ::testing::Test {
     void SetUp() override {
+        debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
         executionEnvironment = std::make_unique<ExecutionEnvironment>();
         executionEnvironment->prepareRootDeviceEnvironments(1);
 
@@ -523,9 +530,13 @@ struct DrmImplicitScalingCommandStreamTest : ::testing::Test {
     std::unique_ptr<OsContextLinux> osContext;
     DrmMemoryManager *memoryManager;
     std::unique_ptr<HardwareInfo> hwInfo;
+    DebugManagerStateRestore restorer;
 };
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, DrmImplicitScalingCommandStreamTest, givenTwoTilesWhenFlushIsCalledThenExecIsExecutedOnEveryTile) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     auto csr = createCsr<FamilyType>();
 
     auto size = 1024u;
@@ -625,6 +636,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, DrmImplicitScalingCommandStreamTest, whenForceExecu
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceExecutionTile.set(1);
     debugManager.flags.EnableWalkerPartition.set(0);
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
 
     struct MockCsr : DrmCommandStreamReceiver<FamilyType> {
         using DrmCommandStreamReceiver<FamilyType>::DrmCommandStreamReceiver;
@@ -666,6 +678,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, DrmImplicitScalingCommandStreamTest, whenForceExecu
 HWCMDTEST_F(IGFX_XE_HP_CORE, DrmImplicitScalingCommandStreamTest, givenDisabledImplicitScalingWhenFlushingThenUseOnlyOneContext) {
     DebugManagerStateRestore debugRestore{};
     debugManager.flags.EnableWalkerPartition.set(0);
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
 
     struct MockCsr : DrmCommandStreamReceiver<FamilyType> {
         using DrmCommandStreamReceiver<FamilyType>::DrmCommandStreamReceiver;
@@ -704,6 +717,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, DrmImplicitScalingCommandStreamTest, givenDisabledI
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, DrmImplicitScalingCommandStreamTest, givenMultiTileCsrWhenFlushThenVmHandleIdEqualsTileId) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.ForceL3FlushAfterPostSync.set(0);
     struct MockCsr : DrmCommandStreamReceiver<FamilyType> {
         using DrmCommandStreamReceiver<FamilyType>::DrmCommandStreamReceiver;
         int exec(const BatchBuffer &batchBuffer, uint32_t vmHandleId, uint32_t drmContextId, uint32_t index) override {

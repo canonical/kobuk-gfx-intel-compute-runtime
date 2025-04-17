@@ -1,13 +1,12 @@
 #!/usr/bin/make -f
 NEO_MAJOR = 25
-NEO_MINOR = 05
-NEO_BUILD = 32567.16
-build_id = 32567
-build_hf_id = 16
+NEO_MINOR = 13
+NEO_BUILD = 33276.17
+build_id = 33276
+build_hf_id = 17
 
 
 export DEB_BUILD_MAINT_OPTIONS	= hardening=+all
-export DEB_CPPFLAGS_MAINT_STRIP = -D_FORTIFY_SOURCE=3
 
 %:
 	dh $@ --builddir build/

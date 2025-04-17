@@ -21,9 +21,6 @@
 namespace L0 {
 namespace Sysman {
 
-const std::string deviceDir("device");
-const std::string sysDevicesDir("/sys/devices/");
-
 const std::map<uint16_t, std::string> SysmanKmdInterfaceI915::i915EngineClassToSysfsEngineMap = {
     {drm_i915_gem_engine_class::I915_ENGINE_CLASS_RENDER, "rcs"},
     {static_cast<uint16_t>(drm_i915_gem_engine_class::I915_ENGINE_CLASS_COMPUTE), "ccs"},
@@ -173,23 +170,10 @@ void SysmanKmdInterface::convertSysfsValueUnit(const SysfsValueUnit dstUnit, con
     }
 }
 
-uint32_t SysmanKmdInterface::getEventTypeImpl(std::string &dirName, const bool isIntegratedDevice) {
-    auto pSysFsAccess = getSysFsAccess();
+uint32_t SysmanKmdInterface::getEventType() {
+
     auto pFsAccess = getFsAccess();
-
-    if (!isIntegratedDevice) {
-        std::string bdfDir;
-        ze_result_t result = pSysFsAccess->readSymLink(deviceDir, bdfDir);
-        if (ZE_RESULT_SUCCESS != result) {
-            return 0;
-        }
-        const auto loc = bdfDir.find_last_of('/');
-        auto bdf = bdfDir.substr(loc + 1);
-        std::replace(bdf.begin(), bdf.end(), ':', '_');
-        dirName = dirName + "_" + bdf;
-    }
-
-    const std::string eventTypeSysfsNode = sysDevicesDir + dirName + "/" + "type";
+    const std::string eventTypeSysfsNode = std::string(sysDevicesDir) + sysmanDeviceDirName + "/" + "type";
     auto eventTypeVal = 0u;
     if (ZE_RESULT_SUCCESS != pFsAccess->read(eventTypeSysfsNode, eventTypeVal)) {
         return 0;
@@ -211,6 +195,32 @@ void SysmanKmdInterface::getWedgedStatusImpl(LinuxSysmanImp *pLinuxSysmanImp, ze
     if (pDrm->getErrno() == EIO) {
         pState->reset |= ZES_RESET_REASON_FLAG_WEDGED;
     }
+}
+
+ze_result_t SysmanKmdInterface::checkErrorNumberAndReturnStatus() {
+    if (errno == EMFILE || errno == ENFILE) {
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): System has run out of file handles. Suggested action is to increase the file handle limit. \n", __FUNCTION__);
+        return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+    }
+    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
+
+ze_result_t SysmanKmdInterface::getDeviceDirName(std::string &dirName, const bool isIntegratedDevice) {
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    if (!isIntegratedDevice) {
+        auto pSysFsAccess = getSysFsAccess();
+        std::string bdfDir;
+        result = pSysFsAccess->readSymLink(std::string(deviceDir), bdfDir);
+        if (ZE_RESULT_SUCCESS != result) {
+            return result;
+        }
+        const auto loc = bdfDir.find_last_of('/');
+        auto bdf = bdfDir.substr(loc + 1);
+        std::replace(bdf.begin(), bdf.end(), ':', '_');
+        dirName = dirName + "_" + bdf;
+    }
+    return result;
 }
 
 std::string SysmanKmdInterfaceI915::getBasePathI915(uint32_t subDeviceId) {

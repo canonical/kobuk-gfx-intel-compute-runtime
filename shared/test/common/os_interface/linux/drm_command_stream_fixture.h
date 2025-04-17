@@ -38,8 +38,8 @@ class DrmCommandStreamTest : public ::testing::Test {
   public:
     template <typename GfxFamily>
     void setUpT() {
-
         // make sure this is disabled, we don't want to test this now
+        debugManager.flags.ForceL3FlushAfterPostSync.set(0);
         debugManager.flags.EnableForcePin.set(false);
 
         mock = new DrmMock(mockFd, *executionEnvironment.rootDeviceEnvironments[0]);
@@ -127,6 +127,7 @@ class DrmCommandStreamEnhancedTemplate : public ::testing::Test {
         this->dbgState = std::make_unique<DebugManagerStateRestore>();
         // make sure this is disabled, we don't want to test this now
         debugManager.flags.EnableForcePin.set(false);
+        debugManager.flags.ForceL3FlushAfterPostSync.set(0);
 
         mock = DrmType::create(*executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]).release();
         executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface = std::make_unique<OSInterface>();
@@ -253,3 +254,25 @@ class DrmCommandStreamEnhancedWithFailingExecTemplate : public ::testing::Test {
 };
 
 using DrmCommandStreamEnhancedWithFailingExec = DrmCommandStreamEnhancedWithFailingExecTemplate<DrmMockCustom>;
+
+struct DrmCommandStreamDirectSubmissionTest : public DrmCommandStreamEnhancedTest {
+    template <typename GfxFamily>
+    void setUpT() {
+        debugManager.flags.EnableDirectSubmission.set(1u);
+        debugManager.flags.DirectSubmissionDisableMonitorFence.set(0);
+        debugManager.flags.DirectSubmissionFlatRingBuffer.set(0);
+        DrmCommandStreamEnhancedTest::setUpT<GfxFamily>();
+        auto hwInfo = device->getRootDeviceEnvironment().getMutableHardwareInfo();
+        auto engineType = device->getDefaultEngine().osContext->getEngineType();
+        hwInfo->capabilityTable.directSubmissionEngines.data[engineType].engineSupported = true;
+        csr->initDirectSubmission();
+    }
+
+    template <typename GfxFamily>
+    void tearDownT() {
+        this->dbgState.reset();
+        DrmCommandStreamEnhancedTest::tearDownT<GfxFamily>();
+    }
+
+    DebugManagerStateRestore restorer;
+};

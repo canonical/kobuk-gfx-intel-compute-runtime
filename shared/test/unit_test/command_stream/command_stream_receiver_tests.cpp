@@ -903,7 +903,41 @@ HWTEST_F(CommandStreamReceiverTest, whenClearColorAllocationIsCreatedThenItIsDes
     EXPECT_EQ(nullptr, csr.clearColorAllocation);
 }
 
+HWTEST_F(CommandStreamReceiverTest, givenCsrWhenUllsEnabledAndStopDirectSubmissionCalledThenObtainOwnershipIsCalled) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto ownershipCalledBefore = csr.recursiveLockCounter.load();
+    csr.isAnyDirectSubmissionEnabledResult = true;
+    csr.isAnyDirectSubmissionEnabledCallBase = false;
+    auto directSubmission = new MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>(csr);
+    csr.directSubmission.reset(directSubmission);
+    csr.stopDirectSubmission(false, true);
+    EXPECT_EQ(csr.recursiveLockCounter, ownershipCalledBefore + 1u);
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenCsrWhenUllsEnabledAndStopDirectSubmissionCalledWithLockNotNeededThenObtainOwnershipIsNotCalled) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto ownershipCalledBefore = csr.recursiveLockCounter.load();
+    csr.isAnyDirectSubmissionEnabledResult = true;
+    csr.isAnyDirectSubmissionEnabledCallBase = false;
+    auto directSubmission = new MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>(csr);
+    csr.directSubmission.reset(directSubmission);
+    csr.stopDirectSubmission(false, false);
+    EXPECT_EQ(csr.recursiveLockCounter, ownershipCalledBefore);
+}
+
+HWTEST_F(CommandStreamReceiverTest, givenCsrWhenUllsDisabledAndStopDirectSubmissionCalledThenObtainOwnershipIsNotCalled) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    auto ownershipCalledBefore = csr.recursiveLockCounter.load();
+    csr.isAnyDirectSubmissionEnabledResult = false;
+    csr.isAnyDirectSubmissionEnabledCallBase = false;
+    csr.stopDirectSubmission(false, true);
+    EXPECT_EQ(csr.recursiveLockCounter, ownershipCalledBefore);
+}
+
 HWTEST_F(CommandStreamReceiverTest, givenNoDirectSubmissionWhenCheckTaskCountFromWaitEnabledThenReturnsFalse) {
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     EXPECT_FALSE(csr.isUpdateTagFromWaitEnabled());
 }
@@ -940,6 +974,10 @@ HWTEST_F(CommandStreamReceiverTest, givenUpdateTaskCountFromWaitWhenCheckTaskCou
 }
 
 HWTEST_F(CommandStreamReceiverTest, givenUpdateTaskCountFromWaitWhenCheckIfEnabledThenCanBeEnabledOnlyWithDirectSubmission) {
+
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     auto &gfxCoreHelper = pDevice->getGfxCoreHelper();
 
@@ -958,6 +996,8 @@ HWTEST_F(CommandStreamReceiverTest, givenUpdateTaskCountFromWaitInMultiRootDevic
 
     DebugManagerStateRestore restorer;
     debugManager.flags.CreateMultipleRootDevices.set(2);
+    NEO::debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+
     TearDown();
     SetUp();
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
@@ -3568,6 +3608,9 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.storeMakeResidentAllocations = true;
+    if (commandStreamReceiver.heaplessModeEnabled) {
+        GTEST_SKIP();
+    }
 
     EXPECT_FALSE(commandStreamReceiver.isRayTracingStateProgramingNeeded(*pDevice));
 
@@ -3706,6 +3749,21 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskCmdListDispatchWhenPipelineSelectNotInitializedThenDoNotDispatchPipelineSelectCommand,
+          IsWithinXeGfxFamily) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    EXPECT_FALSE(commandStreamReceiver.getPreambleSetFlag());
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::cmdList;
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+    EXPECT_FALSE(commandStreamReceiver.getPreambleSetFlag());
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
           givenImmediateFlushTaskOnSystolicPlatformWhenPipelineSelectAlreadyInitializedAndSystolicRequiredThenDispatchPipelineSelectCommandForSystolic,
           IsWithinXeGfxFamily) {
     using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
@@ -3743,6 +3801,35 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskNonKernelDispatchWhenPipelineSelectAlreadyInitializedAndSystolicRequiredThenIgnoreRequiredStreamProperties,
+          IsWithinXeGfxFamily) {
+    using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    EXPECT_FALSE(commandStreamReceiver.getPreambleSetFlag());
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::nonKernel;
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    HardwareParse hwParserCsr;
+    hwParserCsr.parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
+    auto pipelineSelectCmd = hwParserCsr.getCommand<PIPELINE_SELECT>();
+    ASSERT_NE(nullptr, pipelineSelectCmd);
+    EXPECT_TRUE(commandStreamReceiver.getPreambleSetFlag());
+
+    this->requiredStreamProperties.pipelineSelect.setPropertySystolicMode(true);
+
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
           givenImmediateFlushTaskWhenFrontEndNotInitializedThenDispatchFrontEndCommand,
           IsAtLeastXeHpCore) {
     using CFE_STATE = typename FamilyType::CFE_STATE;
@@ -3770,6 +3857,21 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     frontEndCmd = hwParserCsr.getCommand<CFE_STATE>();
 
     EXPECT_EQ(nullptr, frontEndCmd);
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskCmdListDispatchWhenFrontEndNotInitializedThenDoNotDispatchFrontEndCommand,
+          IsAtLeastXeHpCore) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::cmdList;
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
@@ -3819,6 +3921,35 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskNonKernelDispatchWhenFrontEndAlreadyInitializedAndFrontEndPropertyChangeRequiredThenIgnoreRequiredStreamProperties,
+          IsWithinXeGfxFamily) {
+    using CFE_STATE = typename FamilyType::CFE_STATE;
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    EXPECT_TRUE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::nonKernel;
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    HardwareParse hwParserCsr;
+    hwParserCsr.parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
+    auto frontEndCmd = hwParserCsr.getCommand<CFE_STATE>();
+    ASSERT_NE(nullptr, frontEndCmd);
+    EXPECT_FALSE(commandStreamReceiver.getMediaVFEStateDirty());
+
+    this->requiredStreamProperties.frontEndState.setPropertiesComputeDispatchAllWalkerEnableDisableEuFusion(true, true);
+
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
           givenImmediateFlushTaskWhenStateComputeModeNotInitializedThenDispatchStateComputeModeCommand,
           IsAtLeastXeHpCore) {
     using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
@@ -3849,6 +3980,24 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     stateComputeModeCmd = hwParserCsr.getCommand<STATE_COMPUTE_MODE>();
 
     EXPECT_EQ(nullptr, stateComputeModeCmd);
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskCmdListDispatchWhenStateComputeModeNotInitializedThenDoNotDispatchStateComputeModeCommand,
+          IsAtLeastXeHpCore) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    if (commandStreamReceiver.heaplessStateInitialized) {
+        GTEST_SKIP();
+    }
+
+    EXPECT_TRUE(commandStreamReceiver.getStateComputeModeDirty());
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::cmdList;
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+    EXPECT_TRUE(commandStreamReceiver.getStateComputeModeDirty());
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
@@ -3897,6 +4046,40 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskNonKernelDispatchWhenStateComputeModeAlreadyInitializedAndStateComputeModePropertyChangeRequiredThenIgnoreRequiredStreamProperties,
+          IsAtLeastXeHpCore) {
+    using STATE_COMPUTE_MODE = typename FamilyType::STATE_COMPUTE_MODE;
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    if (commandStreamReceiver.heaplessStateInitialized) {
+        GTEST_SKIP();
+    }
+
+    EXPECT_TRUE(commandStreamReceiver.getStateComputeModeDirty());
+
+    this->requiredStreamProperties.stateComputeMode.setPropertiesAll(false, GrfConfig::defaultGrfNumber, ThreadArbitrationPolicy::AgeBased, NEO::PreemptionMode::ThreadGroup);
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::nonKernel;
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    HardwareParse hwParserCsr;
+    hwParserCsr.parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
+    auto stateComputeModeCmd = hwParserCsr.getCommand<STATE_COMPUTE_MODE>();
+    ASSERT_NE(nullptr, stateComputeModeCmd);
+    EXPECT_FALSE(commandStreamReceiver.getStateComputeModeDirty());
+
+    this->requiredStreamProperties.stateComputeMode.setPropertiesGrfNumberThreadArbitration(GrfConfig::largeGrfNumber, ThreadArbitrationPolicy::RoundRobin);
+
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
           givenImmediateFlushTaskAndBindingPoolBaseAddressNeededWhenStateBaseAddressNotInitializedThenDispatchStateBaseAddressAndBindingPoolBaseAddressCommand,
           IsAtLeastXeHpCore) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
@@ -3935,6 +4118,25 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     EXPECT_EQ(nullptr, stateBaseAddress);
     bindingTableAddress = hwParserCsr.getCommand<_3DSTATE_BINDING_TABLE_POOL_ALLOC>();
     EXPECT_EQ(nullptr, bindingTableAddress);
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskCmdListDispatchWhenStateBaseAddressNotInitializedThenDoNotDispatchStateBaseAddressAndBindingPoolBaseAddressCommand,
+          IsAtLeastXeHpCore) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    if (commandStreamReceiver.heaplessStateInitialized) {
+        GTEST_SKIP();
+    }
+
+    EXPECT_TRUE(commandStreamReceiver.getGSBAStateDirty());
+
+    this->requiredStreamProperties.stateBaseAddress.setPropertiesAll(1, 0x1000, 0x100, 0x2000, 0x100, 0x3000, 0x100, 0x4000, 0x100);
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::cmdList;
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+    EXPECT_TRUE(commandStreamReceiver.getGSBAStateDirty());
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
@@ -3978,6 +4180,46 @@ HWTEST2_F(CommandStreamReceiverHwTest,
     ASSERT_NE(nullptr, stateBaseAddress);
     bindingTableAddress = hwParserCsr.getCommand<_3DSTATE_BINDING_TABLE_POOL_ALLOC>();
     ASSERT_NE(nullptr, bindingTableAddress);
+}
+
+HWTEST2_F(CommandStreamReceiverHwTest,
+          givenImmediateFlushTaskNonKernelDispatchWhenStateBaseAddressInitializedThenDispatchInitialStateBaseAddressAndIgnoreRequiredStreamProperties,
+          IsAtLeastXeHpCore) {
+    using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
+    using _3DSTATE_BINDING_TABLE_POOL_ALLOC = typename FamilyType::_3DSTATE_BINDING_TABLE_POOL_ALLOC;
+
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    if (commandStreamReceiver.heaplessStateInitialized) {
+        GTEST_SKIP();
+    }
+
+    EXPECT_TRUE(commandStreamReceiver.getGSBAStateDirty());
+
+    this->requiredStreamProperties.stateBaseAddress.setPropertiesAll(1, 0x1000, 0x100, 0x2000, 0x100, 0x3000, 0x100, 0x4000, 0x100);
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::nonKernel;
+    commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
+
+    HardwareParse hwParserCsr;
+    hwParserCsr.parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
+    auto stateBaseAddress = hwParserCsr.getCommand<STATE_BASE_ADDRESS>();
+    ASSERT_NE(nullptr, stateBaseAddress);
+    EXPECT_EQ(0x4000u, stateBaseAddress->getGeneralStateBaseAddress());
+
+    auto bindingTableAddress = hwParserCsr.getCommand<_3DSTATE_BINDING_TABLE_POOL_ALLOC>();
+    ASSERT_NE(nullptr, bindingTableAddress);
+
+    EXPECT_FALSE(commandStreamReceiver.getGSBAStateDirty());
+
+    this->requiredStreamProperties.stateBaseAddress.setPropertiesBindingTableSurfaceState(0x5000, 0x100, 0x6000, 0x100);
+
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
 }
 
 HWTEST2_F(CommandStreamReceiverHwTest,
@@ -4301,6 +4543,9 @@ HWTEST2_F(CommandStreamReceiverHwTest,
 
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.storeMakeResidentAllocations = true;
+    if (commandStreamReceiver.heaplessModeEnabled) {
+        GTEST_SKIP();
+    }
 
     commandStreamReceiver.flushImmediateTask(commandStream, commandStream.getUsed(), immediateFlushTaskFlags, *pDevice);
 
@@ -5306,6 +5551,39 @@ HWTEST_F(CommandStreamReceiverHwTest, GivenFlushHeapStorageRequiresRecyclingTagW
     EXPECT_EQ(24u, commandStreamReceiver.peekLatestFlushedTaskCount());
 }
 
+HWTEST_F(CommandStreamReceiverHwTest, givenEpilogueStreamAvailableWhenFlushTaskCalledThenDispachEpilogueCommandsIntoEpilogueStream) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    GraphicsAllocation *commandBuffer = commandStreamReceiver.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{commandStreamReceiver.getRootDeviceIndex(), MemoryConstants::pageSize});
+    ASSERT_NE(nullptr, commandBuffer);
+    LinearStream epilogueStream(commandBuffer);
+
+    commandStreamReceiver.storeMakeResidentAllocations = true;
+    flushTaskFlags.guardCommandBufferWithPipeControl = true;
+    flushTaskFlags.optionalEpilogueCmdStream = &epilogueStream;
+
+    commandStream.getSpace(4);
+
+    commandStreamReceiver.flushTask(commandStream,
+                                    0,
+                                    &dsh,
+                                    &ioh,
+                                    nullptr,
+                                    taskLevel,
+                                    flushTaskFlags,
+                                    *pDevice);
+
+    EXPECT_TRUE(commandStreamReceiver.isMadeResident(commandBuffer));
+
+    HardwareParse hwParser;
+
+    hwParser.parseCommands<FamilyType>(epilogueStream, 0);
+    auto cmdIterator = find<typename FamilyType::PIPE_CONTROL *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    EXPECT_NE(hwParser.cmdList.end(), cmdIterator);
+
+    commandStreamReceiver.getMemoryManager()->freeGraphicsMemoryImpl(commandBuffer);
+}
+
 HWTEST2_F(CommandStreamReceiverHwTest, givenSpecialPipelineSelectModeChangedWhenGetCmdSizeForPielineSelectIsCalledThenCorrectSizeIsReturned, IsAtMostXeHpcCore) {
     using PIPELINE_SELECT = typename FamilyType::PIPELINE_SELECT;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
@@ -6054,4 +6332,132 @@ HWTEST_F(CommandStreamReceiverTest, givenCommandStreamReceiverWhenDrainPagingFen
     csr.directSubmissionAvailable = true;
     csr.drainPagingFenceQueue();
     EXPECT_EQ(10u, csr.pagingFenceValueToUnblock);
+}
+
+HWTEST_F(CommandStreamReceiverHwTest, givenRequiredFlushTaskCountWhenFlushBcsTaskCalledThenSetStallingCommandFlag) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    DispatchBcsFlags dispatchBcsFlags(false, false, false);
+
+    // first flush can carry preamble, no interest in flags here
+    commandStreamReceiver.flushBcsTask(commandStream,
+                                       commandStream.getUsed(),
+                                       dispatchBcsFlags,
+                                       pDevice->getHardwareInfo());
+
+    // regular dispatch here
+    commandStreamReceiver.recordFlushedBatchBuffer = true;
+    dispatchBcsFlags.flushTaskCount = true;
+
+    commandStreamReceiver.flushBcsTask(commandStream,
+                                       commandStream.getUsed(),
+                                       dispatchBcsFlags,
+                                       pDevice->getHardwareInfo());
+
+    EXPECT_TRUE(commandStreamReceiver.latestFlushedBatchBuffer.hasStallingCmds);
+}
+
+HWTEST_F(CommandStreamReceiverHwTest, givenEpilogueStreamAvailableWhenFlushBcsTaskCalledThenDispachEpilogueCommandsIntoEpilogueStream) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    DispatchBcsFlags dispatchBcsFlags(false, false, false);
+
+    // first flush can carry preamble, no interest in flags here
+    commandStreamReceiver.flushBcsTask(commandStream,
+                                       commandStream.getUsed(),
+                                       dispatchBcsFlags,
+                                       pDevice->getHardwareInfo());
+
+    // regular dispatch here
+    GraphicsAllocation *commandBuffer = commandStreamReceiver.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{commandStreamReceiver.getRootDeviceIndex(), MemoryConstants::pageSize});
+    ASSERT_NE(nullptr, commandBuffer);
+    LinearStream epilogueStream(commandBuffer);
+
+    commandStreamReceiver.storeMakeResidentAllocations = true;
+    dispatchBcsFlags.flushTaskCount = true;
+    dispatchBcsFlags.optionalEpilogueCmdStream = &epilogueStream;
+
+    commandStreamReceiver.flushBcsTask(commandStream,
+                                       commandStream.getUsed(),
+                                       dispatchBcsFlags,
+                                       pDevice->getHardwareInfo());
+
+    EXPECT_TRUE(commandStreamReceiver.isMadeResident(commandBuffer));
+
+    HardwareParse hwParser;
+
+    hwParser.parseCommands<FamilyType>(epilogueStream, 0);
+    auto cmdIterator = find<typename FamilyType::MI_FLUSH_DW *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    EXPECT_NE(hwParser.cmdList.end(), cmdIterator);
+
+    commandStreamReceiver.getMemoryManager()->freeGraphicsMemoryImpl(commandBuffer);
+}
+
+HWTEST_F(CommandStreamReceiverHwTest, givenEpilogueStreamAvailableWhenFlushImmediateTaskCalledThenDispachEpilogueCommandsIntoEpilogueStream) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    // first flush can carry preamble, no interest in flags here
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    // regular dispatch here
+    GraphicsAllocation *commandBuffer = commandStreamReceiver.getMemoryManager()->allocateGraphicsMemoryWithProperties(MockAllocationProperties{commandStreamReceiver.getRootDeviceIndex(), MemoryConstants::pageSize});
+    ASSERT_NE(nullptr, commandBuffer);
+    LinearStream epilogueStream(commandBuffer);
+
+    commandStreamReceiver.storeMakeResidentAllocations = true;
+    commandStreamReceiver.recordFlushedBatchBuffer = true;
+
+    immediateFlushTaskFlags.requireTaskCountUpdate = true;
+    immediateFlushTaskFlags.optionalEpilogueCmdStream = &epilogueStream;
+
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    EXPECT_TRUE(commandStreamReceiver.isMadeResident(commandBuffer));
+    EXPECT_TRUE(commandStreamReceiver.latestFlushedBatchBuffer.dispatchMonitorFence);
+
+    HardwareParse hwParser;
+
+    hwParser.parseCommands<FamilyType>(epilogueStream, 0);
+    auto cmdIterator = find<typename FamilyType::PIPE_CONTROL *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
+    EXPECT_NE(hwParser.cmdList.end(), cmdIterator);
+
+    commandStreamReceiver.getMemoryManager()->freeGraphicsMemoryImpl(commandBuffer);
+}
+
+HWTEST_F(CommandStreamReceiverHwTest, givenFlushBcsTaskCmdListDispatchWhenCalledThenNoPrologueIsSent) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    DispatchBcsFlags dispatchBcsFlags(false, false, false);
+    dispatchBcsFlags.dispatchOperation = NEO::AppendOperations::cmdList;
+
+    size_t usedSize = commandStreamReceiver.commandStream.getUsed();
+
+    commandStreamReceiver.recordFlushedBatchBuffer = true;
+    commandStreamReceiver.flushBcsTask(commandStream,
+                                       commandStream.getUsed(),
+                                       dispatchBcsFlags,
+                                       pDevice->getHardwareInfo());
+
+    EXPECT_EQ(usedSize, commandStreamReceiver.commandStream.getUsed());
+    EXPECT_TRUE(commandStreamReceiver.latestFlushedBatchBuffer.disableFlatRingBuffer);
+}
+
+HWTEST_F(CommandStreamReceiverHwTest, givenImmediateFlushTaskCmdListDispatchWhenFlushingBufferThenDisableFlatRingBuffer) {
+    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
+
+    commandStreamReceiver.recordFlushedBatchBuffer = true;
+
+    immediateFlushTaskFlags.dispatchOperation = NEO::AppendOperations::cmdList;
+    commandStreamReceiver.flushImmediateTask(commandStream,
+                                             commandStream.getUsed(),
+                                             immediateFlushTaskFlags,
+                                             *pDevice);
+
+    EXPECT_TRUE(commandStreamReceiver.latestFlushedBatchBuffer.disableFlatRingBuffer);
 }

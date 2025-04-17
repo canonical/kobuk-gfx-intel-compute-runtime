@@ -16,6 +16,7 @@
 #include "shared/source/kernel/grf_config.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/residency_container.h"
+#include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/unified_memory/unified_memory.h"
 #include "shared/source/utilities/software_tags_manager.h"
@@ -164,7 +165,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     auto kernelPreemptionMode = obtainKernelPreemptionMode(kernel);
 
     kernel->patchGlobalOffset();
-    kernel->patchRegionParams(launchParams);
+    kernel->patchRegionParams(launchParams, threadGroupDimensions);
     this->allocateOrReuseKernelPrivateMemoryIfNeeded(kernel, kernelDescriptor.kernelAttributes.perHwThreadPrivateMemorySize);
 
     if (launchParams.isIndirect) {
@@ -178,7 +179,8 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     uint64_t eventAddress = 0;
     bool isTimestampEvent = false;
-    bool l3FlushEnable = false;
+    bool l3FlushInPipeControlEnable = false;
+    bool isFlushL3AfterPostSync = false;
     bool isHostSignalScopeEvent = launchParams.isHostSignalScopeEvent;
     bool interruptEvent = false;
     Event *compactEvent = nullptr;
@@ -206,20 +208,35 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
             bool flushRequired = event->isSignalScope() &&
                                  !launchParams.isKernelSplitOperation;
-            l3FlushEnable = getDcFlushRequired(flushRequired);
+
+            l3FlushInPipeControlEnable = getDcFlushRequired(flushRequired) &&
+                                         !this->l3FlushAfterPostSyncRequired;
+
+            isFlushL3AfterPostSync = isHostSignalScopeEvent && this->l3FlushAfterPostSyncRequired && !launchParams.isKernelSplitOperation;
+
             interruptEvent = event->isInterruptModeEnabled();
         }
     }
 
     bool isKernelUsingSystemAllocation = false;
+    bool isKernelUsingExternalAllocation = false;
+
+    auto svmManager = device->getDriverHandle() ? device->getDriverHandle()->getSvmAllocsManager() : nullptr;
+
     if (!launchParams.isBuiltInKernel) {
-        auto verifyKernelUsingSystemAllocations = [&isKernelUsingSystemAllocation](const NEO::ResidencyContainer &kernelResidencyContainer) {
+        auto verifyKernelUsingSystemAllocations = [&](const NEO::ResidencyContainer &kernelResidencyContainer) {
             for (const auto &allocation : kernelResidencyContainer) {
                 if (allocation == nullptr) {
                     continue;
                 }
-                if (allocation->getAllocationType() == NEO::AllocationType::bufferHostMemory) {
+                auto type = allocation->getAllocationType();
+
+                if (type == NEO::AllocationType::bufferHostMemory) {
                     isKernelUsingSystemAllocation = true;
+                }
+
+                if constexpr (checkIfAllocationImportedRequired()) {
+                    isKernelUsingExternalAllocation = this->isAllocationImported(allocation, svmManager);
                 }
             }
         };
@@ -229,6 +246,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     } else {
         isKernelUsingSystemAllocation = launchParams.isDestinationAllocationInSystemMemory;
+        isKernelUsingExternalAllocation = launchParams.isDestinationAllocationImported;
     }
 
     if (kernel->hasIndirectAllocationsAllowed()) {
@@ -388,6 +406,8 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         .interruptEvent = interruptEvent,
         .immediateScratchAddressPatching = !this->scratchAddressPatchingEnabled,
         .makeCommandView = launchParams.makeKernelCommandView,
+        .isFlushL3AfterPostSyncForExternalAllocationRequired = isFlushL3AfterPostSync && isKernelUsingExternalAllocation,
+        .isFlushL3AfterPostSyncForHostUsmRequired = isFlushL3AfterPostSync && isKernelUsingSystemAllocation,
     };
     setAdditionalDispatchKernelArgsFromLaunchParams(dispatchKernelArgs, launchParams);
 
@@ -428,7 +448,8 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
             }
         } else if (event) {
             event->setPacketsInUse(partitionCount);
-            if (l3FlushEnable) {
+
+            if (l3FlushInPipeControlEnable) {
                 programEventL3Flush(event);
             }
             if (!launchParams.isKernelSplitOperation) {

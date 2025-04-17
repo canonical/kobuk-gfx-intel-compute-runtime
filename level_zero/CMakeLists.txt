@@ -131,6 +131,7 @@ if(BUILD_WITH_L0)
           add_custom_command(
                              TARGET copy_third_party_files
                              PRE_BUILD
+                             COMMAND echo Running copy_third_party_files for igc targets. Copy from: $<TARGET_SONAME_FILE:${TARGET_tmp}> to: "${CUSTOM_COMMAND_BINARY_DIR}/"
                              COMMAND ${CMAKE_COMMAND} -E make_directory ${CUSTOM_COMMAND_BINARY_DIR}
                              COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_SONAME_FILE:${TARGET_tmp}> "${CUSTOM_COMMAND_BINARY_DIR}/"
           )
@@ -146,13 +147,18 @@ if(BUILD_WITH_L0)
   else()
     if(DEFINED IGC_DIR) # Only copy igc libs if available
       message(STATUS "L0::Igc Dir: ${IGC_DIR}")
-      add_custom_command(
-                         TARGET copy_third_party_files
-                         PRE_BUILD
-                         COMMAND ${CMAKE_COMMAND} -E make_directory ${CUSTOM_COMMAND_BINARY_DIR}
-                         COMMAND ${CMAKE_COMMAND} -E copy_directory "${NEO__IGC_LIBRARY_PATH}" "${CUSTOM_COMMAND_BINARY_DIR}/"
-                         DEPENDS "${NEO__IGC_LIBRARY_PATH}"
-      )
+      set(TEMP_IGC_DIRS "${NEO__IGC_LIBRARY_PATH}")
+      string(REPLACE ":" ";" TEMP_IGC_DIRS "${NEO__IGC_LIBRARY_PATH}")
+      foreach(TEMP_DIR ${TEMP_IGC_DIRS})
+        add_custom_command(
+                           TARGET copy_third_party_files
+                           PRE_BUILD
+                           COMMAND echo Running copy_third_party_files for igc dir. Copy from: "${TEMP_DIR}" to: "${CUSTOM_COMMAND_BINARY_DIR}/"
+                           COMMAND ${CMAKE_COMMAND} -E make_directory ${CUSTOM_COMMAND_BINARY_DIR}
+                           COMMAND ${CMAKE_COMMAND} -E copy_directory "${TEMP_DIR}" "${CUSTOM_COMMAND_BINARY_DIR}/"
+                           DEPENDS "${NEO__IGC_LIBRARY_PATH}"
+        )
+      endforeach()
     endif()
   endif()
 
@@ -179,6 +185,7 @@ if(BUILD_WITH_L0)
       add_custom_command(
                          TARGET copy_third_party_files
                          PRE_BUILD
+                         COMMAND echo Running copy_third_party_files for gmm dir. Copy from: "${NEO__GMM_LIBRARY_PATH}" to: "${CUSTOM_COMMAND_BINARY_DIR}/"
                          COMMAND ${CMAKE_COMMAND} -E make_directory ${CUSTOM_COMMAND_BINARY_DIR}
                          COMMAND ${CMAKE_COMMAND} -E copy_directory "${NEO__GMM_LIBRARY_PATH}" "${CUSTOM_COMMAND_BINARY_DIR}/"
                          DEPENDS "${NEO__GMM_LIBRARY_PATH}"
@@ -211,28 +218,21 @@ if(BUILD_WITH_L0)
 
   # Create our shared library/DLL
   configure_file(ze_intel_gpu_version.h.in ${NEO_BUILD_DIR}/ze_intel_gpu_version.h)
-  add_library(${TARGET_NAME_L0}
-              SHARED
-              ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
-              ${NEO_SHARED_DIRECTORY}/dll/create_command_stream.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/device_dll.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/direct_submission_controller_enabled.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/options_dll.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/unified_memory_reuse_cleaner_enabled.cpp
-              ${NEO_SHARED_DIRECTORY}/gmm_helper/page_table_mngr.cpp
-              ${NEO_SHARED_DIRECTORY}/gmm_helper/resource_info.cpp
-              ${NEO_SHARED_DIRECTORY}/helpers/abort.cpp
-              ${NEO_SHARED_DIRECTORY}/helpers/debug_helpers.cpp
-              ${NEO_SHARED_DIRECTORY}/helpers/file_io.cpp
-              ${NEO_SHARED_DIRECTORY}/utilities/cpuintrinsics.cpp
-              ${NEO_SHARED_DIRECTORY}/utilities/debug_settings_reader_creator.cpp
-              ${NEO_SHARED_DIRECTORY}/utilities/io_functions.cpp
-              ${NEO_SHARED_DIRECTORY}/built_ins/sip_init.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/create_deferred_deleter.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/create_memory_manager_${DRIVER_MODEL}.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/create_tbx_sockets.cpp
-              ${NEO_SHARED_DIRECTORY}/dll/get_devices.cpp
+  set(L0_SHARED_LIB_DLLS
+      ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt
+      ${NEO_SHARED_DIRECTORY}/gmm_helper/page_table_mngr.cpp
+      ${NEO_SHARED_DIRECTORY}/gmm_helper/resource_info.cpp
+      ${NEO_SHARED_DIRECTORY}/helpers/abort.cpp
+      ${NEO_SHARED_DIRECTORY}/helpers/debug_helpers.cpp
+      ${NEO_SHARED_DIRECTORY}/helpers/file_io.cpp
+      ${NEO_SHARED_DIRECTORY}/utilities/cpuintrinsics.cpp
+      ${NEO_SHARED_DIRECTORY}/utilities/debug_settings_reader_creator.cpp
+      ${NEO_SHARED_DIRECTORY}/utilities/io_functions.cpp
+      ${NEO_SHARED_DIRECTORY}/built_ins/sip_init.cpp
+      $<TARGET_OBJECTS:neo_shared_dlls_precompiled_objects>
   )
+
+  add_library(${TARGET_NAME_L0} SHARED ${L0_SHARED_LIB_DLLS})
   if(DEFINED AUB_STREAM_PROJECT_NAME)
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
@@ -318,7 +318,7 @@ if(BUILD_WITH_L0)
     target_sources(${TARGET_NAME_L0}
                    PRIVATE
                    $<TARGET_OBJECTS:${BUILTINS_BINARIES_STATELESS_LIB_NAME}>
-                   $<TARGET_OBJECTS:${BUILTINS_BINARIES_STATELESS_HEAPLESS_LIB_NAME}>
+                   $<TARGET_OBJECTS:${BUILTINS_BINARIES_HEAPLESS_LIB_NAME}>
                    $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDFUL_LIB_NAME}>
                    $<TARGET_OBJECTS:${BUILTINS_BINARIES_BINDLESS_LIB_NAME}>
     )
@@ -366,6 +366,12 @@ if(BUILD_WITH_L0)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/include "${NEO_BUILD_DIR}/${LIB_NAME}/include")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tools/source "${NEO_BUILD_DIR}/${LIB_NAME}tools/source")
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/sysman/source "${NEO_BUILD_DIR}/${LIB_NAME}sysman/source")
+
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/core/source/driver/driver_handle_imp.cpp
+                                PROPERTIES
+                                COMPILE_DEFINITIONS
+                                "NEO_L0_VERSION_MAJOR=${NEO_L0_VERSION_MAJOR};NEO_L0_VERSION_MINOR=${NEO_L0_VERSION_MINOR}"
+    )
 
     if(DEFINED NEO_SPDLOG_DIR)
       target_include_directories(${LIB_NAME} PRIVATE "experimental/source/log_utility")

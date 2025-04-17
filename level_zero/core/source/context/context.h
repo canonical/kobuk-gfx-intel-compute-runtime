@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,6 +27,8 @@ class Device;
 namespace L0 {
 struct DriverHandle;
 struct Image;
+
+class ContextExt;
 
 struct Context : _ze_context_handle_t {
     inline static ze_memory_type_t parseUSMType(InternalMemoryType memoryType) {
@@ -178,6 +180,8 @@ struct Context : _ze_context_handle_t {
 
     static Context *fromHandle(ze_context_handle_t handle) { return static_cast<Context *>(handle); }
     inline ze_context_handle_t toHandle() { return this; }
+
+    virtual ContextExt *getContextExt() = 0;
 };
 
 } // namespace L0

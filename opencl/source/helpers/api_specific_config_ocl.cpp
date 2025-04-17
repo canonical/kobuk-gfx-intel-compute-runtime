@@ -1,12 +1,15 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/device/device.h"
 #include "shared/source/helpers/api_specific_config.h"
+#include "shared/source/helpers/compiler_product_helper.h"
+#include "shared/source/release_helper/release_helper.h"
 
 #include "opencl/source/os_interface/ocl_reg_path.h"
 
@@ -25,6 +28,10 @@ bool ApiSpecificConfig::getGlobalBindlessHeapConfiguration(const ReleaseHelper *
 }
 
 bool ApiSpecificConfig::getBindlessMode(const Device &device) {
+    if (device.getCompilerProductHelper().isForceBindlessRequired()) {
+        return true;
+    }
+
     if (debugManager.flags.UseBindlessMode.get() != -1) {
         return debugManager.flags.UseBindlessMode.get();
     } else {
@@ -87,6 +94,10 @@ int64_t ApiSpecificConfig::compilerCacheDefaultEnabled() {
 
 bool ApiSpecificConfig::isGlobalStatelessEnabled(const RootDeviceEnvironment &rootDeviceEnvironment) {
     return false;
+}
+
+bool ApiSpecificConfig::isUpdateTagFromWaitEnabledForHeapless() {
+    return true;
 }
 
 } // namespace NEO

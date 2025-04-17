@@ -174,11 +174,11 @@ struct CommandListCoreFamily : public CommandListImp {
     ze_result_t appendWriteToMemory(void *desc, void *ptr,
                                     uint64_t data) override;
 
-    ze_result_t appendWaitExternalSemaphores(uint32_t numExternalSemaphores, const ze_intel_external_semaphore_exp_handle_t *hSemaphores,
-                                             const ze_intel_external_semaphore_wait_params_exp_t *params, ze_event_handle_t hSignalEvent,
+    ze_result_t appendWaitExternalSemaphores(uint32_t numExternalSemaphores, const ze_external_semaphore_ext_handle_t *hSemaphores,
+                                             const ze_external_semaphore_wait_params_ext_t *params, ze_event_handle_t hSignalEvent,
                                              uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override;
-    ze_result_t appendSignalExternalSemaphores(size_t numExternalSemaphores, const ze_intel_external_semaphore_exp_handle_t *hSemaphores,
-                                               const ze_intel_external_semaphore_signal_params_exp_t *params, ze_event_handle_t hSignalEvent,
+    ze_result_t appendSignalExternalSemaphores(size_t numExternalSemaphores, const ze_external_semaphore_ext_handle_t *hSemaphores,
+                                               const ze_external_semaphore_signal_params_ext_t *params, ze_event_handle_t hSignalEvent,
                                                uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) override;
 
     ze_result_t appendQueryKernelTimestamps(uint32_t numEvents, ze_event_handle_t *phEvents, void *dstptr,
@@ -329,7 +329,7 @@ struct CommandListCoreFamily : public CommandListImp {
     MOCKABLE_VIRTUAL AlignedAllocationData getAlignedAllocationData(Device *device, const void *buffer, uint64_t bufferSize, bool hostCopyAllowed, bool copyOffload);
     size_t getAllocationOffsetForAppendBlitFill(void *ptr, NEO::GraphicsAllocation &gpuAllocation);
     uint32_t getRegionOffsetForAppendMemoryCopyBlitRegion(AlignedAllocationData *allocationData);
-    void addFlushRequiredCommand(bool flushOperationRequired, Event *signalEvent, bool copyOperation);
+    void addFlushRequiredCommand(bool flushOperationRequired, Event *signalEvent, bool copyOperation, bool flushL3InPipeControl);
     void handlePostSubmissionState();
 
     void setupFillKernelArguments(size_t baseOffset,
@@ -353,6 +353,10 @@ struct CommandListCoreFamily : public CommandListImp {
     void dispatchEventRemainingPacketsPostSyncOperation(Event *event, bool copyOperation);
     void dispatchEventPostSyncOperation(Event *event, void **syncCmdBuffer, CommandToPatchContainer *outListCommands, uint32_t value, bool omitFirstOperation, bool useMax, bool useLastPipeControl,
                                         bool skipPartitionOffsetProgramming, bool copyOperation);
+
+    bool isAllocationImported(NEO::GraphicsAllocation *gpuAllocation, NEO::SVMAllocsManager *svmManager) const;
+    static constexpr bool checkIfAllocationImportedRequired();
+
     bool isKernelUncachedMocsRequired(bool kernelState) {
         this->containsStatelessUncachedResource |= kernelState;
         if (this->stateBaseAddressTracking) {
@@ -388,6 +392,8 @@ struct CommandListCoreFamily : public CommandListImp {
     virtual ze_result_t flushInOrderCounterSignal(bool waitOnInOrderCounterRequired) { return ZE_RESULT_SUCCESS; };
     bool isCopyOffloadAllowed(const NEO::GraphicsAllocation &srcAllocation, const NEO::GraphicsAllocation &dstAllocation) const;
     void setAdditionalKernelLaunchParams(CmdListKernelLaunchParams &launchParams, Kernel &kernel) const;
+    void dispatchInOrderPostOperationBarrier(Event *signalOperation, bool dcFlushRequired, bool copyOperation);
+    NEO::GraphicsAllocation *getDeviceCounterAllocForResidency(NEO::GraphicsAllocation *counterDeviceAlloc);
 
     NEO::InOrderPatchCommandsContainer<GfxFamily> inOrderPatchCmds;
 

@@ -738,6 +738,11 @@ bool GfxCoreHelperHw<GfxFamily>::is48ResourceNeededForCmdBuffer() const {
 }
 
 template <typename GfxFamily>
+bool GfxCoreHelperHw<GfxFamily>::isStateSipRequired() const {
+    return true;
+}
+
+template <typename GfxFamily>
 bool GfxCoreHelperHw<GfxFamily>::singleTileExecImplicitScalingRequired(bool cooperativeKernel) const {
     return EncodeDispatchKernel<GfxFamily>::singleTileExecImplicitScalingRequired(cooperativeKernel);
 }
@@ -831,6 +836,16 @@ uint32_t GfxCoreHelperHw<Family>::getInternalCopyEngineIndex(const HardwareInfo 
     constexpr uint32_t defaultInternalCopyEngineIndex = 3u;
     auto highestAvailableIndex = getMostSignificantSetBitIndex(hwInfo.featureTable.ftrBcsInfo.to_ullong());
     return std::min(defaultInternalCopyEngineIndex, highestAvailableIndex);
+}
+
+template <typename Family>
+bool GfxCoreHelperHw<Family>::getSipBinaryFromExternalLib() const {
+    return false;
+}
+
+template <typename Family>
+uint32_t GfxCoreHelperHw<Family>::getImplicitArgsVersion() const {
+    return 0;
 }
 
 } // namespace NEO

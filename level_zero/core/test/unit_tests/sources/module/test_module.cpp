@@ -24,6 +24,7 @@
 #include "shared/test/common/compiler_interface/linker_mock.h"
 #include "shared/test/common/device_binary_format/patchtokens_tests.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/implicit_args_test_helper.h"
 #include "shared/test/common/helpers/mock_file_io.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_compiler_product_helper.h"
@@ -34,7 +35,6 @@
 #include "shared/test/common/mocks/mock_l0_debugger.h"
 #include "shared/test/common/mocks/mock_memory_operations_handler.h"
 #include "shared/test/common/mocks/mock_modules_zebin.h"
-#include "shared/test/common/mocks/mock_product_helper.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/kernel/kernel_imp.h"
@@ -175,6 +175,7 @@ HWTEST_F(ModuleTest, givenUserModuleWhenCreatedThenCorrectAllocationTypeIsUsedFo
 
 template <bool localMemEnabled>
 struct ModuleKernelIsaAllocationsFixture : public ModuleFixture {
+    static constexpr size_t isaAllocationPageSize = (localMemEnabled ? MemoryConstants::pageSize64k : MemoryConstants::pageSize);
     using Module = WhiteBox<::L0::Module>;
 
     void setUp() {
@@ -209,7 +210,7 @@ struct ModuleKernelIsaAllocationsFixture : public ModuleFixture {
     void givenSeparateIsaMemoryRegionPerKernelWhenGraphicsAllocationFailsThenProperErrorReturned() {
         mockModule->allocateKernelsIsaMemoryCallBase = false;
         mockModule->computeKernelIsaAllocationAlignedSizeWithPaddingCallBase = false;
-        mockModule->computeKernelIsaAllocationAlignedSizeWithPaddingResult = this->mockModule->getIsaAllocationPageSize();
+        mockModule->computeKernelIsaAllocationAlignedSizeWithPaddingResult = isaAllocationPageSize;
 
         auto result = module->initialize(&this->moduleDesc, device->getNEODevice());
         EXPECT_EQ(result, ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY);
@@ -792,35 +793,6 @@ HWTEST_F(ModuleTest, whenMultipleModulesCreatedThenModulesShareIsaAllocation) {
         EXPECT_EQ(initialWriteMemoryCount + 1, ultCsr.writeMemoryParams.totalCallCount);
     }
 };
-
-TEST_F(ModuleTest, GivenLocalMemoryEnabledOrDisabledAnd2MBAlignmentEnabledOrDisabledWhenGettingIsaAllocationPageSizeThenCorrectValueIsReturned) {
-    DebugManagerStateRestore restorer;
-    auto mockProductHelper = new MockProductHelper;
-
-    device->getNEODevice()->getRootDeviceEnvironmentRef().productHelper.reset(mockProductHelper);
-
-    MockModule mockModule{device, nullptr, ModuleType::user};
-    EXPECT_EQ(mockModule.getIsaAllocationPageSize(), mockModule.isaAllocationPageSize);
-
-    {
-        debugManager.flags.EnableLocalMemory.set(0);
-        mockProductHelper->is2MBLocalMemAlignmentEnabledResult = true;
-
-        EXPECT_EQ(MemoryConstants::pageSize, mockModule.getIsaAllocationPageSize());
-    }
-    {
-        debugManager.flags.EnableLocalMemory.set(1);
-        mockProductHelper->is2MBLocalMemAlignmentEnabledResult = true;
-
-        EXPECT_EQ(MemoryConstants::pageSize2M, mockModule.getIsaAllocationPageSize());
-    }
-    {
-        debugManager.flags.EnableLocalMemory.set(1);
-        mockProductHelper->is2MBLocalMemAlignmentEnabledResult = false;
-
-        EXPECT_EQ(MemoryConstants::pageSize64k, mockModule.getIsaAllocationPageSize());
-    }
-}
 
 template <typename T1, typename T2>
 struct ModuleSpecConstantsFixture : public DeviceFixture {
@@ -1928,7 +1900,7 @@ TEST_F(ModuleDynamicLinkTests, givenModuleWithInternalRelocationAndUnresolvedExt
 
     uint32_t internalRelocationOffset = 0x10;
     linkerInput->textRelocations.push_back({{implicitArgsRelocationSymbolName, internalRelocationOffset, LinkerInput::RelocationInfo::Type::address, SegmentType::instructions}});
-    uint32_t expectedInternalRelocationValue = ImplicitArgs::getSize();
+    uint32_t expectedInternalRelocationValue = ImplicitArgsTestHelper::getImplicitArgsSize(neoDevice->getGfxCoreHelper().getImplicitArgsVersion());
 
     uint32_t externalRelocationOffset = 0x20;
     constexpr auto externalSymbolName = "unresolved";
@@ -3915,7 +3887,7 @@ TEST_F(ModuleTest, givenInternalOptionsWhenBindlessDisabledThenBindlesOptionsNot
 
     module->createBuildOptions("", buildOptions, internalBuildOptions);
 
-    EXPECT_FALSE(NEO::CompilerOptions::contains(internalBuildOptions, NEO::CompilerOptions::bindlessMode));
+    EXPECT_EQ(device->getCompilerProductHelper().isHeaplessModeEnabled(), NEO::CompilerOptions::contains(internalBuildOptions, NEO::CompilerOptions::bindlessMode));
 }
 
 TEST_F(ModuleTest, givenSrcOptLevelInSrcNamesWhenMovingBuildOptionsThenOptionIsRemovedFromSrcNamesAndTranslatedOptionsStoredInDstNames) {
@@ -4077,6 +4049,7 @@ TEST_F(ModuleTest, whenContainsStatefulAccessIsCalledThenResultIsCorrect) {
 
 template <bool localMemEnabled>
 struct ModuleIsaAllocationsFixture : public DeviceFixture {
+    static constexpr size_t isaAllocationPageSize = (localMemEnabled ? MemoryConstants::pageSize64k : MemoryConstants::pageSize);
     static constexpr NEO::MemoryPool isaAllocationMemoryPool = (localMemEnabled ? NEO::MemoryPool::localMemory : NEO::MemoryPool::system4KBPagesWith32BitGpuAddressing);
 
     void setUp() {
@@ -4092,7 +4065,6 @@ struct ModuleIsaAllocationsFixture : public DeviceFixture {
         this->mockMemoryManager->localMemorySupported[this->neoDevice->getRootDeviceIndex()] = true;
         this->mockModule.reset(new MockModule{this->device, nullptr, ModuleType::user});
         this->mockModule->translationUnit.reset(new MockModuleTranslationUnit{this->device});
-        this->isaAllocationPageSize = this->mockModule->getIsaAllocationPageSize();
     }
 
     void tearDown() {
@@ -4148,8 +4120,8 @@ struct ModuleIsaAllocationsFixture : public DeviceFixture {
         EXPECT_EQ(kernelImmDatas[1]->getIsaOffsetInParentAllocation(), 0lu);
         EXPECT_EQ(kernelImmDatas[1]->getIsaSubAllocationSize(), 0lu);
         if constexpr (localMemEnabled) {
-            EXPECT_EQ(alignUp<size_t>(maxAllocationSizeInPage, MemoryConstants::pageSize64k), kernelImmDatas[0]->getIsaSize());
-            EXPECT_EQ(alignUp<size_t>(tinyAllocationSize, MemoryConstants::pageSize64k), kernelImmDatas[1]->getIsaSize());
+            EXPECT_EQ(isaAllocationPageSize, kernelImmDatas[0]->getIsaSize());
+            EXPECT_EQ(isaAllocationPageSize, kernelImmDatas[1]->getIsaSize());
         } else {
             EXPECT_EQ(this->computeKernelIsaAllocationSizeWithPadding(maxAllocationSizeInPage), kernelImmDatas[0]->getIsaSize());
             EXPECT_EQ(this->computeKernelIsaAllocationSizeWithPadding(tinyAllocationSize), kernelImmDatas[1]->getIsaSize());
@@ -4196,7 +4168,6 @@ struct ModuleIsaAllocationsFixture : public DeviceFixture {
 
     size_t isaPadding;
     size_t kernelStartPointerAlignment;
-    size_t isaAllocationPageSize;
     NEO::Device *neoDevice = nullptr;
     MockMemoryManager *mockMemoryManager = nullptr;
     std::unique_ptr<MockModule> mockModule = nullptr;
@@ -4762,6 +4733,7 @@ TEST_F(ModuleTests, givenFullyLinkedModuleWhenCreatingKernelThenDebugMsgOnPrivat
     std::string output = testing::internal::GetCapturedStderr();
     std::ostringstream expectedOutput;
     expectedOutput << "computeUnits for each thread: " << std::to_string(this->device->getDeviceInfo().computeUnitsUsedForScratch) << "\n"
+                   << "global memory size: " << std::to_string(this->device->getDeviceInfo().globalMemSize) << "\n"
                    << "perHwThreadPrivateMemorySize: 0\t totalPrivateMemorySize: 0\n"
                    << "perHwThreadScratchSize: 0\t totalScratchSize: 0\n"
                    << "perHwThreadPrivateScratchSize: 0\t totalPrivateScratchSize: 0\n";
@@ -4795,7 +4767,7 @@ TEST_F(ModuleTests, givenImplicitArgsRelocationAndStackCallsWhenLinkingModuleThe
     auto status = pModule->linkBinary();
     EXPECT_TRUE(status);
 
-    EXPECT_EQ(ImplicitArgs::getSize(), *reinterpret_cast<uint32_t *>(ptrOffset(isaCpuPtr, 0x8)));
+    EXPECT_EQ(ImplicitArgsTestHelper::getImplicitArgsSize(device->getGfxCoreHelper().getImplicitArgsVersion()), *reinterpret_cast<uint32_t *>(ptrOffset(isaCpuPtr, 0x8)));
 
     EXPECT_TRUE(kernelInfo->kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs);
 }

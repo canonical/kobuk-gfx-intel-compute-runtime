@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -485,6 +485,7 @@ HWTEST_F(KernelImpSuggestMaxCooperativeGroupCountTests, GivenUsedSlmSizeWhenCalc
 
 using KernelTest = Test<DeviceFixture>;
 HWTEST2_F(KernelTest, GivenInlineSamplersWhenSettingInlineSamplerThenDshIsPatched, SupportsSampler) {
+    using SamplerState = typename FamilyType::SAMPLER_STATE;
     WhiteBox<::L0::KernelImmutableData> kernelImmData = {};
     NEO::KernelDescriptor descriptor;
     kernelImmData.kernelDescriptor = &descriptor;
@@ -498,12 +499,11 @@ HWTEST2_F(KernelTest, GivenInlineSamplersWhenSettingInlineSamplerThenDshIsPatche
     Mock<KernelImp> kernel;
     kernel.module = &module;
     kernel.kernelImmData = &kernelImmData;
-    kernel.dynamicStateHeapData.reset(new uint8_t[64 + 16]);
-    kernel.dynamicStateHeapDataSize = 64 + 16;
+    kernel.dynamicStateHeapData.reset(new uint8_t[64 + sizeof(SamplerState)]);
+    kernel.dynamicStateHeapDataSize = 64 + sizeof(SamplerState);
 
     kernel.setInlineSamplers();
 
-    using SamplerState = typename FamilyType::SAMPLER_STATE;
     auto samplerState = reinterpret_cast<const SamplerState *>(kernel.dynamicStateHeapData.get() + 64U);
     EXPECT_TRUE(samplerState->getNonNormalizedCoordinateEnable());
     EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTcxAddressControlMode());
@@ -511,6 +511,61 @@ HWTEST2_F(KernelTest, GivenInlineSamplersWhenSettingInlineSamplerThenDshIsPatche
     EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_WRAP, samplerState->getTczAddressControlMode());
     EXPECT_EQ(SamplerState::MIN_MODE_FILTER_NEAREST, samplerState->getMinModeFilter());
     EXPECT_EQ(SamplerState::MAG_MODE_FILTER_NEAREST, samplerState->getMagModeFilter());
+}
+
+HWTEST2_F(KernelTest, givenTwoInlineSamplersWithBindlessAddressingWhenSettingInlineSamplerThenDshIsPatchedCorrectly, SupportsSampler) {
+    using SamplerState = typename FamilyType::SAMPLER_STATE;
+    constexpr auto borderColorStateSize = 64u;
+
+    WhiteBox<::L0::KernelImmutableData> kernelImmData = {};
+    NEO::KernelDescriptor descriptor;
+    kernelImmData.kernelDescriptor = &descriptor;
+
+    descriptor.inlineSamplers.resize(2);
+
+    auto &inlineSampler = descriptor.inlineSamplers[0];
+    inlineSampler.addrMode = NEO::KernelDescriptor::InlineSampler::AddrMode::clampEdge;
+    inlineSampler.filterMode = NEO::KernelDescriptor::InlineSampler::FilterMode::nearest;
+    inlineSampler.isNormalized = false;
+    inlineSampler.bindless = 0x98u;
+    inlineSampler.samplerIndex = 0u;
+
+    ASSERT_TRUE(NEO::isValidOffset(inlineSampler.bindless));
+
+    auto &inlineSampler2 = descriptor.inlineSamplers[1];
+    inlineSampler2.addrMode = NEO::KernelDescriptor::InlineSampler::AddrMode::clampBorder;
+    inlineSampler2.filterMode = NEO::KernelDescriptor::InlineSampler::FilterMode::linear;
+    inlineSampler2.isNormalized = false;
+    inlineSampler2.bindless = 0x90u;
+    inlineSampler2.samplerIndex = 1u;
+
+    ASSERT_TRUE(NEO::isValidOffset(inlineSampler.bindless));
+
+    Mock<Module> module(device, nullptr);
+    Mock<KernelImp> kernel;
+    kernel.module = &module;
+    kernel.kernelImmData = &kernelImmData;
+    kernel.dynamicStateHeapData.reset(new uint8_t[borderColorStateSize + 2 * sizeof(SamplerState)]);
+    kernel.dynamicStateHeapDataSize = borderColorStateSize + 2 * sizeof(SamplerState);
+
+    kernel.setInlineSamplers();
+
+    const SamplerState *samplerState = reinterpret_cast<const SamplerState *>(kernel.dynamicStateHeapData.get() + borderColorStateSize);
+    const SamplerState *samplerState2 = reinterpret_cast<const SamplerState *>(kernel.dynamicStateHeapData.get() + sizeof(SamplerState) + borderColorStateSize);
+
+    EXPECT_TRUE(samplerState->getNonNormalizedCoordinateEnable());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_CLAMP, samplerState->getTcxAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_CLAMP, samplerState->getTcyAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_CLAMP, samplerState->getTczAddressControlMode());
+    EXPECT_EQ(SamplerState::MIN_MODE_FILTER_NEAREST, samplerState->getMinModeFilter());
+    EXPECT_EQ(SamplerState::MAG_MODE_FILTER_NEAREST, samplerState->getMagModeFilter());
+
+    EXPECT_TRUE(samplerState2->getNonNormalizedCoordinateEnable());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_CLAMP_BORDER, samplerState2->getTcxAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_CLAMP_BORDER, samplerState2->getTcyAddressControlMode());
+    EXPECT_EQ(SamplerState::TEXTURE_COORDINATE_MODE_CLAMP_BORDER, samplerState2->getTczAddressControlMode());
+    EXPECT_EQ(SamplerState::MIN_MODE_FILTER_LINEAR, samplerState2->getMinModeFilter());
+    EXPECT_EQ(SamplerState::MAG_MODE_FILTER_LINEAR, samplerState2->getMagModeFilter());
 }
 
 using KernelImmutableDataBindlessTest = Test<DeviceFixture>;
@@ -948,6 +1003,20 @@ TEST_F(KernelImpTest, givenCorrectEngineTypeWhenGettingMaxWgCountPerTileThenRetu
     EXPECT_EQ(4u, kernel.getMaxWgCountPerTile(NEO::EngineGroupType::compute));
     EXPECT_EQ(2u, kernel.getMaxWgCountPerTile(NEO::EngineGroupType::renderCompute));
     EXPECT_EQ(100u, kernel.getMaxWgCountPerTile(NEO::EngineGroupType::cooperativeCompute));
+}
+
+TEST_F(KernelImpTest, givenDefaultGroupSizeWhenGetGroupSizeCalledThenReturnDefaultValues) {
+    Mock<Module> module(device, nullptr);
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = &module;
+    ze_kernel_desc_t kernelDesc{ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    kernel.initialize(&kernelDesc);
+
+    auto groupSize = kernel.getGroupSize();
+
+    EXPECT_EQ(1u, groupSize[0]);
+    EXPECT_EQ(1u, groupSize[1]);
+    EXPECT_EQ(1u, groupSize[2]);
 }
 
 } // namespace ult
