@@ -1,3 +1,9 @@
+intel-compute-runtime (25.13.33276.22-1~24.10~ppa1) oracular; urgency=medium
+
+  * Update to version 25.13.33276.22
+
+ -- Pavel Androniychuk <pavel.androniychuk@intel.com>  Tue, 06 May 2025 13:50:59 -0700
+
 intel-compute-runtime (25.13.33276.21-1~24.10~ppa1) oracular; urgency=medium
 
   * Fix version typo 
