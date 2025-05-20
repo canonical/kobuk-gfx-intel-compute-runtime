@@ -12,6 +12,7 @@
 #include "shared/source/memory_manager/alignment_selector.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/memadvise_flags.h"
+#include "shared/source/memory_manager/unified_memory_reuse.h"
 #include "shared/source/os_interface/os_memory.h"
 #include "shared/source/utilities/stackvec.h"
 
@@ -275,6 +276,7 @@ class MemoryManager {
     virtual AllocationStatus registerLocalMemAlloc(GraphicsAllocation *allocation, uint32_t rootDeviceIndex);
 
     virtual bool setMemAdvise(GraphicsAllocation *gfxAllocation, MemAdviseFlags flags, uint32_t rootDeviceIndex) { return true; }
+    virtual bool setSharedSystemMemAdvise(const void *ptr, const size_t size, MemAdvise memAdviseOp, uint32_t rootDeviceIndex) { return true; }
     virtual bool setMemPrefetch(GraphicsAllocation *gfxAllocation, SubDeviceIdsVec &subDeviceIds, uint32_t rootDeviceIndex) { return true; }
     virtual bool prefetchSharedSystemAlloc(const void *ptr, const size_t size, SubDeviceIdsVec &subDeviceIds, uint32_t rootDeviceIndex) { return true; }
     virtual bool setAtomicAccess(GraphicsAllocation *gfxAllocation, size_t size, AtomicAccessMode mode, uint32_t rootDeviceIndex) { return true; }
@@ -338,26 +340,11 @@ class MemoryManager {
 
     virtual void getExtraDeviceProperties(uint32_t rootDeviceIndex, uint32_t *moduleId, uint16_t *serverType) { return; }
 
-    std::unique_lock<std::mutex> obtainHostAllocationsReuseLock() const {
-        return std::unique_lock<std::mutex>(hostAllocationsReuseMtx);
-    }
+    void initUsmReuseLimits();
+    UsmReuseInfo usmReuseInfo;
 
-    void initUsmReuseMaxSize();
-
-    uint64_t getMaxAllocationsSavedForReuseSize() const {
-        return maxAllocationsSavedForReuseSize;
-    }
-
-    void recordHostAllocationSaveForReuse(uint64_t size) {
-        hostAllocationsSavedForReuseSize += size;
-    }
-
-    void recordHostAllocationGetFromReuse(uint64_t size) {
-        hostAllocationsSavedForReuseSize -= size;
-    }
-
-    uint64_t getHostAllocationsSavedForReuseSize() const {
-        return hostAllocationsSavedForReuseSize;
+    bool shouldLimitAllocationsReuse() const {
+        return getUsedSystemMemorySize() >= usmReuseInfo.getLimitAllocationsReuseThreshold();
     }
 
     void addCustomHeapAllocatorConfig(AllocationType allocationType, bool isFrontWindowPool, const CustomHeapAllocatorConfig &config);
@@ -436,9 +423,6 @@ class MemoryManager {
     std::mutex physicalMemoryAllocationMapMutex;
     std::unique_ptr<std::atomic<size_t>[]> localMemAllocsSize;
     std::atomic<size_t> sysMemAllocsSize;
-    uint64_t maxAllocationsSavedForReuseSize = 0u;
-    uint64_t hostAllocationsSavedForReuseSize = 0u;
-    mutable std::mutex hostAllocationsReuseMtx;
     std::map<std::pair<AllocationType, bool>, CustomHeapAllocatorConfig> customHeapAllocators;
 };
 

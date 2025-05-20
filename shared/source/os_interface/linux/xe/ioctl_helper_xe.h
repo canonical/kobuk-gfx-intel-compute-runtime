@@ -34,6 +34,8 @@ struct BindInfo {
 
 class IoctlHelperXe : public IoctlHelper {
   public:
+    using GtIdContainer = StackVec<int, 4>;
+
     using IoctlHelper::IoctlHelper;
     static std::unique_ptr<IoctlHelperXe> create(Drm &drmArg);
     static bool queryDeviceIdAndRevision(Drm &drm);
@@ -58,6 +60,7 @@ class IoctlHelperXe : public IoctlHelper {
     uint32_t getPreferredLocationAdvise() override;
     std::optional<MemoryClassInstance> getPreferredLocationRegion(PreferredLocation memoryLocation, uint32_t memoryInstance) override;
     bool setVmBoAdvise(int32_t handle, uint32_t attribute, void *region) override;
+    bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) override;
     bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) override;
     bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) override;
     bool setGemTiling(void *setTiling) override;
@@ -106,6 +109,8 @@ class IoctlHelperXe : public IoctlHelper {
     std::string getFileForMaxGpuFrequency() const override;
     std::string getFileForMaxGpuFrequencyOfSubDevice(int subDeviceId) const override;
     std::string getFileForMaxMemoryFrequencyOfSubDevice(int subDeviceId) const override;
+    void configureCcsMode(std::vector<std::string> &files, const std::string expectedPrefix, uint32_t ccsMode,
+                          std::vector<std::tuple<std::string, uint32_t>> &deviceCcsModeVec) override;
     bool getFabricLatency(uint32_t fabricId, uint32_t &latency, uint32_t &bandwidth) override;
     bool isWaitBeforeBindRequired(bool bind) const override;
     std::unique_ptr<EngineInfo> createEngineInfo(bool isSysmanEnabled) override;
@@ -138,8 +143,9 @@ class IoctlHelperXe : public IoctlHelper {
   protected:
     static constexpr uint32_t maxContextSetProperties = 4;
 
-    const char *xeGetClassName(int className);
+    virtual const char *xeGetClassName(int className) const;
     const char *xeGetBindOperationName(int bindOperation);
+    const char *xeGetAdviseOperationName(int adviseOperation);
 
     const char *xeGetengineClassName(uint32_t engineClass);
     template <typename DataType>
@@ -154,9 +160,10 @@ class IoctlHelperXe : public IoctlHelper {
     int debuggerMetadataDestroyIoctl(DrmIoctl request, void *arg);
     int getEudebugExtProperty();
     uint64_t getEudebugExtPropertyValue();
-    virtual bool isExtraEngineClassAllowed(uint16_t engineClass) const { return false; }
+    virtual bool isMediaEngine(uint16_t engineClass) const { return false; }
     virtual std::optional<uint32_t> getCxlType() { return {}; }
     virtual uint32_t getNumEngines(uint64_t *enginesData) const;
+    virtual bool isMediaGt(uint16_t gtType) const;
 
     struct UserFenceExtension {
         static constexpr uint32_t tagValue = 0x123987;
@@ -186,8 +193,9 @@ class IoctlHelperXe : public IoctlHelper {
 
     std::vector<uint64_t> queryGtListData;
     constexpr static int invalidIndex = -1;
-    StackVec<int, 2> gtIdToTileId;
-    StackVec<int, 2> tileIdToGtId;
+    GtIdContainer gtIdToTileId;
+    GtIdContainer tileIdToGtId;
+    GtIdContainer mediaGtIdToTileId;
     XeDrm::drm_xe_query_gt_list *xeGtListData = nullptr;
 
     std::unique_ptr<XeDrm::drm_xe_engine_class_instance> defaultEngine;

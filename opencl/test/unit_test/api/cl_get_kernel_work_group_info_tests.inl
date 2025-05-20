@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,6 +14,7 @@ using namespace NEO;
 namespace ULT {
 
 TEST_P(ClGetKernelWorkGroupInfoTests, GivenValidParametersWhenGettingKernelWorkGroupInfoThenSuccessIsReturned) {
+    USE_REAL_FILE_SYSTEM();
 
     size_t paramValueSizeRet;
     auto retVal = clGetKernelWorkGroupInfo(
@@ -57,6 +58,7 @@ TEST_F(ClGetKernelWorkGroupInfoTest, GivenNullDeviceWhenGettingWorkGroupInfoFrom
 }
 
 TEST_F(ClGetKernelWorkGroupInfoTest, GivenNullDeviceWhenGettingWorkGroupInfoFromMultiDeviceKernelThenInvalidDeviceErrorIsReturned) {
+    USE_REAL_FILE_SYSTEM();
 
     size_t paramValueSizeRet;
     MockUnrestrictiveContext context;
@@ -97,8 +99,7 @@ TEST_F(ClGetKernelWorkGroupInfoTests, GivenKernelRequiringScratchSpaceForSpillWh
     EXPECT_EQ(paramValue, spillMemorySize);
 }
 
-using matcher = IsWithinProducts<IGFX_SKYLAKE, IGFX_DG1>;
-HWTEST2_F(ClGetKernelWorkGroupInfoTests, givenKernelHavingPrivateMemoryAllocationWhenAskedForPrivateAllocationSizeThenProperSizeIsReturned, matcher) {
+HWTEST2_F(ClGetKernelWorkGroupInfoTests, givenKernelHavingPrivateMemoryAllocationWhenAskedForPrivateAllocationSizeThenProperSizeIsReturned, IsGen12LP) {
     size_t paramValueSizeRet;
     cl_ulong paramValue;
     auto pDevice = castToObject<ClDevice>(testedClDevice);

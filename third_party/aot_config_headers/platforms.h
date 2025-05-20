@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -173,12 +173,15 @@ inline const std::map<std::string, PRODUCT_CONFIG> deviceAcronyms = {
 #ifdef SUPPORT_AOT_ARL
     {"arl-h", ARL_H_B0},
 #endif
+#ifdef SUPPORT_AOT_BMG
+    {"bmg-g21", BMG_G21_A0},
+#endif
 #ifdef SUPPORT_AOT_LNL
     {"lnl-m", LNL_B0},
 #endif
 #ifdef SUPPORT_AOT_PTL
     {"ptl-h", PTL_H_B0},
-    {"ptl-u", PTL_U_A1},
+    {"ptl-u", PTL_U_A0},
 #endif
 };
 
@@ -214,7 +217,6 @@ inline const std::map<std::string, PRODUCT_CONFIG> rtlIdAcronyms = {
 #endif
 #ifdef SUPPORT_AOT_BMG
     {"bmg-g21-a0", BMG_G21_A0},
-    {"bmg-g21", BMG_G21_A0},
     {"bmg-g21-a1", BMG_G21_A0},
     {"bmg-g21-b0", BMG_G21_A0},
 #endif
@@ -233,13 +235,16 @@ inline const std::map<std::string, PRODUCT_CONFIG> rtlIdAcronyms = {
 
 inline const std::map<std::string, PRODUCT_CONFIG> genericIdAcronyms = {
 #ifdef SUPPORT_AOT_DG2
-    {"dg2",  DG2_G10_C0},
+    {"dg2", DG2_G10_C0},
 #endif
 #ifdef SUPPORT_AOT_MTL
-    {"mtl",  MTL_U_B0},
+    {"mtl", MTL_U_B0},
 #endif
 #ifdef SUPPORT_AOT_BMG
-    {"bmg",  BMG_G21_A0},
+    {"bmg", BMG_G21_A0},
+#endif
+#ifdef SUPPORT_AOT_PTL
+    {"ptl", PTL_H_B0},
 #endif
 };
 
@@ -249,5 +254,6 @@ inline const std::map<PRODUCT_CONFIG, std::vector<PRODUCT_CONFIG>> compatibility
     {BMG_G21_A0, {LNL_B0}},
     {BMG_G21_A1_RESERVED, {BMG_G21_A0, LNL_B0}},
     {BMG_G21_B0_RESERVED, {BMG_G21_A0, LNL_B0}},
+    {PTL_H_B0, {PTL_U_A0}},
 };
 } // namespace AOT

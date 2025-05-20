@@ -30,10 +30,8 @@
 #include <unordered_map>
 #include <vector>
 
-struct _ze_command_list_handle_t {
-    const uint64_t objMagic = objMagicValue;
-    static const zel_handle_type_t handleType = ZEL_HANDLE_COMMAND_LIST;
-};
+struct _ze_command_list_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_COMMAND_LIST> {};
+static_assert(IsCompliantWithDdiHandlesExt<_ze_command_list_handle_t>);
 
 namespace NEO {
 class ScratchSpaceController;
@@ -52,6 +50,15 @@ struct CmdListReturnPoint {
     uint64_t gpuAddress = 0;
     NEO::GraphicsAllocation *currentCmdBuffer = nullptr;
 };
+
+struct MemAdviseOperation {
+    ze_device_handle_t hDevice;
+    const void *ptr;
+    const size_t size;
+    ze_memory_advice_t advice;
+};
+
+using AppendedMemAdviseOperations = std::vector<MemAdviseOperation>;
 
 struct CommandList : _ze_command_list_handle_t {
     static constexpr uint32_t defaultNumIddsPerBlock = 64u;
@@ -116,6 +123,9 @@ struct CommandList : _ze_command_list_handle_t {
                                                             uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch) = 0;
     virtual ze_result_t appendMemAdvise(ze_device_handle_t hDevice, const void *ptr, size_t size,
                                         ze_memory_advice_t advice) = 0;
+    virtual ze_result_t executeMemAdvise(ze_device_handle_t hDevice,
+                                         const void *ptr, size_t size,
+                                         ze_memory_advice_t advice) = 0;
     virtual ze_result_t appendMemoryCopy(void *dstptr, const void *srcptr, size_t size,
                                          ze_event_handle_t hSignalEvent, uint32_t numWaitEvents,
                                          ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) = 0;
@@ -281,7 +291,6 @@ struct CommandList : _ze_command_list_handle_t {
     bool storeExternalPtrAsTemporary() const {
         return isImmediateType() && (this->isFlushTaskSubmissionEnabled || isCopyOnly(false));
     }
-    bool isWaitForEventsFromHostEnabled();
 
     enum class CommandListType : uint32_t {
         typeRegular = 0u,
@@ -329,6 +338,10 @@ struct CommandList : _ze_command_list_handle_t {
 
     NEO::PrefetchContext &getPrefetchContext() {
         return prefetchContext;
+    }
+
+    AppendedMemAdviseOperations &getMemAdviseOperations() {
+        return memAdviseOperations;
     }
 
     NEO::HeapAddressModel getCmdListHeapAddressModel() const {
@@ -412,6 +425,10 @@ struct CommandList : _ze_command_list_handle_t {
         return localDispatchSupport;
     }
 
+    bool isClosed() const {
+        return closedCmdList;
+    }
+
   protected:
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize, bool copyOffload);
     NEO::GraphicsAllocation *getHostPtrAlloc(const void *buffer, uint64_t bufferSize, bool hostCopyAllowed, bool copyOffload);
@@ -435,6 +452,7 @@ struct CommandList : _ze_command_list_handle_t {
     CommandsToPatch commandsToPatch{};
     UnifiedMemoryControls unifiedMemoryControls;
     NEO::PrefetchContext prefetchContext;
+    AppendedMemAdviseOperations memAdviseOperations;
     NEO::L1CachePolicy l1CachePolicyData{};
     NEO::EncodeDummyBlitWaArgs dummyBlitWa{};
 
@@ -506,6 +524,7 @@ struct CommandList : _ze_command_list_handle_t {
     bool localDispatchSupport = false;
     bool copyOperationOffloadEnabled = false;
     bool l3FlushAfterPostSyncRequired = false;
+    bool closedCmdList = false;
 };
 
 using CommandListAllocatorFn = CommandList *(*)(uint32_t);

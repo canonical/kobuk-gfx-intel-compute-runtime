@@ -332,7 +332,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         if (inOrderExecSignalRequired) {
             if (!compactEvent || this->asMutable() || !compactEvent->isCounterBased() || compactEvent->isUsingContextEndOffset()) {
                 if (inOrderNonWalkerSignalling) {
-                    if (!eventForInOrderExec->getAllocation(this->device) && Event::standaloneInOrderTimestampAllocationEnabled()) {
+                    if (!eventForInOrderExec->getAllocation(this->device)) {
                         eventForInOrderExec->resetInOrderTimestampNode(device->getInOrderTimestampAllocator()->getTag(), this->partitionCount);
                     }
                     if (this->asMutable() || !eventForInOrderExec->isCounterBased()) {
@@ -352,9 +352,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
                             inOrderIncrementGpuAddress = eventForInOrderExec->getInOrderExecInfo()->getBaseDeviceAddress();
                             inOrderIncrementValue = eventForInOrderExec->getInOrderIncrementValue();
                         }
-                        if (!isTimestampEvent) {
-                            eventAddress = 0;
-                        }
                     }
                 }
             }
@@ -366,13 +363,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     NEO::EncodeKernelArgsExt dispatchKernelArgsExt = {};
 
     NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
-        .eventAddress = eventAddress,
-        .postSyncImmValue = static_cast<uint64_t>(Event::STATE_SIGNALED),
-        .inOrderCounterValue = inOrderCounterValue,
-        .inOrderIncrementGpuAddress = inOrderIncrementGpuAddress,
-        .inOrderIncrementValue = inOrderIncrementValue,
         .device = neoDevice,
-        .inOrderExecInfo = inOrderExecInfo,
         .dispatchInterface = kernel,
         .surfaceStateHeap = ssh,
         .dynamicStateHeap = dsh,
@@ -383,6 +374,22 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         .outImplicitArgsPtr = nullptr,
         .additionalCommands = &additionalCommands,
         .extendedArgs = &dispatchKernelArgsExt,
+        .postSyncArgs = {
+            .eventAddress = eventAddress,
+            .postSyncImmValue = static_cast<uint64_t>(Event::STATE_SIGNALED),
+            .inOrderCounterValue = inOrderCounterValue,
+            .inOrderIncrementGpuAddress = inOrderIncrementGpuAddress,
+            .inOrderIncrementValue = inOrderIncrementValue,
+            .device = neoDevice,
+            .inOrderExecInfo = inOrderExecInfo,
+            .isTimestampEvent = isTimestampEvent,
+            .isHostScopeSignalEvent = isHostSignalScopeEvent,
+            .isKernelUsingSystemAllocation = isKernelUsingSystemAllocation,
+            .dcFlushEnable = this->dcFlushSupport,
+            .interruptEvent = interruptEvent,
+            .isFlushL3ForExternalAllocationRequired = isFlushL3AfterPostSync && isKernelUsingExternalAllocation,
+            .isFlushL3ForHostUsmRequired = isFlushL3AfterPostSync && isKernelUsingSystemAllocation,
+        },
         .preemptionMode = kernelPreemptionMode,
         .requiredPartitionDim = launchParams.requiredPartitionDim,
         .requiredDispatchWalkOrder = launchParams.requiredDispatchWalkOrder,
@@ -393,22 +400,15 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         .defaultPipelinedThreadArbitrationPolicy = this->defaultPipelinedThreadArbitrationPolicy,
         .isIndirect = launchParams.isIndirect,
         .isPredicate = launchParams.isPredicate,
-        .isTimestampEvent = isTimestampEvent,
         .requiresUncachedMocs = uncachedMocsKernel,
         .isInternal = internalUsage,
         .isCooperative = launchParams.isCooperative,
-        .isHostScopeSignalEvent = isHostSignalScopeEvent,
-        .isKernelUsingSystemAllocation = isKernelUsingSystemAllocation,
         .isKernelDispatchedFromImmediateCmdList = isImmediateType(),
         .isRcs = engineGroupType == NEO::EngineGroupType::renderCompute,
-        .dcFlushEnable = this->dcFlushSupport,
         .isHeaplessModeEnabled = this->heaplessModeEnabled,
         .isHeaplessStateInitEnabled = this->heaplessStateInitEnabled,
-        .interruptEvent = interruptEvent,
         .immediateScratchAddressPatching = !this->scratchAddressPatchingEnabled,
         .makeCommandView = launchParams.makeKernelCommandView,
-        .isFlushL3AfterPostSyncForExternalAllocationRequired = isFlushL3AfterPostSync && isKernelUsingExternalAllocation,
-        .isFlushL3AfterPostSyncForHostUsmRequired = isFlushL3AfterPostSync && isKernelUsingSystemAllocation,
     };
     setAdditionalDispatchKernelArgsFromLaunchParams(dispatchKernelArgs, launchParams);
 

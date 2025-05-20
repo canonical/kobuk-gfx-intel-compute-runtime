@@ -23,11 +23,13 @@
 #include "shared/source/os_interface/linux/drm_buffer_object.h"
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/engine_info.h"
+#include "shared/source/os_interface/linux/file_descriptor.h"
 #include "shared/source/os_interface/linux/memory_info.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
 #include "shared/source/os_interface/linux/xe/xedrm.h"
 #include "shared/source/os_interface/os_time.h"
+#include "shared/source/utilities/directory.h"
 
 #include <algorithm>
 #include <iostream>
@@ -44,10 +46,9 @@
 #ifndef DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR
 #define DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR (1 << 2)
 #endif
-
 namespace NEO {
 
-const char *IoctlHelperXe::xeGetClassName(int className) {
+const char *IoctlHelperXe::xeGetClassName(int className) const {
     switch (className) {
     case DRM_XE_ENGINE_CLASS_RENDER:
         return "rcs";
@@ -76,6 +77,10 @@ const char *IoctlHelperXe::xeGetBindOperationName(int bindOperation) {
     case DRM_XE_VM_BIND_OP_PREFETCH:
         return "PREFETCH";
     }
+    return "Unknown operation";
+}
+
+const char *IoctlHelperXe::xeGetAdviseOperationName(int adviseOperation) {
     return "Unknown operation";
 }
 
@@ -231,20 +236,30 @@ bool IoctlHelperXe::initialize() {
     }
     xeGtListData = reinterpret_cast<drm_xe_query_gt_list *>(queryGtListData.data());
 
+    auto assignValue = [](auto &container, uint16_t id, uint16_t value) {
+        if (container.size() < id + 1u) {
+            container.resize(id + 1, invalidIndex);
+        }
+        container[id] = value;
+    };
+
     gtIdToTileId.resize(xeGtListData->num_gt, invalidIndex);
     for (auto i = 0u; i < xeGtListData->num_gt; i++) {
         const auto &gt = xeGtListData->gt_list[i];
         if (gt.type == DRM_XE_QUERY_GT_TYPE_MAIN) {
             gtIdToTileId[gt.gt_id] = gt.tile_id;
-            if (tileIdToGtId.size() < gt.tile_id + 1u) {
-                tileIdToGtId.resize(gt.tile_id + 1, invalidIndex);
-            }
 
-            tileIdToGtId[gt.tile_id] = gt.gt_id;
+            assignValue(tileIdToGtId, gt.tile_id, gt.gt_id);
+        } else if (isMediaGt(gt.type)) {
+            assignValue(mediaGtIdToTileId, gt.gt_id, gt.tile_id);
         }
     }
     querySupportedFeatures();
     return true;
+}
+
+bool IoctlHelperXe::isMediaGt(uint16_t gtType) const {
+    return (gtType == DRM_XE_QUERY_GT_TYPE_MEDIA);
 }
 
 IoctlHelperXe::~IoctlHelperXe() {
@@ -307,23 +322,38 @@ std::unique_ptr<EngineInfo> IoctlHelperXe::createEngineInfo(bool isSysmanEnabled
     auto hwInfo = drm.getRootDeviceEnvironment().getMutableHardwareInfo();
     auto defaultEngineClass = getDefaultEngineClass(hwInfo->capabilityTable.defaultEngineType);
 
+    auto containsGtId = [](const auto &container, uint16_t gtId) {
+        return ((container.size() > gtId) && (container[gtId] != invalidIndex));
+    };
+
     for (auto i = 0u; i < numberHwEngines; i++) {
         const auto &engine = queryEngines->engines[i].instance;
-        auto tile = engine.gt_id;
+
+        uint16_t tile = 0;
+        const bool mediaEngine = isMediaEngine(engine.engine_class);
+        const bool videoEngine = (engine.engine_class == getDrmParamValue(DrmParam::engineClassVideo) || engine.engine_class == getDrmParamValue(DrmParam::engineClassVideoEnhance));
+
+        if (containsGtId(gtIdToTileId, engine.gt_id) && !mediaEngine) {
+            tile = static_cast<uint16_t>(gtIdToTileId[engine.gt_id]);
+        } else if (containsGtId(mediaGtIdToTileId, engine.gt_id) && (mediaEngine || videoEngine)) {
+            tile = static_cast<uint16_t>(mediaGtIdToTileId[engine.gt_id]);
+        } else {
+            continue;
+        }
+
         multiTileMask.set(tile);
         EngineClassInstance engineClassInstance{};
         engineClassInstance.engineClass = engine.engine_class;
         engineClassInstance.engineInstance = engine.engine_instance;
-        xeLog("\t%s:%d:%d\n", xeGetClassName(engineClassInstance.engineClass), engineClassInstance.engineInstance, engine.gt_id);
+        xeLog("\tclass: %s, instance: %d, gt_id: %d, tile: %d\n", xeGetClassName(engineClassInstance.engineClass), engineClassInstance.engineInstance, engine.gt_id, tile);
 
         const bool isBaseEngineClass = engineClassInstance.engineClass == getDrmParamValue(DrmParam::engineClassCompute) ||
                                        engineClassInstance.engineClass == getDrmParamValue(DrmParam::engineClassRender) ||
                                        engineClassInstance.engineClass == getDrmParamValue(DrmParam::engineClassCopy);
 
-        const bool isSysmanEngineClass = isSysmanEnabled && (engineClassInstance.engineClass == getDrmParamValue(DrmParam::engineClassVideo) ||
-                                                             engineClassInstance.engineClass == getDrmParamValue(DrmParam::engineClassVideoEnhance));
+        const bool isSysmanEngineClass = isSysmanEnabled && videoEngine;
 
-        if (isBaseEngineClass || isSysmanEngineClass || isExtraEngineClassAllowed(engineClassInstance.engineClass)) {
+        if (isBaseEngineClass || isSysmanEngineClass || mediaEngine) {
             if (enginesPerTile.size() <= tile) {
                 enginesPerTile.resize(tile + 1);
             }
@@ -346,13 +376,15 @@ std::unique_ptr<EngineInfo> IoctlHelperXe::createEngineInfo(bool isSysmanEnabled
 }
 
 inline MemoryRegion createMemoryRegionFromXeMemRegion(const drm_xe_mem_region &xeMemRegion, std::bitset<4> tilesMask) {
-    MemoryRegion memoryRegion{};
-    memoryRegion.region.memoryInstance = xeMemRegion.instance;
-    memoryRegion.region.memoryClass = xeMemRegion.mem_class;
-    memoryRegion.probedSize = xeMemRegion.total_size;
-    memoryRegion.unallocatedSize = xeMemRegion.total_size - xeMemRegion.used;
-    memoryRegion.tilesMask = tilesMask;
-    return memoryRegion;
+    return {
+        .region{
+            .memoryClass = xeMemRegion.mem_class,
+            .memoryInstance = xeMemRegion.instance},
+        .probedSize = xeMemRegion.total_size,
+        .unallocatedSize = xeMemRegion.total_size - xeMemRegion.used,
+        .cpuVisibleSize = xeMemRegion.cpu_visible_size,
+        .tilesMask = tilesMask,
+    };
 }
 
 std::unique_ptr<MemoryInfo> IoctlHelperXe::createMemoryInfo() {
@@ -790,7 +822,7 @@ int IoctlHelperXe::waitUserFence(uint32_t ctxId, uint64_t address,
     return 0;
 }
 
-uint32_t IoctlHelperXe::getAtomicAdvise(bool isNonAtomic) {
+uint32_t IoctlHelperXe::getAtomicAdvise(bool /* isNonAtomic */) {
     xeLog(" -> IoctlHelperXe::%s\n", __FUNCTION__);
     return 0;
 }
@@ -811,6 +843,12 @@ std::optional<MemoryClassInstance> IoctlHelperXe::getPreferredLocationRegion(Pre
 
 bool IoctlHelperXe::setVmBoAdvise(int32_t handle, uint32_t attribute, void *region) {
     xeLog(" -> IoctlHelperXe::%s\n", __FUNCTION__);
+    // There is no vmAdvise attribute in Xe, so return success
+    return true;
+}
+
+bool IoctlHelperXe::setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) {
+    xeLog(" -> IoctlHelperXe::%s h=0x%llx s=0x%llx vmid=0x%x\n", __FUNCTION__, handle, size, vmId);
     // There is no vmAdvise attribute in Xe, so return success
     return true;
 }
@@ -1071,8 +1109,15 @@ bool IoctlHelperXe::isDebugAttachAvailable() {
 
 int IoctlHelperXe::getDrmParamValue(DrmParam drmParam) const {
     xeLog(" -> IoctlHelperXe::%s 0x%x %s\n", __FUNCTION__, drmParam, getDrmParamString(drmParam).c_str());
-
     switch (drmParam) {
+    case DrmParam::atomicClassUndefined:
+        return -1;
+    case DrmParam::atomicClassDevice:
+        return -1;
+    case DrmParam::atomicClassGlobal:
+        return -1;
+    case DrmParam::atomicClassSystem:
+        return -1;
     case DrmParam::memoryClassDevice:
         return DRM_XE_MEM_REGION_CLASS_VRAM;
     case DrmParam::memoryClassSystem:
@@ -1457,6 +1502,14 @@ int IoctlHelperXe::xeVmBind(const VmBindParams &vmBindParams, bool isBind) {
 
 std::string IoctlHelperXe::getDrmParamString(DrmParam drmParam) const {
     switch (drmParam) {
+    case DrmParam::atomicClassUndefined:
+        return "AtomicClassUndefined";
+    case DrmParam::atomicClassDevice:
+        return "AtomicClassDevice";
+    case DrmParam::atomicClassGlobal:
+        return "AtomicClassGlobal";
+    case DrmParam::atomicClassSystem:
+        return "AtomicClassSystem";
     case DrmParam::contextCreateExtSetparam:
         return "ContextCreateExtSetparam";
     case DrmParam::contextCreateFlagsUseExtensions:
@@ -1554,6 +1607,27 @@ std::string IoctlHelperXe::getFileForMaxGpuFrequencyOfSubDevice(int tileId) cons
 
 std::string IoctlHelperXe::getFileForMaxMemoryFrequencyOfSubDevice(int tileId) const {
     return getDirectoryWithFrequencyFiles(tileId, tileIdToGtId[tileId]) + "/rp0_freq";
+}
+
+void IoctlHelperXe::configureCcsMode(std::vector<std::string> &files, const std::string expectedFilePrefix, uint32_t ccsMode,
+                                     std::vector<std::tuple<std::string, uint32_t>> &deviceCcsModeVec) {
+
+    // On Xe, path is /sys/class/drm/card0/device/tile*/gt*/ccs_mode
+    for (const auto &file : files) {
+        if (file.find(expectedFilePrefix.c_str()) == std::string::npos) {
+            continue;
+        }
+
+        std::string tilePath = file + "/device/tile";
+        auto tileFiles = Directory::getFiles(tilePath.c_str());
+        for (const auto &tileFile : tileFiles) {
+            std::string gtPath = tileFile + "/gt";
+            auto gtFiles = Directory::getFiles(gtPath.c_str());
+            for (const auto &gtFile : gtFiles) {
+                writeCcsMode(gtFile, ccsMode, deviceCcsModeVec);
+            }
+        }
+    }
 }
 
 bool IoctlHelperXe::getFabricLatency(uint32_t fabricId, uint32_t &latency, uint32_t &bandwidth) {

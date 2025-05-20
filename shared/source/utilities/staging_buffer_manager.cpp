@@ -13,6 +13,7 @@
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/utilities/heap_allocator.h"
@@ -122,56 +123,119 @@ StagingTransferStatus StagingBufferManager::performCopy(void *dstPtr, const void
     return result;
 }
 
-/*
- * This method orchestrates transfer operation for images with given origin and region.
- * Transfer is splitted into chunks, each chunk represents sub-region to transfer.
- * Each chunk contains staging buffer which should be used instead of non-usm memory during transfers on GPU.
- * Several rows are packed into single chunk unless size of single row exceeds maximum chunk size (2MB).
- * Caller provides actual function to enqueue read/write operation for single chunk.
- */
-StagingTransferStatus StagingBufferManager::performImageTransfer(const void *ptr, const size_t *globalOrigin, const size_t *globalRegion, size_t rowPitch, size_t bytesPerPixel, ChunkTransferImageFunc &chunkTransferImageFunc, CommandStreamReceiver *csr, bool isRead) {
-    StagingQueue stagingQueue;
-    size_t origin[3] = {};
-    size_t region[3] = {};
-    origin[0] = globalOrigin[0];
-    origin[2] = globalOrigin[2];
-    region[0] = globalRegion[0];
-    region[2] = globalRegion[2];
+size_t calculateSizeForRegion(size_t region[3], const ImageMetadata &imageMetadata) {
+    if (region[2] > 1) {
+        return (region[2] - 1) * imageMetadata.slicePitch + (region[1] - 1) * imageMetadata.rowPitch + region[0] * imageMetadata.bytesPerPixel;
+    } else if (region[1] > 1) {
+        return (region[1] - 1) * imageMetadata.rowPitch + region[0] * imageMetadata.bytesPerPixel;
+    }
+    return region[0] * imageMetadata.bytesPerPixel;
+}
+
+StagingTransferStatus StagingBufferManager::performImageSlicesTransfer(StagingQueue &stagingQueue, size_t &submittedChunks, const void *ptr, auto sliceOffset,
+                                                                       size_t baseRowOffset, size_t rowsToCopy, size_t origin[4], size_t region[3], ImageMetadata &imageMetadata,
+                                                                       ChunkTransferImageFunc &chunkTransferImageFunc, CommandStreamReceiver *csr, bool isRead) {
+    auto rowPitch = imageMetadata.rowPitch;
     auto rowsPerChunk = std::max<size_t>(1ul, chunkSize / rowPitch);
-    rowsPerChunk = std::min<size_t>(rowsPerChunk, globalRegion[1]);
-    auto numOfChunks = globalRegion[1] / rowsPerChunk;
-    auto remainder = globalRegion[1] % (rowsPerChunk * numOfChunks);
+    rowsPerChunk = std::min<size_t>(rowsPerChunk, rowsToCopy);
+    auto slicePitch = imageMetadata.slicePitch;
+    auto numOfChunksInYDim = rowsToCopy / rowsPerChunk;
+    auto remainder = rowsToCopy % (rowsPerChunk * numOfChunksInYDim);
     StagingTransferStatus result{};
-    RowPitchData rowPitchData{region[0] * bytesPerPixel, rowPitch, rowsPerChunk};
+    imageMetadata.slicesInChunk = region[2];
 
-    for (auto i = 0u; i < numOfChunks; i++) {
-        origin[1] = globalOrigin[1] + i * rowsPerChunk;
+    // Split (X, Y, Z') region into several (X, Y', Z') chunks.
+    for (auto rowId = 0u; rowId < numOfChunksInYDim; rowId++) {
+        origin[1] = baseRowOffset + rowId * rowsPerChunk;
         region[1] = rowsPerChunk;
-        auto size = region[1] * rowPitch;
-        auto chunkPtr = ptrOffset(ptr, i * rowsPerChunk * rowPitch);
-        UserData userData{chunkPtr, size, rowPitchData};
 
-        result = performChunkTransfer(i, isRead, userData, stagingQueue, csr, chunkTransferImageFunc, origin, region);
+        auto size = calculateSizeForRegion(region, imageMetadata);
+        auto chunkPtr = ptrOffset(ptr, sliceOffset * slicePitch + rowId * rowsPerChunk * rowPitch);
+
+        imageMetadata.rowsInChunk = rowsPerChunk;
+        UserData userData{chunkPtr, size, imageMetadata, true};
+
+        result = performChunkTransfer(submittedChunks++, isRead, userData, stagingQueue, csr, chunkTransferImageFunc, origin, region);
         if (result.chunkCopyStatus != 0 || result.waitStatus == WaitStatus::gpuHang) {
             return result;
         }
     }
 
     if (remainder != 0) {
-        origin[1] = globalOrigin[1] + numOfChunks * rowsPerChunk;
+        origin[1] = baseRowOffset + numOfChunksInYDim * rowsPerChunk;
         region[1] = remainder;
-        auto size = region[1] * rowPitch;
-        auto chunkPtr = ptrOffset(ptr, numOfChunks * rowsPerChunk * rowPitch);
-        rowPitchData.rowsInChunk = remainder;
-        UserData userData{chunkPtr, size, rowPitchData};
 
-        result = performChunkTransfer(numOfChunks, isRead, userData, stagingQueue, csr, chunkTransferImageFunc, origin, region);
+        auto size = calculateSizeForRegion(region, imageMetadata);
+        auto chunkPtr = ptrOffset(ptr, sliceOffset * slicePitch + numOfChunksInYDim * rowsPerChunk * rowPitch);
+
+        imageMetadata.rowsInChunk = remainder;
+        UserData userData{chunkPtr, size, imageMetadata, true};
+
+        result = performChunkTransfer(submittedChunks++, isRead, userData, stagingQueue, csr, chunkTransferImageFunc, origin, region);
+        if (result.chunkCopyStatus != 0 || result.waitStatus == WaitStatus::gpuHang) {
+            return result;
+        }
+    }
+    return result;
+}
+
+/*
+ * This method orchestrates transfer operation for images with given origin and region.
+ * Transfer is splitted into chunks, each chunk represents sub-region to transfer.
+ * Each chunk contains staging buffer which should be used instead of non-usm memory during transfers on GPU.
+ * Several slices and rows can be packed into single chunk if size of such chunk does not exceeds maximum chunk size (2MB).
+ * Caller provides actual function to enqueue read/write operation for single chunk.
+ */
+StagingTransferStatus StagingBufferManager::performImageTransfer(const void *ptr, const size_t *globalOrigin, const size_t *globalRegion, size_t rowPitch, size_t slicePitch, size_t bytesPerPixel, bool isMipMapped3DImage, ChunkTransferImageFunc &chunkTransferImageFunc, CommandStreamReceiver *csr, bool isRead) {
+    StagingQueue stagingQueue;
+    size_t origin[4] = {};
+    size_t region[3] = {};
+    origin[0] = globalOrigin[0];
+    region[0] = globalRegion[0];
+    if (isMipMapped3DImage) {
+        origin[3] = globalOrigin[3];
+    }
+
+    StagingTransferStatus result{};
+    size_t submittedChunks = 0;
+
+    // Calculate number of rows that can be packed into single chunk.
+    auto rowsPerChunk = std::max<size_t>(1ul, chunkSize / rowPitch);
+    rowsPerChunk = std::min<size_t>(rowsPerChunk, globalRegion[1]);
+    auto numOfChunksInYDim = globalRegion[1] / rowsPerChunk;
+
+    // If single chunk is enough to transfer whole slice, we can try to pack several slices into single chunk.
+    size_t slicesPerStep = 1;
+    if (numOfChunksInYDim == 1) {
+        slicesPerStep = std::max<size_t>(1ul, chunkSize / slicePitch);
+        slicesPerStep = std::min<size_t>(slicesPerStep, globalRegion[2]);
+    }
+    auto remainderSlices = globalRegion[2] % slicesPerStep;
+
+    ImageMetadata imageMetadata{bytesPerPixel, globalRegion[0] * bytesPerPixel, rowPitch, slicePitch};
+
+    // Split (X, Y, Z) region into several (X, Y, Z') chunks.
+    for (auto sliceId = 0u; sliceId < globalRegion[2] / slicesPerStep; sliceId++) {
+        auto sliceOffset = sliceId * slicesPerStep;
+        origin[2] = globalOrigin[2] + sliceOffset;
+        region[2] = slicesPerStep;
+        result = performImageSlicesTransfer(stagingQueue, submittedChunks, ptr, sliceOffset, globalOrigin[1], globalRegion[1], origin, region, imageMetadata, chunkTransferImageFunc, csr, isRead);
         if (result.chunkCopyStatus != 0 || result.waitStatus == WaitStatus::gpuHang) {
             return result;
         }
     }
 
-    result.waitStatus = drainAndReleaseStagingQueue(isRead, stagingQueue, numOfChunks + (remainder != 0 ? 1 : 0));
+    if (remainderSlices != 0) {
+        auto sliceOffset = globalRegion[2] - remainderSlices;
+        origin[2] = globalOrigin[2] + sliceOffset;
+        region[2] = remainderSlices;
+        result = performImageSlicesTransfer(stagingQueue, submittedChunks, ptr, sliceOffset, globalOrigin[1], globalRegion[1], origin, region, imageMetadata, chunkTransferImageFunc, csr, isRead);
+        if (result.chunkCopyStatus != 0 || result.waitStatus == WaitStatus::gpuHang) {
+            return result;
+        }
+    }
+
+    result.waitStatus = drainAndReleaseStagingQueue(isRead, stagingQueue, submittedChunks);
     return result;
 }
 
@@ -204,6 +268,23 @@ StagingTransferStatus StagingBufferManager::performBufferTransfer(const void *pt
     return result;
 }
 
+void StagingBufferManager::copyImageToHost(void *dst, const void *stagingBuffer, size_t size, const ImageMetadata &imageData) const {
+    auto sliceSize = imageData.rowSize * imageData.rowsInChunk;
+
+    if (imageData.rowSize < imageData.rowPitch || (sliceSize < imageData.slicePitch && imageData.slicesInChunk > 1)) {
+        for (auto sliceId = 0u; sliceId < imageData.slicesInChunk; sliceId++) {
+            auto sliceOffset = sliceId * imageData.slicePitch;
+            for (auto rowId = 0u; rowId < imageData.rowsInChunk; rowId++) {
+                auto rowOffset = rowId * imageData.rowPitch;
+                auto offset = sliceOffset + rowOffset;
+                memcpy(ptrOffset(dst, offset), ptrOffset(stagingBuffer, offset), imageData.rowSize);
+            }
+        }
+    } else {
+        memcpy(dst, stagingBuffer, size);
+    }
+}
+
 /*
  * This method is used for read transfers. It waits for transfer to finish
  * and copies data associated with that transfer to host allocation.
@@ -219,14 +300,12 @@ WaitStatus StagingBufferManager::copyStagingToHost(const std::pair<UserData, Sta
     tracker = transfer.second;
     auto stagingBuffer = addrToPtr(tracker.chunkAddress);
     auto userDst = const_cast<void *>(userData.ptr);
-    if (userData.rowPitchData.rowSize < userData.rowPitchData.rowPitch) {
-        for (auto rowId = 0u; rowId < userData.rowPitchData.rowsInChunk; rowId++) {
-            auto offset = rowId * userData.rowPitchData.rowPitch;
-            memcpy(ptrOffset(userDst, offset), ptrOffset(stagingBuffer, offset), userData.rowPitchData.rowSize);
-        }
-    } else {
-        memcpy(userDst, stagingBuffer, userData.size);
+    if (userData.isImageOperation) {
+        copyImageToHost(userDst, stagingBuffer, userData.size, userData.imageMetadata);
+        return WaitStatus::ready;
     }
+
+    memcpy(userDst, stagingBuffer, userData.size);
     return WaitStatus::ready;
 }
 

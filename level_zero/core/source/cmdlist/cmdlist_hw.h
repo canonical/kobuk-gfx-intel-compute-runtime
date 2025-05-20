@@ -135,6 +135,9 @@ struct CommandListCoreFamily : public CommandListImp {
     ze_result_t appendMemAdvise(ze_device_handle_t hDevice,
                                 const void *ptr, size_t size,
                                 ze_memory_advice_t advice) override;
+    ze_result_t executeMemAdvise(ze_device_handle_t hDevice,
+                                 const void *ptr, size_t size,
+                                 ze_memory_advice_t advice) override;
     ze_result_t appendMemoryCopy(void *dstptr, const void *srcptr, size_t size,
                                  ze_event_handle_t hSignalEvent, uint32_t numWaitEvents,
                                  ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) override;
@@ -300,6 +303,7 @@ struct CommandListCoreFamily : public CommandListImp {
 
     ze_result_t prepareIndirectParams(const ze_group_count_t *threadGroupDimensions);
     void updateStreamPropertiesForRegularCommandLists(Kernel &kernel, bool isCooperative, const ze_group_count_t &threadGroupDimensions, bool isIndirect);
+    void appendVfeStateCmdToPatch();
     void updateStreamPropertiesForFlushTaskDispatchFlags(Kernel &kernel, bool isCooperative, const ze_group_count_t &threadGroupDimensions, bool isIndirect);
     void updateStreamProperties(Kernel &kernel, bool isCooperative, const ze_group_count_t &threadGroupDimensions, bool isIndirect);
     void clearCommandsToPatch();
@@ -311,7 +315,6 @@ struct CommandListCoreFamily : public CommandListImp {
     void applyMemoryRangesBarrier(uint32_t numRanges, const size_t *pRangeSizes,
                                   const void **pRanges);
 
-    ze_result_t setGlobalWorkSizeIndirect(NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress, uint32_t lws[3]);
     ze_result_t programSyncBuffer(Kernel &kernel, NEO::Device &device, const ze_group_count_t &threadGroupDimensions, size_t &patchIndex);
     void programRegionGroupBarrier(Kernel &kernel, const ze_group_count_t &threadGroupDimensions, size_t localRegionSize, size_t &patchIndex);
     void appendWriteKernelTimestamp(Event *event, CommandToPatchContainer *outTimeStampSyncCmds, bool beforeWalker, bool maskLsb, bool workloadPartition, bool copyOperation);

@@ -70,7 +70,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore, givenAppendKernelWhenKernelNo
 
     kernel.setGroupSize(1, 1, 1);
     ze_group_count_t groupCount{8, 1, 1};
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -132,7 +132,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore,
 
     kernel.setGroupSize(1, 1, 1);
     ze_group_count_t groupCount{8, 1, 1};
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -180,7 +180,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore,
     auto srcAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, srcAllocation);
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -248,7 +248,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore,
 
     kernel.setGroupSize(1, 1, 1);
     ze_group_count_t groupCount{8, 1, 1};
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -312,7 +312,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore,
 
     kernel.setGroupSize(1, 1, 1);
     ze_group_count_t groupCount{8, 1, 1};
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -337,68 +337,6 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore,
     ASSERT_EQ(result, ZE_RESULT_SUCCESS);
 }
 
-HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCore,
-          givenAppendKernelWhenKernelUsingUsmHostMemoryAllocationsAndEventHostSignalScopeThenExpectsSystemFenceUsed, IsXe2HpgCore) {
-    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-
-    ze_result_t result = ZE_RESULT_SUCCESS;
-
-    constexpr size_t size = 4096u;
-    constexpr size_t alignment = 4096u;
-    void *ptr = nullptr;
-
-    ze_host_mem_alloc_desc_t hostDesc = {};
-    result = context->allocHostMem(&hostDesc, size, alignment, &ptr);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    EXPECT_NE(nullptr, ptr);
-
-    Mock<::L0::KernelImp> kernel;
-    auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
-    kernel.module = mockModule.get();
-
-    auto allocData = driverHandle->getSvmAllocsManager()->getSVMAlloc(ptr);
-    ASSERT_NE(nullptr, allocData);
-    auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
-    ASSERT_NE(nullptr, kernelAllocation);
-    kernel.argumentsResidencyContainer.push_back(kernelAllocation);
-
-    ze_event_pool_desc_t eventPoolDesc = {};
-    eventPoolDesc.count = 1;
-    auto eventPool = std::unique_ptr<L0::EventPool>(L0::EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, result));
-    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    ze_event_desc_t eventDesc = {};
-    eventDesc.index = 0;
-    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
-    eventDesc.wait = 0;
-    auto event = std::unique_ptr<L0::Event>(L0::Event::create<typename FamilyType::TimestampPacketType>(eventPool.get(), &eventDesc, device));
-
-    kernel.setGroupSize(1, 1, 1);
-    ze_group_count_t groupCount{8, 1, 1};
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
-    result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
-    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
-    CmdListKernelLaunchParams launchParams = {};
-    result = commandList->appendLaunchKernelWithParams(&kernel, groupCount, event.get(), launchParams);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-
-    GenCmdList commands;
-    ASSERT_TRUE(CmdParse<FamilyType>::parseCommandBuffer(
-        commands,
-        commandList->getCmdContainer().getCommandStream()->getCpuBase(),
-        commandList->getCmdContainer().getCommandStream()->getUsed()));
-
-    auto itor = find<DefaultWalkerType *>(commands.begin(), commands.end());
-    ASSERT_NE(itor, commands.end());
-
-    auto walkerCmd = genCmdCast<DefaultWalkerType *>(*itor);
-    auto &postSyncData = walkerCmd->getPostSync();
-    EXPECT_TRUE(postSyncData.getSystemMemoryFenceRequest());
-
-    result = context->freeMem(ptr);
-    ASSERT_EQ(result, ZE_RESULT_SUCCESS);
-}
-
 using CommandListAppendLaunchKernelXe2HpgCoreDebugger = Test<L0DebuggerHwFixture>;
 
 HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCoreDebugger, givenDebuggingEnabledWhenKernelAppendedThenIDDDoesNotHaveMidThreadPreemptionEnabled, IsXe2HpgCore) {
@@ -408,7 +346,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXe2HpgCoreDebugger, givenDebuggingEnabled
     auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
 
     ze_group_count_t groupCount{128, 1, 1};
-    auto immediateCmdList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto immediateCmdList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     immediateCmdList->cmdListType = ::L0::CommandList::CommandListType::typeImmediate;
     immediateCmdList->isFlushTaskSubmissionEnabled = false;
     immediateCmdList->cmdQImmediate = queue.get();
@@ -463,7 +401,7 @@ using CommandListStatePrefetchXe2HpgCore = Test<ModuleFixture>;
 HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenUnifiedSharedMemoryWhenPrefetchApiIsCalledThenRequestMemoryPrefetchByDefault, IsXe2HpgCore) {
     auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
     memoryManager->prefetchManager.reset(new MockPrefetchManager());
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -491,7 +429,7 @@ HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenUnifiedSharedMemoryWhenPrefet
 HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenUnifiedSharedMemoryWhenPrefetchApiIsCalledThenRequestMemoryPrefetchByDefaultWithNoPrefetchManager, IsXe2HpgCore) {
     auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
     memoryManager->prefetchManager.reset(new MockPrefetchManager());
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -517,7 +455,7 @@ HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenUnifiedSharedMemoryWhenPrefet
 }
 
 HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenUnifiedSharedMemoryWhenPrefetchApiCalledAndDebugFlagFalseThenRequestMemoryPrefetchNotCalled, IsXe2HpgCore) {
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -545,7 +483,7 @@ HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenUnifiedSharedMemoryWhenPrefet
 HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenSharedSystemAllocationOnSupportedDeviceWhenPrefetchApiIsCalledThenRequestMemoryPrefetchCalled, IsXe2HpgCore) {
     auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
     memoryManager->prefetchManager.reset(new MockPrefetchManager());
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -568,7 +506,7 @@ HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenSharedSystemAllocationOnSuppo
 }
 
 HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenSharedSystemAllocationOnSupportedDeviceWhenPrefetchApiIsCalledThenRequestMemoryPrefetchCalledWithNoPrefetchManager, IsXe2HpgCore) {
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -593,7 +531,7 @@ HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenSharedSystemAllocationOnSuppo
 HWTEST2_F(CommandListStatePrefetchXe2HpgCore, givenSharedSystemAllocationOnUnSupportedDeviceWhenPrefetchApiIsCalledThenRequestMemoryPrefetchNotCalled, IsXe2HpgCore) {
     auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
     memoryManager->prefetchManager.reset(new MockPrefetchManager());
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 

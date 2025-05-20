@@ -127,7 +127,7 @@ HWTEST2_F(ImageCreate, givenDifferentSwizzleFormatWhenImageInitializeThenCorrect
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -175,7 +175,7 @@ HWTEST2_F(ImageCreate, givenBindlessImageWhenImageInitializeThenImageImplicitArg
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -254,7 +254,7 @@ HWTEST2_F(ImageCreate, givenBindlessModeDisabledWhenImageInitializeThenImageImpl
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -283,7 +283,7 @@ HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageViewThenProperPlaneIsCreated
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -521,7 +521,7 @@ HWTEST2_F(ImageView, givenPlanarImageWhenCreateImageWithInvalidStructViewThenPro
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -569,7 +569,7 @@ HWTEST2_F(ImageCreate, givenFDWhenCreatingImageThenSuccessIsReturned, MatchAny) 
     importFd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
     desc.pNext = &importFd;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     ASSERT_EQ(static_cast<int>(imageHW->getAllocation()->peekSharedHandle()), importFd.fd);
@@ -597,7 +597,7 @@ HWTEST2_F(ImageCreate, givenOpaqueFdWhenCreatingImageThenSuccessIsReturned, Matc
     importFd.stype = ZE_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMPORT_FD;
     desc.pNext = &importFd;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 }
@@ -624,7 +624,7 @@ HWTEST2_F(ImageCreate, givenExportStructWhenCreatingImageThenUnsupportedErrorIsR
     exportFd.flags = ZE_EXTERNAL_MEMORY_TYPE_FLAG_OPAQUE_WIN32;
     desc.pNext = &exportFd;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION, ret);
 }
@@ -687,7 +687,7 @@ HWTEST2_F(ImageCreateExternalMemoryTest, givenNTHandleWhenCreatingImageThenSucce
     driverHandle->setMemoryManager(execEnv->memoryManager.get());
     driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     ASSERT_EQ(imageHW->getAllocation()->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
@@ -706,7 +706,7 @@ HWTEST2_F(ImageCreateExternalMemoryTest, givenD3D12HeapHandleWhenCreatingImageTh
     driverHandle->setMemoryManager(execEnv->memoryManager.get());
     driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     ASSERT_EQ(imageHW->getAllocation()->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
@@ -725,7 +725,7 @@ HWTEST2_F(ImageCreateExternalMemoryTest, givenD3D12ResourceHandleWhenCreatingIma
     driverHandle->setMemoryManager(execEnv->memoryManager.get());
     driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     ASSERT_EQ(imageHW->getAllocation()->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
@@ -744,7 +744,7 @@ HWTEST2_F(ImageCreateExternalMemoryTest, givenD3D11TextureHandleWhenCreatingImag
     driverHandle->setMemoryManager(execEnv->memoryManager.get());
     driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     ASSERT_EQ(imageHW->getAllocation()->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
@@ -783,7 +783,7 @@ HWTEST2_F(ImageCreateWithMemoryManagerNTHandleMock, givenNTHandleWhenCreatingNV1
     driverHandle->setMemoryManager(execEnv->memoryManager.get());
     driverHandle->svmAllocsManager = new NEO::SVMAllocsManager(execEnv->memoryManager.get(), false);
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     ASSERT_EQ(imageHW->getAllocation()->peekSharedHandle(), NEO::toOsHandle(importNTHandle.handle));
@@ -859,7 +859,7 @@ HWTEST2_F(ImageCreate, givenMediaBlockOptionWhenCopySurfaceStateThenSurfaceState
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -893,7 +893,7 @@ HWTEST2_P(TestImageFormats, givenValidLayoutAndTypeWhenCreateImageCoreFamilyThen
     zeDesc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
     zeDesc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_A;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
 
     imageHW->initialize(device, &zeDesc);
 
@@ -1358,9 +1358,7 @@ HWTEST2_F(ImageCreate, givenImageSizeZeroThenDummyImageIsCreated, IsAtMostXeHpgC
     image->destroy();
 }
 
-using IsAtMostProductDG2 = IsWithinProducts<IGFX_SKYLAKE, IGFX_DG2>;
-
-HWTEST2_F(ImageCreate, WhenGettingImagePropertiesThenFilterFlagsAreValid, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenGettingImagePropertiesThenFilterFlagsAreValid, IsAtMostDg2) {
     ze_image_properties_t properties;
 
     ze_image_desc_t desc = {};
@@ -1384,7 +1382,7 @@ HWTEST2_F(ImageCreate, WhenGettingImagePropertiesThenFilterFlagsAreValid, IsAtMo
     EXPECT_TRUE(samplerFilterFlagsValid);
 }
 
-HWTEST2_F(ImageCreate, WhenDestroyingImageThenSuccessIsReturned, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenDestroyingImageThenSuccessIsReturned, IsAtMostDg2) {
     ze_image_desc_t desc = {};
     desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     L0::Image *imagePtr;
@@ -1399,7 +1397,7 @@ HWTEST2_F(ImageCreate, WhenDestroyingImageThenSuccessIsReturned, IsAtMostProduct
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
-HWTEST2_F(ImageCreate, WhenCreatingImageThenNonNullPointerIsReturned, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenCreatingImageThenNonNullPointerIsReturned, IsAtMostDg2) {
     ze_image_desc_t desc = {};
     desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     L0::Image *imagePtr;
@@ -1413,7 +1411,7 @@ HWTEST2_F(ImageCreate, WhenCreatingImageThenNonNullPointerIsReturned, IsAtMostPr
     image->destroy();
 }
 
-HWTEST2_F(ImageCreate, givenInvalidProductFamilyThenNullIsReturned, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, givenInvalidProductFamilyThenNullIsReturned, IsAtMostDg2) {
     ze_image_desc_t desc = {};
     desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
     L0::Image *imagePtr;
@@ -1425,7 +1423,7 @@ HWTEST2_F(ImageCreate, givenInvalidProductFamilyThenNullIsReturned, IsAtMostProd
     ASSERT_EQ(nullptr, image);
 }
 
-HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesAllocation, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesAllocation, IsAtMostDg2) {
     ze_image_desc_t desc = {};
 
     desc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
@@ -1450,7 +1448,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesAllocation, IsAtMostProd
     image->destroy();
 }
 
-HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurface, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurface, IsAtMostDg2) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -1467,7 +1465,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurface, IsAtMostProduct
     desc.height = 13;
     desc.depth = 17;
 
-    auto imageCore = new WhiteBox<ImageCoreFamily<gfxCoreFamily>>();
+    auto imageCore = new WhiteBox<ImageCoreFamily<FamilyType::gfxCoreFamily>>();
     ze_result_t ret = imageCore->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1490,7 +1488,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurface, IsAtMostProduct
     delete imageCore;
 }
 
-HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescSwizzlesMatchSurface, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescSwizzlesMatchSurface, IsAtMostDg2) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
     ze_image_desc_t desc = {};
@@ -1508,7 +1506,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescSwizzlesMatchSurface, IsAtMostP
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageCore = new WhiteBox<ImageCoreFamily<gfxCoreFamily>>();
+    auto imageCore = new WhiteBox<ImageCoreFamily<FamilyType::gfxCoreFamily>>();
     ze_result_t ret = imageCore->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1526,7 +1524,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescSwizzlesMatchSurface, IsAtMostP
     delete imageCore;
 }
 
-HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurfaceFormats, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurfaceFormats, IsAtMostDg2) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     using SURFACE_FORMAT = typename RENDER_SURFACE_STATE::SURFACE_FORMAT;
 
@@ -1585,7 +1583,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurfaceFormats, IsAtMost
             desc->format.layout = testFormats[i].formatLayout;
             desc->format.type = testFormats[i].formatType;
 
-            auto imageCore = new WhiteBox<ImageCoreFamily<gfxCoreFamily>>();
+            auto imageCore = new WhiteBox<ImageCoreFamily<FamilyType::gfxCoreFamily>>();
             ze_result_t ret = imageCore->initialize(device, desc);
             ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1600,7 +1598,7 @@ HWTEST2_F(ImageCreate, WhenImageIsCreatedThenDescMatchesSurfaceFormats, IsAtMost
     }
 }
 
-HWTEST2_F(ImageCreate, WhenCopyingToSshThenSurfacePropertiesAreRetained, IsAtMostProductDG2) {
+HWTEST2_F(ImageCreate, WhenCopyingToSshThenSurfacePropertiesAreRetained, IsAtMostDg2) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     uint8_t mockSSH[sizeof(RENDER_SURFACE_STATE) * 4] = {0};
 
@@ -1615,7 +1613,7 @@ HWTEST2_F(ImageCreate, WhenCopyingToSshThenSurfacePropertiesAreRetained, IsAtMos
     desc.height = 13;
     desc.depth = 1;
 
-    auto imageA = new ImageCoreFamily<gfxCoreFamily>();
+    auto imageA = new ImageCoreFamily<FamilyType::gfxCoreFamily>();
     ze_result_t ret = imageA->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1625,7 +1623,7 @@ HWTEST2_F(ImageCreate, WhenCopyingToSshThenSurfacePropertiesAreRetained, IsAtMos
     desc.width = 10;
     desc.height = 10;
 
-    auto imageB = new ImageCoreFamily<gfxCoreFamily>();
+    auto imageB = new ImageCoreFamily<FamilyType::gfxCoreFamily>();
     ret = imageB->initialize(device, &desc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1668,7 +1666,7 @@ HWTEST2_F(ImageCreate, WhenImageViewCreateExpThenSuccessIsReturned, MatchAny) {
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1722,7 +1720,7 @@ HWTEST2_F(ImageCreate, WhenImageViewCreateExtThenSuccessIsReturned, MatchAny) {
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1785,7 +1783,7 @@ HWTEST2_F(ImageCreate, GivenNonBindlessImageWhenGettingDeviceOffsetThenErrorIsRe
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
     EXPECT_EQ(nullptr, imageHW->getBindlessSlot());
@@ -1820,7 +1818,7 @@ HWTEST2_F(ImageCreate, GivenNoBindlessHelperAndBindlessImageFlagWhenCreatingImag
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
 }
@@ -1852,7 +1850,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenGettingDeviceOffsetThenBindlessSlot
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -1899,7 +1897,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenBindlessSlotAllocationFailsThenImag
     bindlessHelper->failAllocateSS = true;
     bindlessHelper->globalSsh->getSpace(bindlessHelper->globalSsh->getAvailableSpace());
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY, ret);
 }
@@ -1934,7 +1932,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenImageCreatedWithInvalidPitchedPtrTh
                                   depth,
                                   0,
                                   0};
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, ret);
 }
@@ -1979,7 +1977,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenImageCreatedWithDeviceUMSPitchedPtr
                                   depth,
                                   0,
                                   0};
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2036,7 +2034,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenImageViewCreatedWithDeviceUMSPitche
 
     ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC, &bindlessExtDesc, ZE_IMAGE_FLAG_KERNEL_WRITE, ZE_IMAGE_TYPE_2D, {ZE_IMAGE_FORMAT_LAYOUT_8, ZE_IMAGE_FORMAT_TYPE_UINT, ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G, ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_A}, width, height, depth, 0, 0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2085,7 +2083,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenImageViewCreatedWithTheSameFormatTh
 
     ze_image_desc_t srcImgDesc = {ZE_STRUCTURE_TYPE_IMAGE_DESC, &bindlessExtDesc, ZE_IMAGE_FLAG_KERNEL_WRITE, ZE_IMAGE_TYPE_2D, {ZE_IMAGE_FORMAT_LAYOUT_8, ZE_IMAGE_FORMAT_TYPE_UINT, ZE_IMAGE_FORMAT_SWIZZLE_R, ZE_IMAGE_FORMAT_SWIZZLE_G, ZE_IMAGE_FORMAT_SWIZZLE_B, ZE_IMAGE_FORMAT_SWIZZLE_A}, width, height, depth, 0, 0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2096,7 +2094,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenImageViewCreatedWithTheSameFormatTh
     ret = imageHW->createView(device, &srcImgDesc, &imageView);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 
-    auto imageViewObject = static_cast<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>> *>(Image::fromHandle(imageView));
+    auto imageViewObject = static_cast<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>> *>(Image::fromHandle(imageView));
 
     EXPECT_TRUE(imageViewObject->bindlessImage);
     EXPECT_TRUE(imageViewObject->imageFromBuffer);
@@ -2142,7 +2140,7 @@ HWTEST2_F(ImageCreate, GivenBindlessImageWhenInitializedThenSurfaceStateCopiedTo
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2193,7 +2191,7 @@ HWTEST2_F(ImageCreate, GivenBindlessSampledImageWhenCreatedThenSampledImageFlagA
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2240,7 +2238,7 @@ HWTEST2_F(ImageCreate, GivenBindlessSampledImageWhenImageViewCreatedWithCorrectF
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2262,7 +2260,7 @@ HWTEST2_F(ImageCreate, GivenBindlessSampledImageWhenImageViewCreatedWithCorrectF
     ret = imageHW->createView(device, &srcImgDesc, &imageView);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 
-    auto imageViewObject = static_cast<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>> *>(Image::fromHandle(imageView));
+    auto imageViewObject = static_cast<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>> *>(Image::fromHandle(imageView));
 
     EXPECT_TRUE(imageViewObject->bindlessImage);
     EXPECT_TRUE(imageViewObject->sampledImage);
@@ -2316,7 +2314,7 @@ HWTEST2_F(ImageCreate, GivenNoBindlessFlagWhenSampledImageCreatedThenErrorIsRetu
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, ret);
 }
@@ -2348,7 +2346,7 @@ HWTEST2_F(ImageCreate, GivenNoSamplerDescWhenSampledImageCreatedThenErrorIsRetur
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, ret);
 }
@@ -2387,7 +2385,7 @@ HWTEST2_F(ImageCreate, GivenBindlessSampledImageWhenInitializedThenSamplerStateC
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2448,7 +2446,7 @@ HWTEST2_F(ImageCreate, GivenBindlessSampledImageViewFromUnsampledImageWhenInitia
                                   0,
                                   0};
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &srcImgDesc);
     ASSERT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2461,7 +2459,7 @@ HWTEST2_F(ImageCreate, GivenBindlessSampledImageViewFromUnsampledImageWhenInitia
     ret = imageHW->createView(device, &srcImgDesc, &imageView);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 
-    auto imageViewObject = static_cast<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>> *>(Image::fromHandle(imageView));
+    auto imageViewObject = static_cast<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>> *>(Image::fromHandle(imageView));
 
     EXPECT_TRUE(imageViewObject->bindlessImage);
     EXPECT_TRUE(imageViewObject->sampledImage);
@@ -2519,7 +2517,7 @@ HWTEST2_F(ImageCreate, given2DImageFormatWithPixelSizeOf3BytesWhenRowPitchIsQuer
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 
@@ -2545,7 +2543,7 @@ HWTEST2_F(ImageCreate, given2DImageFormatWithPixelSizeOf6BytesWhenRowPitchIsQuer
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_B;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
 
-    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHW = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto ret = imageHW->initialize(device, &desc);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 

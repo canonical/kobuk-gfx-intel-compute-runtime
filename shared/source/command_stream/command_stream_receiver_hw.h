@@ -7,11 +7,14 @@
 
 #pragma once
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/command_stream/csr_definitions.h"
 #include "shared/source/command_stream/wait_status.h"
 #include "shared/source/direct_submission/direct_submission_hw.h"
 #include "shared/source/direct_submission/dispatchers/blitter_dispatcher.h"
 #include "shared/source/direct_submission/dispatchers/render_dispatcher.h"
 #include "shared/source/helpers/dirty_state_helpers.h"
+#include "shared/source/helpers/pipeline_select_args.h"
+
 namespace NEO {
 class TagNodeBase;
 template <typename GfxFamily>
@@ -224,6 +227,8 @@ class CommandStreamReceiverHw : public CommandStreamReceiver {
 
     void programEnginePrologue(LinearStream &csr);
     size_t getCmdSizeForPrologue() const;
+    void programExceptions(LinearStream &csr, Device &device);
+    size_t getCmdSizeForExceptions() const;
     size_t getCmdSizeForHeaplessPrologue(Device &device) const;
     void handleAllocationsResidencyForHeaplessProlog(LinearStream &linearStream, Device &device);
 

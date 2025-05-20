@@ -12,7 +12,7 @@ namespace NEO {
 template <PRODUCT_FAMILY productFamily>
 class MockCompilerProductHelperHeaplessHw : public CompilerProductHelperHw<productFamily> {
   public:
-    bool isHeaplessModeEnabled() const override {
+    bool isHeaplessModeEnabled(const HardwareInfo &hwInfo) const override {
         return heaplessModeEnabled;
     }
 
@@ -24,7 +24,6 @@ class MockCompilerProductHelper : public CompilerProductHelper {
   public:
     using BaseClass = CompilerProductHelper;
     using BaseClass::getDefaultHwIpVersion;
-
     ADDMETHOD_CONST_NOBASE(isMidThreadPreemptionSupported, bool, false, (const HardwareInfo &hwInfo));
 
     ADDMETHOD_CONST_NOBASE(isForceEmuInt32DivRemSPRequired, bool, false, ());
@@ -54,17 +53,19 @@ class MockCompilerProductHelper : public CompilerProductHelper {
     using getDeviceOpenCLCVersionsRetType = StackVec<OclCVersion, 5>;
     ADDMETHOD_CONST_NOBASE(getDeviceOpenCLCVersions, getDeviceOpenCLCVersionsRetType, {}, (const HardwareInfo &hwInfo, OclCVersion max));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(adjustHwInfoForIgc, (HardwareInfo & hwInfo));
-    ADDMETHOD_CONST_NOBASE(isHeaplessModeEnabled, bool, false, ());
+    ADDMETHOD_CONST_NOBASE(isHeaplessModeEnabled, bool, false, (const HardwareInfo &hwInfo));
     ADDMETHOD_CONST_NOBASE(isHeaplessStateInitEnabled, bool, false, (bool heaplessModeEnabled));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(getKernelFp16AtomicCapabilities, (const ReleaseHelper *releaseHelper, uint32_t &fp16Caps));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(getKernelFp32AtomicCapabilities, (uint32_t & fp32Caps));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(getKernelFp64AtomicCapabilities, (uint32_t & fp64Caps));
     ADDMETHOD_CONST_NOBASE_VOIDRETURN(getKernelCapabilitiesExtra, (const ReleaseHelper *releaseHelper, uint32_t &extraCaps));
     ADDMETHOD_CONST_NOBASE(isBindlessAddressingDisabled, bool, false, (const ReleaseHelper *releaseHelper));
-    ADDMETHOD_CONST_NOBASE(isForceBindlessRequired, bool, false, ());
+    ADDMETHOD_CONST_NOBASE(isForceBindlessRequired, bool, false, (const HardwareInfo &hwInfo));
     ADDMETHOD_CONST_NOBASE(getProductConfigFromHwInfo, uint32_t, 0, (const HardwareInfo &hwInfo));
     ADDMETHOD_CONST_NOBASE(getCustomIgcLibraryName, const char *, nullptr, ());
     ADDMETHOD_CONST_NOBASE(getFinalizerLibraryName, const char *, nullptr, ());
+    ADDMETHOD_CONST_NOBASE(useIgcAsFcl, bool, false, ());
+    ADDMETHOD_CONST_NOBASE(getPreferredIntermediateRepresentation, IGC::CodeType::CodeType_t, IGC::CodeType::undefined, ());
 };
 
 } // namespace NEO

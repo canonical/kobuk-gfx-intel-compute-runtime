@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -37,7 +37,7 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsT
     csr.setupContext(*neoDevice->getDefaultEngine().osContext);
     csr.createGlobalFenceAllocation();
 
-    auto commandQueue = new MockCommandQueueHw<gfxCoreFamily>(device, &csr, &desc);
+    auto commandQueue = new MockCommandQueueHw<FamilyType::gfxCoreFamily>(device, &csr, &desc);
     commandQueue->initialize(false, false, false);
 
     ze_result_t returnValue;
@@ -45,7 +45,7 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsT
     auto commandListHandle = commandList->toHandle();
     commandList->close();
 
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
 
     auto globalFence = csr.getGlobalFenceAllocation();
 
@@ -65,7 +65,7 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsT
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
 
-    auto commandQueue = new MockCommandQueueHw<gfxCoreFamily>(device, csr, &desc);
+    auto commandQueue = new MockCommandQueueHw<FamilyType::gfxCoreFamily>(device, csr, &desc);
     commandQueue->initialize(false, false, false);
 
     ze_result_t returnValue;
@@ -73,7 +73,7 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsT
     auto commandListHandle = commandList->toHandle();
     commandList->close();
 
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
 
     auto globalFence = csr->getGlobalFenceAllocation();
 
@@ -96,7 +96,7 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsF
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
 
-    auto commandQueue = new MockCommandQueueHw<gfxCoreFamily>(device, csr, &desc);
+    auto commandQueue = new MockCommandQueueHw<FamilyType::gfxCoreFamily>(device, csr, &desc);
     commandQueue->initialize(false, false, false);
 
     ze_result_t returnValue;
@@ -104,9 +104,9 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenCommandQueueWhenExecutingCommandListsF
     auto commandListHandle = commandList->toHandle();
     commandList->close();
 
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
     auto usedSpaceAfter1stExecute = commandQueue->commandStream.getUsed();
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
     auto usedSpaceOn2ndExecute = commandQueue->commandStream.getUsed() - usedSpaceAfter1stExecute;
 
     GenCmdList cmdList;
@@ -1602,6 +1602,8 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenSplitBcsCopyAndImmediateCommandListWhe
     EXPECT_EQ(static_cast<DeviceImp *>(testL0Device.get())->bcsSplit.events.createdFromLatestPool, 12u);
 
     NEO::debugManager.flags.OverrideEventSynchronizeTimeout.set(0);
+    NEO::debugManager.flags.EnableTimestampPoolAllocator.set(0);
+
     auto memoryManager = reinterpret_cast<MockMemoryManager *>(static_cast<DeviceImp *>(testL0Device.get())->bcsSplit.device.getDriverHandle()->getMemoryManager());
     memoryManager->isMockHostMemoryManager = true;
     memoryManager->forceFailureInPrimaryAllocation = true;
@@ -1651,6 +1653,8 @@ HWTEST2_F(CommandQueueCommandsXeHpc, givenSplitBcsCopyAndImmediateCommandListWhe
     EXPECT_EQ(static_cast<DeviceImp *>(testL0Device.get())->bcsSplit.events.createdFromLatestPool, 0u);
 
     NEO::debugManager.flags.OverrideEventSynchronizeTimeout.set(0);
+    NEO::debugManager.flags.EnableTimestampPoolAllocator.set(0);
+
     auto memoryManager = reinterpret_cast<MockMemoryManager *>(static_cast<DeviceImp *>(testL0Device.get())->bcsSplit.device.getDriverHandle()->getMemoryManager());
     memoryManager->isMockHostMemoryManager = true;
     memoryManager->forceFailureInPrimaryAllocation = true;

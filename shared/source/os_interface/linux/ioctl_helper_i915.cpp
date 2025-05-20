@@ -16,14 +16,17 @@
 #include "shared/source/os_interface/linux/drm_neo.h"
 #include "shared/source/os_interface/linux/drm_wrappers.h"
 #include "shared/source/os_interface/linux/engine_info.h"
+#include "shared/source/os_interface/linux/file_descriptor.h"
 #include "shared/source/os_interface/linux/i915.h"
 #include "shared/source/os_interface/linux/ioctl_helper.h"
 #include "shared/source/os_interface/linux/memory_info.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
 #include "shared/source/os_interface/linux/sys_calls.h"
 #include "shared/source/os_interface/os_time.h"
+#include "shared/source/utilities/directory.h"
 
 #include <fcntl.h>
+#include <span>
 #include <sstream>
 
 namespace NEO {
@@ -181,11 +184,13 @@ std::vector<EngineCapabilities> IoctlHelperI915::translateToEngineCaps(const std
 }
 
 std::vector<MemoryRegion> IoctlHelperI915::translateToMemoryRegions(const std::vector<uint64_t> &regionInfo) {
+
     auto *data = reinterpret_cast<const drm_i915_query_memory_regions *>(regionInfo.data());
     auto memRegions = std::vector<MemoryRegion>(data->num_regions);
     for (uint32_t i = 0; i < data->num_regions; i++) {
         memRegions[i].probedSize = data->regions[i].probed_size;
         memRegions[i].unallocatedSize = data->regions[i].unallocated_size;
+        memRegions[i].cpuVisibleSize = data->regions[i].probed_cpu_visible_size;
         memRegions[i].region.memoryClass = data->regions[i].region.memory_class;
         memRegions[i].region.memoryInstance = data->regions[i].region.memory_instance;
     }
@@ -450,6 +455,27 @@ std::string IoctlHelperI915::getFileForMaxGpuFrequencyOfSubDevice(int tileId) co
 
 std::string IoctlHelperI915::getFileForMaxMemoryFrequencyOfSubDevice(int tileId) const {
     return "/gt/gt" + std::to_string(tileId) + "/mem_RP0_freq_mhz";
+}
+
+void IoctlHelperI915::configureCcsMode(std::vector<std::string> &files, const std::string expectedFilePrefix, uint32_t ccsMode,
+                                       std::vector<std::tuple<std::string, uint32_t>> &deviceCcsModeVec) {
+
+    // On i915 path to ccs_mode is /sys/class/drm/card0/gt/gt*/
+    for (const auto &file : files) {
+        if (file.find(expectedFilePrefix.c_str()) == std::string::npos) {
+            continue;
+        }
+
+        std::string gtPath = file + "/gt";
+        auto gtFiles = Directory::getFiles(gtPath.c_str());
+        auto expectedGtFilePrefix = gtPath + "/gt";
+        for (const auto &gtFile : gtFiles) {
+            if (gtFile.find(expectedGtFilePrefix.c_str()) == std::string::npos) {
+                continue;
+            }
+            writeCcsMode(gtFile, ccsMode, deviceCcsModeVec);
+        }
+    }
 }
 
 bool IoctlHelperI915::getTopologyDataAndMap(const HardwareInfo &hwInfo, DrmQueryTopologyData &topologyData, TopologyMap &topologyMap) {

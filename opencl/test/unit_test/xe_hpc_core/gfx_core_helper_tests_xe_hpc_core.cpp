@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -593,33 +593,45 @@ XE_HPC_CORETEST_F(GfxCoreHelperTestsXeHpcCore, whenPipecontrolWaIsProgrammedThen
 XE_HPC_CORETEST_F(GfxCoreHelperTestsXeHpcCore, givenGfxCoreHelperWhenAskedIfFenceAllocationRequiredThenReturnCorrectValue) {
     DebugManagerStateRestore dbgRestore;
 
-    auto hwInfo = *defaultHwInfo;
-    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    const auto hwInfo = *defaultHwInfo;
+    const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    const auto &productHelper = getHelper<ProductHelper>();
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(-1);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(-1);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(-1);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(-1);
+    EXPECT_EQ(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper), !hwInfo.capabilityTable.isIntegratedDevice);
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_FALSE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_FALSE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(1);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(1);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(1);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
+
+    debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
+    debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
+    debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(1);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 }
 
 XE_HPC_CORETEST_F(GfxCoreHelperTestsXeHpcCore, givenDontProgramGlobalFenceAsMiMemFenceCommandInCommandStreamWhenGettingSizeForAdditionalSynchronizationThenCorrectValueIsReturned) {

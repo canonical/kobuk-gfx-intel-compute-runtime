@@ -171,7 +171,7 @@ TEST(CommandQueue, givenEnableTimestampWaitWhenCheckIsTimestampWaitEnabledThenRe
         debugManager.flags.EnableTimestampWaitForQueues.set(-1);
         const auto &productHelper = mockDevice->getProductHelper();
         const auto &compilerProductHelper = mockDevice->getCompilerProductHelper();
-        bool heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+        bool heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
 
         auto enabled = productHelper.isTimestampWaitSupportedForQueues(heaplessEnabled);
 
@@ -449,19 +449,26 @@ HWTEST_F(CommandQueueCommandStreamTest, WhenCheckIsTextureCacheFlushNeededThenRe
     MockCommandQueue cmdQ(&context, mockDevice.get(), 0, false);
     auto &commandStreamReceiver = mockDevice->getUltCommandStreamReceiver<FamilyType>();
 
-    EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(CL_COMMAND_COPY_BUFFER_RECT));
-
-    for (auto i = CL_COMMAND_NDRANGE_KERNEL; i < CL_COMMAND_SVM_MIGRATE_MEM; i++) {
-        if (i == CL_COMMAND_COPY_IMAGE || i == CL_COMMAND_WRITE_IMAGE || i == CL_COMMAND_FILL_IMAGE) {
+    std::set<cl_command_type> typesToFlush = {CL_COMMAND_COPY_IMAGE, CL_COMMAND_WRITE_IMAGE, CL_COMMAND_FILL_IMAGE,
+                                              CL_COMMAND_READ_IMAGE, CL_COMMAND_COPY_IMAGE_TO_BUFFER};
+    for (auto operation = CL_COMMAND_NDRANGE_KERNEL; operation < CL_COMMAND_SVM_MIGRATE_MEM; operation++) {
+        if (typesToFlush.find(operation) != typesToFlush.end()) {
             commandStreamReceiver.directSubmissionAvailable = true;
-            EXPECT_TRUE(cmdQ.isTextureCacheFlushNeeded(i));
+
+            if (operation == CL_COMMAND_READ_IMAGE || operation == CL_COMMAND_COPY_IMAGE_TO_BUFFER) {
+                auto isCacheFlushPriorImageReadRequired = mockDevice->getGfxCoreHelper().isCacheFlushPriorImageReadRequired();
+                EXPECT_EQ(isCacheFlushPriorImageReadRequired, cmdQ.isTextureCacheFlushNeeded(operation));
+            } else {
+                EXPECT_TRUE(cmdQ.isTextureCacheFlushNeeded(operation));
+            }
+
             commandStreamReceiver.directSubmissionAvailable = false;
-            EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(i));
+            EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(operation));
         } else {
             commandStreamReceiver.directSubmissionAvailable = true;
-            EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(i));
+            EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(operation));
             commandStreamReceiver.directSubmissionAvailable = false;
-            EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(i));
+            EXPECT_FALSE(cmdQ.isTextureCacheFlushNeeded(operation));
         }
     }
 }
@@ -2626,7 +2633,7 @@ HWTEST_F(KernelExecutionTypesTests, givenConcurrentKernelWhileDoingNonBlockedEnq
     setUpImpl<CsrType>();
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), nullptr);
@@ -2648,7 +2655,7 @@ HWTEST_F(KernelExecutionTypesTests, givenKernelWithDifferentExecutionTypeWhileDo
     setUpImpl<CsrType>();
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), nullptr);
@@ -2678,7 +2685,7 @@ HWTEST_F(KernelExecutionTypesTests, givenConcurrentKernelWhileDoingBlockedEnqueu
     setUpImpl<CsrType>();
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context.get(), device.get(), nullptr);
@@ -2996,7 +3003,7 @@ HWTEST_F(CommandQueueOnSpecificEngineTests, givenNotInitializedCcsOsContextWhenC
     cl_command_queue_properties properties[5] = {};
 
     auto &compilerProductHelper = context.getDevice(0)->getCompilerProductHelper();
-    auto heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     auto heaplessStateInit = compilerProductHelper.isHeaplessStateInitEnabled(heaplessModeEnabled);
 
     OsContext &osContext = *context.getDevice(0)->getEngine(aub_stream::ENGINE_CCS, EngineUsage::regular).osContext;

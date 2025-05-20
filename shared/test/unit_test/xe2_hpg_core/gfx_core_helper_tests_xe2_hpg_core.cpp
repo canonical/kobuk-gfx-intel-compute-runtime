@@ -478,33 +478,45 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, whenPipecontrolWaIsProgrammedTh
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenGfxCoreHelperWhenAskedIfFenceAllocationRequiredThenReturnCorrectValue) {
     DebugManagerStateRestore dbgRestore;
 
-    auto hwInfo = *defaultHwInfo;
-    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    const auto hwInfo = *defaultHwInfo;
+    const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    const auto &productHelper = getHelper<ProductHelper>();
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(-1);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(-1);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(-1);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(-1);
+    EXPECT_EQ(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper), !hwInfo.capabilityTable.isIntegratedDevice);
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_FALSE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_FALSE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(1);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(1);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(1);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
+
+    debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
+    debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
+    debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(1);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 }
 
 XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenDefaultMemorySynchronizationCommandsWhenGettingSizeForAdditionalSynchronizationThenCorrectValueIsReturned) {
@@ -670,7 +682,7 @@ XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenCallUseGem
 
 XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenAskingForGlobalFenceSupportThenReturnTrue) {
     const auto &productHelper = getHelper<ProductHelper>();
-    EXPECT_TRUE(productHelper.isGlobalFenceInCommandStreamRequired(*defaultHwInfo));
+    EXPECT_EQ(productHelper.isGlobalFenceInCommandStreamRequired(*defaultHwInfo), !defaultHwInfo->capabilityTable.isIntegratedDevice);
 }
 
 XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenAskingForCooperativeEngineSupportThenReturnTrue) {
@@ -690,7 +702,7 @@ XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenCallIsNewC
 
 XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenProductHelperWhenCallDeferMOCSToPatThenTrueIsReturned) {
     const auto &productHelper = getHelper<ProductHelper>();
-    EXPECT_TRUE(productHelper.deferMOCSToPatIndex());
+    EXPECT_TRUE(productHelper.deferMOCSToPatIndex(false));
 }
 
 XE2_HPG_CORETEST_F(ProductHelperTestXe2HpgCore, givenPatIndexWhenCheckIsCoherentAllocationThenReturnProperValue) {
@@ -767,9 +779,11 @@ XE2_HPG_CORETEST_F(GfxCoreHelperTestsXe2HpgCore, givenAllocDataWhenSetExtraAlloc
 
         if (defaultHwInfo->featureTable.flags.ftrLocalMemory) {
             if (allocProperties.allocationType == AllocationType::commandBuffer ||
-                allocProperties.allocationType == AllocationType::ringBuffer ||
-                allocProperties.allocationType == AllocationType::semaphoreBuffer) {
+                allocProperties.allocationType == AllocationType::ringBuffer) {
                 EXPECT_FALSE(allocData.flags.useSystemMemory);
+                EXPECT_TRUE(allocData.flags.requiresCpuAccess);
+            } else if (allocProperties.allocationType == AllocationType::semaphoreBuffer) {
+                EXPECT_TRUE(allocData.flags.useSystemMemory);
                 EXPECT_TRUE(allocData.flags.requiresCpuAccess);
             } else {
                 EXPECT_FALSE(allocData.flags.useSystemMemory);

@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/built_ins/built_ins.h"
+#include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debugger/debugger_l0.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/gfx_core_helper.h"
@@ -358,7 +359,7 @@ TEST_F(RawBinarySipTest, givenRawBinaryFileWhenGettingDebugSipWithContextThenSip
 
     uint32_t sipIndex;
     auto &compilerProductHelper = pDevice->getRootDeviceEnvironment().getHelper<CompilerProductHelper>();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         sipIndex = static_cast<uint32_t>(SipKernelType::dbgHeapless);
     } else {
         sipIndex = static_cast<uint32_t>(SipKernelType::dbgBindless);
@@ -502,7 +503,7 @@ TEST(DebugBindlessSip, givenDebuggerAndUseBindlessDebugSipWhenGettingSipTypeThen
     auto sipType = NEO::SipKernel::getSipKernelType(*mockDevice);
 
     auto &compilerProductHelper = mockDevice->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (heaplessEnabled) {
         EXPECT_EQ(SipKernelType::dbgHeapless, sipType);
 
@@ -579,7 +580,7 @@ TEST(DebugSip, givenDebugSipIsRequestedThenCorrectSipKernelIsReturned) {
 
     EXPECT_NE(nullptr, &sipKernel);
     auto &compilerProductHelper = mockDevice->getRootDeviceEnvironment().getHelper<CompilerProductHelper>();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         EXPECT_EQ(SipKernelType::dbgHeapless, sipKernel.getType());
     } else {
         EXPECT_EQ(SipKernelType::dbgBindless, sipKernel.getType());

@@ -1050,7 +1050,7 @@ TEST_F(WddmMemoryManagerSimpleTest, whenCreateAllocationFromHandleAndMapCallFail
     EXPECT_EQ(1u, memoryManager->freeGraphicsMemoryImplCalled);
 }
 
-TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrIsCalledWhenNotAlignedPtrIsPassedThenAlignedGraphicsAllocationIsCreatedWithCorrectGmmResource) {
+TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrIsCalledWhenNotAlignedPtrIsPassedAndFlushL3RequiredThenSetCorrectGmmResource) {
     memoryManager.reset(new MockWddmMemoryManager(false, false, executionEnvironment));
     auto size = 13u;
     auto hostPtr = reinterpret_cast<const void *>(0x10001);
@@ -1058,6 +1058,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrI
     AllocationData allocationData;
     allocationData.size = size;
     allocationData.hostPtr = hostPtr;
+    allocationData.flags.flushL3 = true;
     auto allocation = memoryManager->allocateGraphicsMemoryForNonSvmHostPtr(allocationData);
     EXPECT_NE(nullptr, allocation);
     EXPECT_EQ(hostPtr, allocation->getUnderlyingBuffer());
@@ -1074,6 +1075,22 @@ TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrI
     memoryManager->freeGraphicsMemory(allocation);
 }
 
+TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrIsCalledWhenNotAlignedPtrIsPassedAndFlushL3NotRequiredThenSetCorrectGmmResource) {
+    memoryManager.reset(new MockWddmMemoryManager(false, false, executionEnvironment));
+    auto size = 13u;
+    auto hostPtr = reinterpret_cast<const void *>(0x10001);
+
+    AllocationData allocationData;
+    allocationData.size = size;
+    allocationData.hostPtr = hostPtr;
+    allocationData.flags.flushL3 = false;
+    auto allocation = memoryManager->allocateGraphicsMemoryForNonSvmHostPtr(allocationData);
+    EXPECT_NE(nullptr, allocation);
+
+    EXPECT_EQ(GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER, allocation->getGmm(0)->resourceParams.Usage);
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
 TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrIsCalledWhenNotAlignedPtrIsPassedAndImportedAllocationIsFalseThenAlignedGraphicsAllocationIsFreed) {
     memoryManager.reset(new MockWddmMemoryManager(false, false, executionEnvironment));
     auto size = 13u;
@@ -1082,6 +1099,7 @@ TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryForNonSvmHostPtrI
     AllocationData allocationData;
     allocationData.size = size;
     allocationData.hostPtr = hostPtr;
+    allocationData.flags.flushL3 = true;
     auto allocation = memoryManager->allocateGraphicsMemoryForNonSvmHostPtr(allocationData);
     EXPECT_NE(nullptr, allocation);
     EXPECT_EQ(hostPtr, allocation->getUnderlyingBuffer());
@@ -2911,6 +2929,29 @@ TEST_F(WddmMemoryManagerTest, givenWddmMemoryManagerSizeZeroWhenCreateFromShared
     auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandleData, properties, false, false, true, nullptr);
     ASSERT_NE(nullptr, gpuAllocation);
     EXPECT_EQ(size, gpuAllocation->getUnderlyingBufferSize());
+    memoryManager->freeGraphicsMemory(gpuAllocation);
+}
+
+TEST_F(WddmMemoryManagerTest, whenOpenSharedHandleThenRegisterAllocationSize) {
+    MockWddmMemoryManager::OsHandleData osHandleData{1u};
+    auto size = 4096u;
+    void *pSysMem = reinterpret_cast<void *>(0x1000);
+    GmmRequirements gmmRequirements{};
+    gmmRequirements.allowLargePages = true;
+    gmmRequirements.preferCompressed = false;
+    std::unique_ptr<Gmm> gmm(new Gmm(rootDeviceEnvironment->getGmmHelper(), pSysMem, size, 0, GMM_RESOURCE_USAGE_OCL_BUFFER, {}, gmmRequirements));
+    void *gmmPtrArray[]{gmm->gmmResourceInfo.get()};
+    setSizesFcn(gmmPtrArray, 1u, 1024u, 1u);
+
+    auto usedSystemMemorySize = memoryManager->getUsedSystemMemorySize();
+    AllocationProperties properties(0, false, size, AllocationType::sharedBuffer, false, false, 0);
+
+    auto *gpuAllocation = memoryManager->createGraphicsAllocationFromSharedHandle(osHandleData, properties, false, false, true, nullptr);
+
+    ASSERT_NE(nullptr, gpuAllocation);
+    EXPECT_EQ(size, gpuAllocation->getUnderlyingBufferSize());
+    EXPECT_EQ(usedSystemMemorySize + size, memoryManager->getUsedSystemMemorySize());
+
     memoryManager->freeGraphicsMemory(gpuAllocation);
 }
 

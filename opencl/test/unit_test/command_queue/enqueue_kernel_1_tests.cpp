@@ -91,6 +91,7 @@ TEST_F(EnqueueKernelTest, givenKernelWhenAllArgsAreSetThenClEnqueueNDRangeKernel
 }
 
 TEST(EnqueueMultiDeviceKernelTest, givenMultiDeviceKernelWhenSetArgDeviceUSMThenOnlyOneKernelIsPatched) {
+    USE_REAL_FILE_SYSTEM();
     REQUIRE_SVM_OR_SKIP(defaultHwInfo);
     auto deviceFactory = std::make_unique<UltClDeviceFactory>(3, 0);
     auto device0 = deviceFactory->rootDevices[0];
@@ -1804,7 +1805,7 @@ struct PauseOnGpuTests : public EnqueueKernelTest {
         debugPauseStateAddress = csr.getDebugPauseStateGPUAddress();
 
         auto &compilerProductHelper = pDevice->getCompilerProductHelper();
-        auto heapless = compilerProductHelper.isHeaplessModeEnabled();
+        auto heapless = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
         heaplessStateInit = compilerProductHelper.isHeaplessStateInitEnabled(heapless);
     }
 

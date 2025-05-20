@@ -67,7 +67,6 @@ void EncodeDispatchKernel<Family>::setGrfInfo(InterfaceDescriptorType *pInterfac
 template <typename Family>
 template <typename WalkerType>
 void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDispatchKernelArgs &args) {
-
     using MEDIA_STATE_FLUSH = typename Family::MEDIA_STATE_FLUSH;
     using STATE_BASE_ADDRESS = typename Family::STATE_BASE_ADDRESS;
 
@@ -214,7 +213,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
         if (args.isIndirect) {
             auto crossThreadDataGpuVA = heapIndirect->getGraphicsAllocation()->getGpuAddress() + heapIndirect->getUsed() - sizeThreadData;
-            EncodeIndirectParams<Family>::encode(container, crossThreadDataGpuVA, args.dispatchInterface, implicitArgsGpuVA);
+            EncodeIndirectParams<Family>::encode(container, crossThreadDataGpuVA, args.dispatchInterface, implicitArgsGpuVA, nullptr);
         }
 
         ptr = ptrOffset(ptr, sizeCrossThreadData);
@@ -223,7 +222,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     }
 
     uint32_t numIDD = 0u;
-    void *iddPtr = getInterfaceDescriptor(container, args.dynamicStateHeap, numIDD);
+    void *iddPtr = EncodeDispatchKernel::getInterfaceDescriptor(container, args.dynamicStateHeap, numIDD);
 
     auto slmSizeNew = args.dispatchInterface->getSlmTotalSize();
     bool dirtyHeaps = container.isAnyHeapDirty();
@@ -231,7 +230,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     if (flush) {
         PipeControlArgs syncArgs;
-        syncArgs.dcFlushEnable = args.dcFlushEnable;
+        syncArgs.dcFlushEnable = args.postSyncArgs.dcFlushEnable;
         if (dirtyHeaps) {
             syncArgs.hdcPipelineFlush = true;
         }
@@ -241,7 +240,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
             STATE_BASE_ADDRESS sba;
             auto gmmHelper = container.getDevice()->getGmmHelper();
             uint32_t statelessMocsIndex =
-                args.requiresUncachedMocs ? (gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1) : (gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1);
+                args.requiresUncachedMocs ? (gmmHelper->getUncachedMOCS() >> 1) : (gmmHelper->getL3EnabledMOCS() >> 1);
             auto l1CachePolicy = container.l1CachePolicyDataRef()->getL1CacheValue(false);
             auto l1CachePolicyDebuggerActive = container.l1CachePolicyDataRef()->getL1CacheValue(true);
             EncodeStateBaseAddressArgs<Family> encodeStateBaseAddressArgs = {
@@ -299,11 +298,12 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         .requiredDispatchWalkOrder = args.requiredDispatchWalkOrder,
         .localRegionSize = args.localRegionSize,
         .maxFrontEndThreads = args.device->getDeviceInfo().maxFrontEndThreads,
-        .requiredSystemFence = args.requiresSystemMemoryFence(),
+        .requiredSystemFence = args.postSyncArgs.requiresSystemMemoryFence(),
         .hasSample = false};
 
+    using INTERFACE_DESCRIPTOR_DATA = typename Family::INTERFACE_DESCRIPTOR_DATA;
     EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(rootDeviceEnvironment, cmd, walkerArgs);
-    EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(cmd, walkerArgs);
+    EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(cmd, rootDeviceEnvironment, walkerArgs);
     EncodeDispatchKernel<Family>::template encodeComputeDispatchAllWalker<WalkerType, INTERFACE_DESCRIPTOR_DATA>(cmd, nullptr, rootDeviceEnvironment, walkerArgs);
 
     memcpy_s(iddPtr, sizeof(idd), &idd, sizeof(idd));
@@ -351,6 +351,7 @@ void EncodeMediaInterfaceDescriptorLoad<Family>::encode(CommandContainer &contai
 
     MEDIA_INTERFACE_DESCRIPTOR_LOAD cmd = Family::cmdInitMediaInterfaceDescriptorLoad;
     cmd.setInterfaceDescriptorDataStartAddress(iddOffset);
+    using INTERFACE_DESCRIPTOR_DATA = typename Family::INTERFACE_DESCRIPTOR_DATA;
     cmd.setInterfaceDescriptorTotalLength(sizeof(INTERFACE_DESCRIPTOR_DATA) * container.getNumIddPerBlock());
 
     auto buffer = container.getCommandStream()->getSpace(sizeof(cmd));
@@ -433,7 +434,7 @@ inline void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const Roo
 
 template <typename Family>
 template <typename WalkerType>
-inline void EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
+inline void EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(WalkerType &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment, const EncodeWalkerArgs &walkerArgs) {}
 
 template <typename Family>
 template <typename WalkerType, typename InterfaceDescriptorType>
@@ -589,20 +590,21 @@ inline void EncodeStoreMemory<Family>::programStoreDataImm(MI_STORE_DATA_IMM *cm
 }
 
 template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::setupPostSyncMocs(WalkerType &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment, bool dcFlush) {}
+uint32_t EncodePostSync<Family>::getPostSyncMocs(const RootDeviceEnvironment &rootDeviceEnvironment, bool dcFlush) {
+    return 0;
+}
 
 template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::setupPostSyncForRegularEvent(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
+template <typename CommandType>
+void EncodePostSync<Family>::setupPostSyncForRegularEvent(CommandType &cmd, const EncodePostSyncArgs &args) {}
 
 template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::encodeL3FlushAfterPostSync(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
+template <typename CommandType>
+void EncodePostSync<Family>::encodeL3Flush(CommandType &cmd, const EncodePostSyncArgs &args) {}
 
 template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::setupPostSyncForInOrderExec(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
+template <typename CommandType>
+void EncodePostSync<Family>::setupPostSyncForInOrderExec(CommandType &cmd, const EncodePostSyncArgs &args) {}
 
 template <typename Family>
 template <typename WalkerType>
@@ -707,8 +709,8 @@ template <typename WalkerType>
 void EncodeDispatchKernel<Family>::setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t threadGroupCount, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder) {}
 
 template <typename Family>
-template <typename WalkerType>
-void EncodeDispatchKernel<Family>::adjustTimestampPacket(WalkerType &walkerCmd, const EncodeDispatchKernelArgs &args) {}
+template <typename CommandType>
+void EncodePostSync<Family>::adjustTimestampPacket(CommandType &cmd, const EncodePostSyncArgs &args) {}
 
 template <>
 size_t EncodeWA<Family>::getAdditionalPipelineSelectSize(Device &device, bool isRcs) {
@@ -753,7 +755,7 @@ void EncodeWA<Family>::encodeAdditionalPipelineSelect(LinearStream &stream, cons
 template <>
 void EncodeSurfaceState<Family>::encodeExtraBufferParams(EncodeSurfaceStateArgs &args) {
     auto surfaceState = reinterpret_cast<R_SURFACE_STATE *>(args.outMemory);
-    const bool isL3Allowed = surfaceState->getMemoryObjectControlState() == args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    const bool isL3Allowed = surfaceState->getMemoryObjectControlState() == args.gmmHelper->getL3EnabledMOCS();
     if (isL3Allowed) {
         const bool isConstantSurface = args.allocation && args.allocation->getAllocationType() == AllocationType::constantSurface;
         bool useL1 = args.isReadOnly || isConstantSurface;
@@ -763,7 +765,7 @@ void EncodeSurfaceState<Family>::encodeExtraBufferParams(EncodeSurfaceStateArgs 
         }
 
         if (useL1) {
-            surfaceState->setMemoryObjectControlState(args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST));
+            surfaceState->setMemoryObjectControlState(args.gmmHelper->getL1EnabledMOCS());
         }
     }
 }
@@ -801,6 +803,7 @@ namespace NEO {
 template struct EncodeL3State<Family>;
 
 template void InOrderPatchCommandHelpers::PatchCmd<Family>::patchComputeWalker(uint64_t appendCounterValue);
+template struct EncodeDispatchKernelWithHeap<Family>;
 } // namespace NEO
 
 #include "shared/source/command_container/implicit_scaling_before_xe_hp.inl"

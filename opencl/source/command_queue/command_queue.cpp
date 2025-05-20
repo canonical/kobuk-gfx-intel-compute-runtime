@@ -107,7 +107,7 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
         auto &compilerProductHelper = device->getCompilerProductHelper();
         auto &rootDeviceEnvironment = device->getRootDeviceEnvironment();
 
-        bcsAllowed = !device->getDevice().isAnyDirectSubmissionEnabled(true) &&
+        bcsAllowed = !device->getDevice().isAnyDirectSubmissionLightEnabled() &&
                      productHelper.isBlitterFullySupported(hwInfo) &&
                      gfxCoreHelper.isSubDeviceEngineSupported(rootDeviceEnvironment, device->getDeviceBitfield(), aub_stream::EngineType::ENGINE_BCS);
 
@@ -132,7 +132,7 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
             device->getDevice().getL0Debugger()->notifyCommandQueueCreated(&device->getDevice());
         }
 
-        this->heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled();
+        this->heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled(hwInfo);
         this->heaplessStateInitEnabled = compilerProductHelper.isHeaplessStateInitEnabled(this->heaplessModeEnabled);
 
         this->isForceStateless = compilerProductHelper.isForceToStatelessRequired();
@@ -994,11 +994,15 @@ TaskCountType CommandQueue::peekBcsTaskCount(aub_stream::EngineType bcsEngineTyp
 }
 
 bool CommandQueue::isTextureCacheFlushNeeded(uint32_t commandType) const {
+    auto isDirectSubmissionEnabled = getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled();
     switch (commandType) {
     case CL_COMMAND_COPY_IMAGE:
     case CL_COMMAND_WRITE_IMAGE:
     case CL_COMMAND_FILL_IMAGE:
-        return getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled();
+        return isDirectSubmissionEnabled;
+    case CL_COMMAND_READ_IMAGE:
+    case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
+        return isDirectSubmissionEnabled && getDevice().getGfxCoreHelper().isCacheFlushPriorImageReadRequired();
     default:
         return false;
     }
@@ -1572,7 +1576,7 @@ void CommandQueue::unregisterGpgpuAndBcsCsrClients() {
     }
 }
 
-size_t CommandQueue::calculateHostPtrSizeForImage(const size_t *region, size_t rowPitch, size_t slicePitch, Image *image) {
+size_t CommandQueue::calculateHostPtrSizeForImage(const size_t *region, size_t rowPitch, size_t slicePitch, Image *image) const {
     auto bytesPerPixel = image->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
     auto dstRowPitch = rowPitch ? rowPitch : region[0] * bytesPerPixel;
     auto dstSlicePitch = slicePitch ? slicePitch : ((image->getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? 1 : region[1]) * dstRowPitch);

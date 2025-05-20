@@ -9,12 +9,13 @@
 
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 
-#include <level_zero/ze_api.h>
+#include "level_zero/core/source/helpers/api_handle_helper.h"
 
 #include <memory>
 #include <vector>
 
-struct _ze_module_handle_t {};
+struct _ze_module_handle_t : BaseHandle {};
+static_assert(IsCompliantWithDdiHandlesExt<_ze_module_handle_t>);
 
 namespace NEO {
 struct KernelDescriptor;
@@ -61,6 +62,8 @@ struct Module : _ze_module_handle_t, NEO::NonCopyableAndNonMovableClass {
     virtual bool shouldAllocatePrivateMemoryPerDispatch() const = 0;
     virtual uint32_t getProfileFlags() const = 0;
     virtual void checkIfPrivateMemoryPerDispatchIsNeeded() = 0;
+    virtual void populateZebinExtendedArgsMetadata() = 0;
+    virtual void generateDefaultExtendedArgsMetadata() = 0;
 
     static Module *fromHandle(ze_module_handle_t handle) { return static_cast<Module *>(handle); }
 
