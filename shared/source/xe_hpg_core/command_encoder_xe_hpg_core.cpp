@@ -59,7 +59,7 @@ void EncodeDispatchKernel<Family>::programBarrierEnable(INTERFACE_DESCRIPTOR_DAT
 
 template <>
 template <typename WalkerType>
-void EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(WalkerType &walkerCmd, const EncodeWalkerArgs &walkerArgs) {}
+void EncodeDispatchKernel<Family>::encodeWalkerPostSyncFields(WalkerType &walkerCmd, const RootDeviceEnvironment &rootDeviceEnvironment, const EncodeWalkerArgs &walkerArgs) {}
 
 template <>
 template <typename WalkerType, typename InterfaceDescriptorType>
@@ -186,4 +186,5 @@ void EncodeMiFlushDW<Family>::adjust(MI_FLUSH_DW *miFlushDwCmd, const ProductHel
 namespace NEO {
 template void InOrderPatchCommandHelpers::PatchCmd<Family>::patchComputeWalker(uint64_t appendCounterValue);
 template void flushGpuCache<Family>(LinearStream *commandStream, const Range<L3Range> &ranges, uint64_t postSyncAddress, const HardwareInfo &hwInfo);
+template struct EncodeDispatchKernelWithHeap<Family>;
 } // namespace NEO

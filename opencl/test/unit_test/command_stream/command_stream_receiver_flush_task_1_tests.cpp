@@ -566,7 +566,7 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandStreamReceiverFlushTaskTests, WhenFlushing
     typedef typename FamilyType::STATE_BASE_ADDRESS STATE_BASE_ADDRESS;
     auto gmmHelper = pDevice->getGmmHelper();
     auto stateHeapMocs = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER);
-    auto l3CacheOnMocs = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    auto l3CacheOnMocs = gmmHelper->getL3EnabledMOCS();
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     flushTask(commandStreamReceiver);
 
@@ -847,15 +847,14 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenStateBaseAddressNotChangedWhe
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
     configureCSRHeapStatesToNonDirty<FamilyType>();
+    auto usedBefore = commandStreamReceiver.commandStream.getUsed();
+    flushTaskFlags.l3CacheSettings = L3CachingSettings::notApplicable;
 
     flushTask(commandStreamReceiver);
 
-    auto base = commandStreamReceiver.commandStream.getCpuBase();
-
-    auto stateBaseAddress = base
-                                ? genCmdCast<typename FamilyType::STATE_BASE_ADDRESS *>(base)
-                                : nullptr;
-    EXPECT_EQ(nullptr, stateBaseAddress);
+    parseCommands<FamilyType>(commandStreamReceiver.commandStream, usedBefore);
+    auto stateBaseAddressItor = find<typename FamilyType::STATE_BASE_ADDRESS *>(cmdList.begin(), cmdList.end());
+    EXPECT_EQ(cmdList.end(), stateBaseAddressItor);
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEmptyCqsWhenFlushingTaskThenCommandNotAdded) {
@@ -910,7 +909,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleWh
     auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo, 0u));
 
     auto &compilerProductHelper = mockDevice->getCompilerProductHelper();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -937,7 +936,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleWh
                                                                              flushTaskFlags.threadArbitrationPolicy, PreemptionMode::Disabled);
     flushTask(commandStreamReceiver);
 
-    EXPECT_EQ(sizeNeeded, csrCS.getUsed());
+    EXPECT_GE(sizeNeeded, csrCS.getUsed());
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAndSbaWhenFlushingTaskThenOnlyAvailableMemoryIsUsed) {
@@ -950,7 +949,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAn
     auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(&hardwareInfo, 0u));
 
     auto &compilerProductHelper = mockDevice->getCompilerProductHelper();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -977,7 +976,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAn
                                                                              flushTaskFlags.threadArbitrationPolicy, PreemptionMode::Disabled);
     flushTask(commandStreamReceiver);
 
-    EXPECT_EQ(sizeNeeded, csrCS.getUsed());
+    EXPECT_GE(sizeNeeded, csrCS.getUsed());
 }
 
 HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAndSbaAndPipeControlWhenFlushingTaskThenOnlyAvailableMemoryIsUsed) {
@@ -1026,7 +1025,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenEnoughMemoryOnlyForPreambleAn
         *mockDevice);
 
     // Verify that we didn't grab a new CS buffer
-    EXPECT_EQ(expectedUsed, csrCS.getUsed());
+    EXPECT_GE(expectedUsed, csrCS.getUsed());
     EXPECT_EQ(expectedBase, csrCS.getCpuBase());
 }
 

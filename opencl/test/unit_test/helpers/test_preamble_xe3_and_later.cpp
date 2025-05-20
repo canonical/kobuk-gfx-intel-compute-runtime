@@ -12,10 +12,11 @@
 #include "test_traits_common.h"
 
 using namespace NEO;
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
 
 using PreambleCfeStateXe3AndLater = PreambleFixture;
 
-HWTEST2_F(PreambleCfeStateXe3AndLater, givenSetDebugFlagWhenPreambleCfeStateIsProgrammedThenCFEStateParamsHaveSetValue, IsAtLeastXe3Core) {
+HWTEST2_F(PreambleCfeStateXe3AndLater, givenSetDebugFlagWhenPreambleCfeStateIsProgrammedThenCFEStateParamsHaveSetValue, IsHeapfulSupportedAndAtLeastXe3Core) {
     using CFE_STATE = typename FamilyType::CFE_STATE;
 
     uint32_t expectedValue1 = 1u;
@@ -41,7 +42,7 @@ HWTEST2_F(PreambleCfeStateXe3AndLater, givenSetDebugFlagWhenPreambleCfeStateIsPr
     auto cfeState = reinterpret_cast<CFE_STATE *>(*cfeStateIt);
 
     EXPECT_EQ(expectedValue1, static_cast<uint32_t>(cfeState->getOverDispatchControl()));
-    if constexpr (TestTraits<gfxCoreFamily>::numberOfWalkersInCfeStateSupported) {
+    if constexpr (TestTraits<FamilyType::gfxCoreFamily>::numberOfWalkersInCfeStateSupported) {
         EXPECT_EQ(expectedValue2, cfeState->getNumberOfWalkers());
     }
     EXPECT_EQ(expectedValue2, cfeState->getMaximumNumberOfThreads());

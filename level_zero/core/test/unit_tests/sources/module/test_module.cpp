@@ -305,7 +305,7 @@ HWTEST_F(ModuleTest, givenBlitterAvailableWhenCopyingPatchedSegmentsThenIsaIsTra
     }
 }
 
-using ModuleTestSupport = IsWithinProducts<IGFX_SKYLAKE, IGFX_TIGERLAKE_LP>;
+using ModuleTestSupport = IsGen12LP;
 
 HWTEST2_F(ModuleTest, givenNonPatchedTokenThenSurfaceBaseAddressIsCorrectlySet, ModuleTestSupport) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
@@ -374,6 +374,7 @@ HWTEST_F(ModuleTest, givenStatefulBufferWhenOffsetIsPatchedThenAllocBaseAddressI
 
     auto gpuAlloc = device->getDriverHandle()->getSvmAllocsManager()->getSVMAllocs()->get(devicePtr)->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, gpuAlloc);
+    const auto gpuAllocAddress = gpuAlloc->getGpuAddress();
 
     uint32_t argIndex = 0u;
     uint32_t offset = 0x1234;
@@ -386,7 +387,7 @@ HWTEST_F(ModuleTest, givenStatefulBufferWhenOffsetIsPatchedThenAllocBaseAddressI
     auto argInfo = kernelImp->getImmutableData()->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescPointer>();
     auto surfaceStateAddressRaw = ptrOffset(kernelImp->getSurfaceStateHeapData(), argInfo.bindful);
     auto surfaceStateAddress = reinterpret_cast<RENDER_SURFACE_STATE *>(const_cast<unsigned char *>(surfaceStateAddressRaw));
-    EXPECT_EQ(devicePtr, reinterpret_cast<void *>(surfaceStateAddress->getSurfaceBaseAddress()));
+    EXPECT_EQ(gpuAllocAddress, surfaceStateAddress->getSurfaceBaseAddress());
 
     // Bindless arg
     surfaceStateAddress->setSurfaceBaseAddress(0);
@@ -397,7 +398,7 @@ HWTEST_F(ModuleTest, givenStatefulBufferWhenOffsetIsPatchedThenAllocBaseAddressI
     kernelImp->setBufferSurfaceState(argIndex, ptrOffset(devicePtr, offset), gpuAlloc);
 
     surfaceStateAddress = reinterpret_cast<RENDER_SURFACE_STATE *>(const_cast<unsigned char *>(kernelImp->getSurfaceStateHeapData()));
-    EXPECT_EQ(devicePtr, reinterpret_cast<void *>(surfaceStateAddress->getSurfaceBaseAddress()));
+    EXPECT_EQ(gpuAllocAddress, surfaceStateAddress->getSurfaceBaseAddress());
 
     Kernel::fromHandle(kernelHandle)->destroy();
 
@@ -446,7 +447,7 @@ HWTEST_F(ModuleTest, givenBufferWhenOffsetIsNotPatchedThenPassedPtrIsSetAsBaseAd
     context->freeMem(devicePtr);
 }
 
-HWTEST_F(ModuleTest, givenBufferWhenOffsetIsNotPatchedThenSizeIsDecereasedByOffset) {
+HWTEST_F(ModuleTest, givenBufferWhenOffsetIsNotPatchedThenSizeIsDecreasedByOffset) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
     ze_kernel_handle_t kernelHandle;
 
@@ -470,6 +471,7 @@ HWTEST_F(ModuleTest, givenBufferWhenOffsetIsNotPatchedThenSizeIsDecereasedByOffs
 
     auto gpuAlloc = device->getDriverHandle()->getSvmAllocsManager()->getSVMAllocs()->get(devicePtr)->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, gpuAlloc);
+    const auto devicePtrOffsetInAlloc = ptrDiff(devicePtr, gpuAlloc->getGpuAddress());
 
     uint32_t argIndex = 0u;
     uint32_t offset = 0x1234;
@@ -482,7 +484,8 @@ HWTEST_F(ModuleTest, givenBufferWhenOffsetIsNotPatchedThenSizeIsDecereasedByOffs
     auto surfaceStateAddressRaw = ptrOffset(kernelImp->getSurfaceStateHeapData(), argInfo.bindful);
     auto surfaceStateAddress = reinterpret_cast<RENDER_SURFACE_STATE *>(const_cast<unsigned char *>(surfaceStateAddressRaw));
     SurfaceStateBufferLength length = {0};
-    length.length = static_cast<uint32_t>((gpuAlloc->getUnderlyingBufferSize() - offset) - 1);
+    const auto totalOffset = offset + devicePtrOffsetInAlloc;
+    length.length = static_cast<uint32_t>((gpuAlloc->getUnderlyingBufferSize() - totalOffset) - 1);
     EXPECT_EQ(surfaceStateAddress->getWidth(), static_cast<uint32_t>(length.surfaceState.width + 1));
     EXPECT_EQ(surfaceStateAddress->getHeight(), static_cast<uint32_t>(length.surfaceState.height + 1));
     EXPECT_EQ(surfaceStateAddress->getDepth(), static_cast<uint32_t>(length.surfaceState.depth + 1));
@@ -681,7 +684,7 @@ HWTEST2_F(ModuleUncachedBufferTest,
     EXPECT_EQ(devicePtr, reinterpret_cast<void *>(surfaceStateAddress->getSurfaceBaseAddress()));
 
     auto gmmHelper = device->getNEODevice()->getGmmHelper();
-    uint32_t expectedMocs = gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED);
+    uint32_t expectedMocs = gmmHelper->getUncachedMOCS();
 
     EXPECT_EQ(expectedMocs, surfaceStateAddress->getMemoryObjectControlState());
 
@@ -724,6 +727,7 @@ struct DerivedModuleImp : public L0::ModuleImp {
 };
 
 HWTEST_F(ModuleTest, whenMultipleModulesCreatedThenModulesShareIsaAllocation) {
+    USE_REAL_FILE_SYSTEM();
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
     uint8_t binary[10];
@@ -3623,6 +3627,7 @@ HWTEST2_F(ModuleTranslationUnitTest, givenDebugFlagSetToWbWhenGetInternalOptions
 }
 
 HWTEST_F(ModuleTranslationUnitTest, givenDumpZebinWhenBuildingFromSpirvThenZebinElfDumped) {
+    USE_REAL_FILE_SYSTEM();
     DebugManagerStateRestore restorer;
     debugManager.flags.DumpZEBin.set(1);
 
@@ -3887,7 +3892,7 @@ TEST_F(ModuleTest, givenInternalOptionsWhenBindlessDisabledThenBindlesOptionsNot
 
     module->createBuildOptions("", buildOptions, internalBuildOptions);
 
-    EXPECT_EQ(device->getCompilerProductHelper().isHeaplessModeEnabled(), NEO::CompilerOptions::contains(internalBuildOptions, NEO::CompilerOptions::bindlessMode));
+    EXPECT_EQ(device->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo), NEO::CompilerOptions::contains(internalBuildOptions, NEO::CompilerOptions::bindlessMode));
 }
 
 TEST_F(ModuleTest, givenSrcOptLevelInSrcNamesWhenMovingBuildOptionsThenOptionIsRemovedFromSrcNamesAndTranslatedOptionsStoredInDstNames) {

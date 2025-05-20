@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -74,7 +74,7 @@ void StateBaseAddressHelper<GfxFamily>::appendStateBaseAddressParameters(
 
     auto &productHelper = args.gmmHelper->getRootDeviceEnvironment().template getHelper<ProductHelper>();
 
-    auto heapResourceUsage = CacheSettingsHelper::getGmmUsageType(AllocationType::internalHeap, debugManager.flags.DisableCachingForHeaps.get(), productHelper);
+    auto heapResourceUsage = CacheSettingsHelper::getGmmUsageType(AllocationType::internalHeap, debugManager.flags.DisableCachingForHeaps.get(), productHelper, args.gmmHelper->getHardwareInfo());
     auto heapMocsValue = args.gmmHelper->getMOCS(heapResourceUsage);
 
     args.stateBaseAddressCmd->setSurfaceStateMemoryObjectControlState(heapMocsValue);
@@ -87,11 +87,11 @@ void StateBaseAddressHelper<GfxFamily>::appendStateBaseAddressParameters(
         setSbaStatelessCompressionParams<GfxFamily>(args.stateBaseAddressCmd, args.memoryCompressionState);
     }
 
-    bool l3MocsEnabled = (args.stateBaseAddressCmd->getStatelessDataPortAccessMemoryObjectControlState() >> 1) == (args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1);
+    bool l3MocsEnabled = (args.stateBaseAddressCmd->getStatelessDataPortAccessMemoryObjectControlState() >> 1) == (args.gmmHelper->getL3EnabledMOCS() >> 1);
     bool constMocsAllowed = (l3MocsEnabled && (debugManager.flags.ForceL1Caching.get() != 0));
 
     if (constMocsAllowed) {
-        auto constMocsIndex = args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST);
+        auto constMocsIndex = args.gmmHelper->getL1EnabledMOCS();
         GmmHelper::applyMocsEncryptionBit(constMocsIndex);
 
         args.stateBaseAddressCmd->setStatelessDataPortAccessMemoryObjectControlState(constMocsIndex);
@@ -102,18 +102,20 @@ void StateBaseAddressHelper<GfxFamily>::appendStateBaseAddressParameters(
 
 template <typename GfxFamily>
 void StateBaseAddressHelper<GfxFamily>::programBindingTableBaseAddress(LinearStream &commandStream, uint64_t baseAddress, uint32_t sizeInPages, GmmHelper *gmmHelper) {
-    using _3DSTATE_BINDING_TABLE_POOL_ALLOC = typename GfxFamily::_3DSTATE_BINDING_TABLE_POOL_ALLOC;
+    if constexpr (GfxFamily::isHeaplessRequired() == false) {
+        using _3DSTATE_BINDING_TABLE_POOL_ALLOC = typename GfxFamily::_3DSTATE_BINDING_TABLE_POOL_ALLOC;
 
-    auto bindingTablePoolAlloc = commandStream.getSpaceForCmd<_3DSTATE_BINDING_TABLE_POOL_ALLOC>();
-    _3DSTATE_BINDING_TABLE_POOL_ALLOC cmd = GfxFamily::cmdInitStateBindingTablePoolAlloc;
-    cmd.setBindingTablePoolBaseAddress(baseAddress);
-    cmd.setBindingTablePoolBufferSize(sizeInPages);
-    cmd.setSurfaceObjectControlStateIndexToMocsTables(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER));
-    if (debugManager.flags.DisableCachingForHeaps.get()) {
-        cmd.setSurfaceObjectControlStateIndexToMocsTables(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER_CACHELINE_MISALIGNED));
+        auto bindingTablePoolAlloc = commandStream.getSpaceForCmd<_3DSTATE_BINDING_TABLE_POOL_ALLOC>();
+        _3DSTATE_BINDING_TABLE_POOL_ALLOC cmd = GfxFamily::cmdInitStateBindingTablePoolAlloc;
+        cmd.setBindingTablePoolBaseAddress(baseAddress);
+        cmd.setBindingTablePoolBufferSize(sizeInPages);
+        cmd.setSurfaceObjectControlStateIndexToMocsTables(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER));
+        if (debugManager.flags.DisableCachingForHeaps.get()) {
+            cmd.setSurfaceObjectControlStateIndexToMocsTables(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER_CACHELINE_MISALIGNED));
+        }
+
+        *bindingTablePoolAlloc = cmd;
     }
-
-    *bindingTablePoolAlloc = cmd;
 }
 
 template <typename GfxFamily>

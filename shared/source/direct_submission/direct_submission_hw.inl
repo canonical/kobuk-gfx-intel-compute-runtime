@@ -69,17 +69,13 @@ DirectSubmissionHw<GfxFamily, Dispatcher>::DirectSubmissionHw(const DirectSubmis
         detectGpuHang = !!debugManager.flags.DirectSubmissionDetectGpuHang.get();
     }
 
-    if (hwInfo->capabilityTable.isIntegratedDevice) {
-        miMemFenceRequired = false;
-    } else {
-        miMemFenceRequired = productHelper.isGlobalFenceInDirectSubmissionRequired(*hwInfo);
-    }
+    miMemFenceRequired = productHelper.isGlobalFenceInDirectSubmissionRequired(*hwInfo);
 
     if (debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.get() != -1) {
         miMemFenceRequired = debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.get();
     }
 
-    if (miMemFenceRequired && compilerProductHelper.isHeaplessStateInitEnabled(compilerProductHelper.isHeaplessModeEnabled())) {
+    if (miMemFenceRequired && compilerProductHelper.isHeaplessStateInitEnabled(compilerProductHelper.isHeaplessModeEnabled(*hwInfo))) {
         this->systemMemoryFenceAddressSet = true;
     }
 
@@ -129,7 +125,7 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchStaticRelaxedOrderingSch
 
     uint64_t loopSectionStartAddress = schedulerStartAddress + RelaxedOrderingHelper::StaticSchedulerSizeAndOffsetSection<GfxFamily>::loopStartSectionStart;
 
-    const uint32_t miMathMocs = this->rootDeviceEnvironment.getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    const uint32_t miMathMocs = this->rootDeviceEnvironment.getGmmHelper()->getL3EnabledMOCS();
 
     constexpr bool isBcs = Dispatcher::isCopy();
 
@@ -429,18 +425,30 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::makeResourcesResident(DirectSubm
 }
 
 template <typename GfxFamily, typename Dispatcher>
+bool DirectSubmissionHw<GfxFamily, Dispatcher>::allocateOsResources() {
+    if (this->semaphorePtr != nullptr) {
+        this->tagAddress = reinterpret_cast<volatile TagAddressType *>(reinterpret_cast<uint8_t *>(this->semaphorePtr) + offsetof(RingSemaphoreData, tagAllocation));
+    } else {
+        this->tagAddress = nullptr;
+    }
+    return true;
+}
+
+template <typename GfxFamily, typename Dispatcher>
 inline void DirectSubmissionHw<GfxFamily, Dispatcher>::unblockGpu() {
     if (sfenceMode >= DirectSubmissionSfenceMode::beforeSemaphoreOnly) {
-        CpuIntrinsics::sfence();
+        if (!this->miMemFenceRequired && !this->pciBarrierPtr && !this->hwInfo->capabilityTable.isIntegratedDevice) {
+            CpuIntrinsics::mfence();
+        } else {
+            CpuIntrinsics::sfence();
+        }
     }
 
     if (this->pciBarrierPtr) {
         *this->pciBarrierPtr = 0u;
     }
 
-    if (debugManager.flags.DirectSubmissionPrintSemaphoreUsage.get() == 1) {
-        printf("DirectSubmission semaphore %" PRIx64 " unlocked with value: %u\n", semaphoreGpuVa, currentQueueWorkCount);
-    }
+    PRINT_DEBUG_STRING(debugManager.flags.DirectSubmissionPrintSemaphoreUsage.get() == 1, stdout, "DirectSubmission semaphore %" PRIx64 " unlocked with value: %u\n", semaphoreGpuVa, currentQueueWorkCount);
 
     semaphoreData->queueWorkCount = currentQueueWorkCount;
 
@@ -529,9 +537,7 @@ bool DirectSubmissionHw<GfxFamily, Dispatcher>::stopRingBuffer(bool blocking) {
     void *flushPtr = ringCommandStream.getSpace(0);
     Dispatcher::dispatchCacheFlush(ringCommandStream, this->rootDeviceEnvironment, gpuVaForMiFlush);
     if (disableMonitorFence) {
-        TagData currentTagData = {};
-        getTagAddressValue(currentTagData);
-        Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired, this->notifyKmdDuringMonitorFence);
+        dispatchStopRingBufferSection();
     }
     Dispatcher::dispatchStopCommandBuffer(ringCommandStream);
 
@@ -617,7 +623,7 @@ template <typename GfxFamily, typename Dispatcher>
 inline void DirectSubmissionHw<GfxFamily, Dispatcher>::dispatchSwitchRingBufferSection(uint64_t nextBufferGpuAddress) {
     if (disableMonitorFence) {
         TagData currentTagData = {};
-        getTagAddressValue(currentTagData);
+        getTagAddressValueForRingSwitch(currentTagData);
         Dispatcher::dispatchMonitorFence(ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired, this->notifyKmdDuringMonitorFence);
     }
     Dispatcher::dispatchStartCommandBuffer(ringCommandStream, nextBufferGpuAddress);
@@ -639,7 +645,7 @@ inline size_t DirectSubmissionHw<GfxFamily, Dispatcher>::getSizeEnd(bool relaxed
                   (Dispatcher::getSizeStartCommandBuffer() - Dispatcher::getSizeStopCommandBuffer()) +
                   MemoryConstants::cacheLineSize;
     if (disableMonitorFence) {
-        size += Dispatcher::getSizeMonitorFence(rootDeviceEnvironment);
+        size += dispatchStopRingBufferSectionSize();
     }
     if (this->relaxedOrderingEnabled && relaxedOrderingSchedulerRequired) {
         size += getSizeDispatchRelaxedOrderingQueueStall();
@@ -844,7 +850,7 @@ void DirectSubmissionHw<GfxFamily, Dispatcher>::preinitializeRelaxedOrderingSect
     LriHelper<GfxFamily>::program(&stream, RegisterOffsets::csGprR8, 8, true, isBcs);
     LriHelper<GfxFamily>::program(&stream, RegisterOffsets::csGprR8 + 4, 0, true, isBcs);
 
-    const uint32_t miMathMocs = this->rootDeviceEnvironment.getGmmHelper()->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+    const uint32_t miMathMocs = this->rootDeviceEnvironment.getGmmHelper()->getL3EnabledMOCS();
 
     EncodeAluHelper<GfxFamily, 9> aluHelper({{
         {AluRegisters::opcodeLoad, AluRegisters::srca, AluRegisters::gpr1},
@@ -1147,7 +1153,7 @@ inline GraphicsAllocation *DirectSubmissionHw<GfxFamily, Dispatcher>::switchRing
                                                                          isMultiOsContextCapable, false, osContext.getDeviceBitfield()};
             nextAllocation = memoryManager->allocateGraphicsMemoryWithProperties(commandStreamAllocationProperties);
             this->currentRingBuffer = static_cast<uint32_t>(this->ringBuffers.size());
-            this->ringBuffers.emplace_back(0ull, nextAllocation);
+            this->ringBuffers.emplace_back(0ull, 0ull, nextAllocation);
             auto ret = memoryOperationHandler->makeResidentWithinOsContext(&this->osContext, ArrayRef<GraphicsAllocation *>(&nextAllocation, 1u), false, false, false) == MemoryOperationsStatus::success;
             UNRECOVERABLE_IF(!ret);
 

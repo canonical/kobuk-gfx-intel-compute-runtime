@@ -13,9 +13,9 @@
 #include "shared/source/helpers/timestamp_packet_container.h"
 #include "shared/source/memory_manager/multi_graphics_allocation.h"
 #include "shared/source/os_interface/os_time.h"
+#include "shared/source/utilities/timestamp_pool_allocator.h"
 
 #include "level_zero/core/source/helpers/api_handle_helper.h"
-#include <level_zero/ze_api.h>
 
 #include <atomic>
 #include <bitset>
@@ -25,12 +25,11 @@
 #include <mutex>
 #include <vector>
 
-struct _ze_event_handle_t {
-    const uint64_t objMagic = objMagicValue;
-    static const zel_handle_type_t handleType = ZEL_HANDLE_EVENT;
-};
+struct _ze_event_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_EVENT> {};
+static_assert(IsCompliantWithDdiHandlesExt<_ze_event_handle_t>);
 
-struct _ze_event_pool_handle_t {};
+struct _ze_event_pool_handle_t : BaseHandle {};
+static_assert(IsCompliantWithDdiHandlesExt<_ze_event_pool_handle_t>);
 
 namespace NEO {
 class CommandStreamReceiver;
@@ -89,6 +88,7 @@ inline constexpr uint32_t eventPackets = maxKernelSplit * NEO ::TimestampPacketC
 struct EventDescriptor {
     NEO::MultiGraphicsAllocation *eventPoolAllocation = nullptr;
     const void *extensions = nullptr;
+    size_t offsetInSharedAlloc = 0;
     uint32_t totalEventSize = 0;
     uint32_t maxKernelCount = 0;
     uint32_t maxPacketsCount = 0;
@@ -132,8 +132,6 @@ struct Event : _ze_event_handle_t {
         implicitlyEnabled,
         implicitlyDisabled
     };
-
-    static bool standaloneInOrderTimestampAllocationEnabled();
 
     template <typename TagSizeT>
     static Event *create(EventPool *eventPool, const ze_event_desc_t *desc, Device *device);
@@ -337,6 +335,8 @@ struct Event : _ze_event_handle_t {
 
     virtual ze_result_t hostEventSetValue(State eventState) = 0;
 
+    size_t getOffsetInSharedAlloc() const { return offsetInSharedAlloc; }
+
   protected:
     Event(int index, Device *device) : device(device), index(index) {}
 
@@ -368,6 +368,7 @@ struct Event : _ze_event_handle_t {
     size_t timestampSizeInDw = 0u;
     size_t singlePacketSize = 0u;
     size_t eventPoolOffset = 0u;
+    size_t offsetInSharedAlloc = 0u;
 
     size_t cpuStartTimestamp = 0u;
     size_t gpuStartTimestamp = 0u;
@@ -434,6 +435,9 @@ struct EventPool : _ze_event_pool_handle_t {
     inline ze_event_pool_handle_t toHandle() { return this; }
 
     MOCKABLE_VIRTUAL NEO::MultiGraphicsAllocation &getAllocation() { return *eventPoolAllocations; }
+    std::unique_ptr<NEO::SharedTimestampAllocation> &getSharedTimestampAllocation() {
+        return sharedTimestampAllocation;
+    }
 
     uint32_t getEventSize() const { return eventSize; }
     void setEventSize(uint32_t size) { eventSize = size; }
@@ -487,6 +491,8 @@ struct EventPool : _ze_event_pool_handle_t {
     std::vector<Device *> devices;
 
     std::unique_ptr<NEO::MultiGraphicsAllocation> eventPoolAllocations;
+    std::unique_ptr<NEO::SharedTimestampAllocation> sharedTimestampAllocation;
+
     void *eventPoolPtr = nullptr;
     ContextImp *context = nullptr;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -9,6 +9,7 @@
 
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/helpers/stdio.h"
+#include "shared/source/utilities/io_functions.h"
 
 #include <cstring>
 #include <map>
@@ -21,15 +22,13 @@ extern std::map<std::string, std::stringstream> virtualFileList;
 
 size_t writeDataToFile(
     const char *filename,
-    const void *pData,
-    size_t dataSize) {
+    std::string_view data) {
 
-    DEBUG_BREAK_IF(nullptr == pData);
     DEBUG_BREAK_IF(nullptr == filename);
 
-    NEO::virtualFileList[filename] << std::string(static_cast<const char *>(pData), dataSize);
+    NEO::virtualFileList[filename] << data;
 
-    return dataSize;
+    return data.size();
 }
 
 bool fileExists(const std::string &fileName) {
@@ -42,9 +41,9 @@ bool fileExists(const std::string &fileName) {
         return true;
     }
 
-    fopen_s(&pFile, fileName.c_str(), "rb");
+    pFile = NEO::IoFunctions::fopenPtr(fileName.c_str(), "rb");
     if (pFile) {
-        fclose(pFile);
+        NEO::IoFunctions::fclosePtr(pFile);
     }
     return pFile != nullptr;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -66,7 +66,7 @@ using DebuggerSingleAddressSpaceAub = Test<DebuggerSingleAddressSpaceAubFixture>
 using PlatformsSupportingSingleAddressSpace = MatchAny;
 
 HWTEST2_F(DebuggerSingleAddressSpaceAub, GivenSingleAddressSpaceWhenCmdListIsExecutedThenSbaAddressesAreTracked, PlatformsSupportingSingleAddressSpace) {
-    if (neoDevice->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    if (neoDevice->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
     constexpr size_t bufferSize = MemoryConstants::pageSize;
@@ -112,7 +112,7 @@ HWTEST2_F(DebuggerSingleAddressSpaceAub, GivenSingleAddressSpaceWhenCmdListIsExe
     EXPECT_EQ(ZE_RESULT_SUCCESS, zeCommandListAppendLaunchKernel(cmdListHandle, kernel, &dispatchTraits, nullptr, 0, nullptr));
     commandList->close();
 
-    pCmdq->executeCommandLists(1, &cmdListHandle, nullptr, false, nullptr);
+    pCmdq->executeCommandLists(1, &cmdListHandle, nullptr, false, nullptr, nullptr);
     pCmdq->synchronize(std::numeric_limits<uint64_t>::max());
 
     expectMemory<FamilyType>(reinterpret_cast<void *>(driverHandle->svmAllocsManager->getSVMAlloc(bufferDst)->gpuAllocations.getDefaultGraphicsAllocation()->getGpuAddress()),
@@ -253,7 +253,7 @@ HWTEST2_F(DebuggerGlobalAllocatorAub, GivenKernelWithScratchWhenCmdListExecutedT
     EXPECT_EQ(ZE_RESULT_SUCCESS, zeCommandListAppendLaunchKernel(cmdListHandle, kernel, &dispatchTraits, nullptr, 0, nullptr));
     commandList->close();
 
-    pCmdq->executeCommandLists(1, &cmdListHandle, nullptr, false, nullptr);
+    pCmdq->executeCommandLists(1, &cmdListHandle, nullptr, false, nullptr, nullptr);
     pCmdq->synchronize(std::numeric_limits<uint64_t>::max());
 
     expectMemory<FamilyType>(reinterpret_cast<void *>(driverHandle->svmAllocsManager->getSVMAlloc(bufferDst)->gpuAllocations.getDefaultGraphicsAllocation()->getGpuAddress()),

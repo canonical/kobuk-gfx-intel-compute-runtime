@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/memory_manager/allocation_type.h"
@@ -134,6 +135,7 @@ HWTEST2_F(XeLpgHwInfoTests, givenBoolWhenCallHardwareInfoSetupThenFeatureTableAn
         EXPECT_FALSE(featureTable.flags.ftrFlatPhysCCS);
         EXPECT_FALSE(featureTable.flags.ftrE2ECompression);
         EXPECT_FALSE(featureTable.flags.ftrMultiTileArch);
+        EXPECT_FALSE(featureTable.flags.ftrHeaplessMode);
     }
 }
 
@@ -358,7 +360,12 @@ HWTEST2_F(XeLpgProductHelperTests, givenProductHelperWhenCallIsNewCoherencyModel
 
 HWTEST2_F(XeLpgProductHelperTests, givenProductHelperWhenCallDeferMOCSToPatThenFalseIsReturned, IsXeLpg) {
     const auto &productHelper = getHelper<ProductHelper>();
-    EXPECT_FALSE(productHelper.deferMOCSToPatIndex());
+    EXPECT_FALSE(productHelper.deferMOCSToPatIndex(false));
+}
+
+HWTEST2_F(XeLpgProductHelperTests, givenProductHelperWhenCallDeferMOCSToPatOnWSLThenFalseIsReturned, IsXeLpg) {
+    const auto &productHelper = getHelper<ProductHelper>();
+    EXPECT_FALSE(productHelper.deferMOCSToPatIndex(true));
 }
 
 HWTEST2_F(XeLpgProductHelperTests, givenPatIndexWhenCheckIsCoherentAllocationThenReturnProperValue, IsXeLpg) {

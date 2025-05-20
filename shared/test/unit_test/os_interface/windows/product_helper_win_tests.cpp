@@ -93,6 +93,10 @@ HWTEST_F(ProductHelperTestWindows, givenFtrIaCoherencyFlagWhenConfiguringHwInfoT
     EXPECT_EQ(initialCoherencyStatus, outHwInfo.capabilityTable.ftrSupportsCoherency);
 }
 
+HWTEST2_F(ProductHelperTestWindows, givenProductHelperWhenAskedIfPlatformSupportsSvmHeapReservationThenReturnFalseForMTL, IsMTL) {
+    EXPECT_FALSE(productHelper->isSvmHeapReservationSupported());
+}
+
 HWTEST2_F(ProductHelperTestWindows, givenE2ECompressionWhenConfiguringHwInfoWddmThenCompressionFlagsAreCorrectlySet, IsBeforeXe2HpgCore) {
     HardwareInfo initialHwInfo = *defaultHwInfo;
 
@@ -121,5 +125,4 @@ HWTEST2_F(ProductHelperTestWindows, givenE2ECompressionWhenConfiguringHwInfoWddm
     EXPECT_FALSE(outHwInfo.capabilityTable.ftrRenderCompressedImages);
 }
 
->>>>>>> c010d17842 (fix: respect compression flag in capability table)
 } // namespace NEO

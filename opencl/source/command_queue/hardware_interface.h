@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -14,6 +14,7 @@
 namespace NEO {
 
 class CommandQueue;
+class CsrDependencies;
 class DispatchInfo;
 class Event;
 class IndirectHeap;
@@ -52,8 +53,8 @@ struct HardwareInterfaceWalkerArgs {
 template <typename GfxFamily>
 class HardwareInterface {
   public:
-    using INTERFACE_DESCRIPTOR_DATA = typename GfxFamily::INTERFACE_DESCRIPTOR_DATA;
     using DefaultWalkerType = typename GfxFamily::DefaultWalkerType;
+    using INTERFACE_DESCRIPTOR_DATA = typename DefaultWalkerType::InterfaceDescriptorType;
 
     template <typename WalkerType>
     static void dispatchWalker(

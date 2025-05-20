@@ -23,7 +23,8 @@
 
 namespace NEO {
 struct KernelDescriptor;
-class SharedIsaAllocation;
+struct MetadataGeneration;
+class SharedPoolAllocation;
 
 namespace Zebin::Debug {
 struct Segments;
@@ -158,6 +159,9 @@ struct ModuleImp : public Module {
         return allocatePrivateMemoryPerDispatch;
     }
 
+    void populateZebinExtendedArgsMetadata() override;
+    void generateDefaultExtendedArgsMetadata() override;
+
     uint32_t getProfileFlags() const override { return profileFlags; }
 
     ModuleTranslationUnit *getTranslationUnit() {
@@ -196,7 +200,7 @@ struct ModuleImp : public Module {
     std::unique_ptr<ModuleTranslationUnit> translationUnit;
     ModuleBuildLog *moduleBuildLog = nullptr;
     NEO::GraphicsAllocation *exportedFunctionsSurface = nullptr;
-    std::unique_ptr<NEO::SharedIsaAllocation> sharedIsaAllocation;
+    std::unique_ptr<NEO::SharedPoolAllocation> sharedIsaAllocation;
     std::vector<std::shared_ptr<Kernel>> printfKernelContainer;
     std::vector<std::unique_ptr<KernelImmutableData>> kernelImmDatas;
     NEO::Linker::RelocatedSymbolsMap symbols;
@@ -226,6 +230,8 @@ struct ModuleImp : public Module {
 
     NEO::Linker::PatchableSegments isaSegmentsForPatching;
     std::vector<std::vector<char>> patchedIsaTempStorage;
+
+    std::unique_ptr<NEO::MetadataGeneration> metadataGeneration;
 };
 
 bool moveBuildOption(std::string &dstOptionsSet, std::string &srcOptionSet, NEO::ConstStringRef dstOptionName, NEO::ConstStringRef srcOptionName);

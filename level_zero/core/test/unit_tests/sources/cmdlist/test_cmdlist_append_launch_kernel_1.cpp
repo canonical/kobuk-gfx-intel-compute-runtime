@@ -33,6 +33,8 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 
 #include "test_traits_common.h"
+using namespace NEO;
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
 
 namespace L0 {
 namespace ult {
@@ -126,7 +128,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithStallRRThreadArbitrationP
 HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithThreadArbitrationPolicySetUsingSchedulingHintExtensionTheSameFlagIsUsedToSetCmdListThreadArbitrationPolicy) {
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    if (compilerProductHelper.isHeaplessModeEnabled()) {
+    if (compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -206,7 +208,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenNotEnoughSpaceInCommandStreamWhenA
     const uint32_t threadGroupDimensions[3] = {1, 1, 1};
 
     auto dispatchKernelArgs = CommandEncodeStatesFixture::createDefaultDispatchKernelArgs(device->getNEODevice(), kernel.get(), threadGroupDimensions, false);
-    dispatchKernelArgs.dcFlushEnable = commandList->getDcFlushRequired(true);
+    dispatchKernelArgs.postSyncArgs.dcFlushEnable = commandList->getDcFlushRequired(true);
 
     NEO::EncodeDispatchKernel<FamilyType>::template encode<DefaultWalkerType>(commandContainer, dispatchKernelArgs);
 
@@ -395,7 +397,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfAppendedToCommandLi
 
     auto commandListHandle = commandList->toHandle();
     EXPECT_EQ(0u, kernel->printPrintfOutputCalledTimes);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr));
     EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->synchronize(std::numeric_limits<uint64_t>::max()));
     EXPECT_EQ(1u, kernel->printPrintfOutputCalledTimes);
     EXPECT_EQ(ZE_RESULT_SUCCESS, kernel->destroy());
@@ -457,7 +459,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfAndEventAppendedToC
 
     auto commandListHandle = commandList->toHandle();
     EXPECT_EQ(0u, kernel->printPrintfOutputCalledTimes);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr));
     EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->synchronize(std::numeric_limits<uint64_t>::max()));
     *reinterpret_cast<uint32_t *>(event->getHostAddress()) = Event::STATE_SIGNALED;
     EXPECT_EQ(1u, kernel->printPrintfOutputCalledTimes);
@@ -524,7 +526,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenKernelWithPrintfAndEventAppendedToC
 
     auto commandListHandle = commandList->toHandle();
     EXPECT_EQ(0u, kernel->printPrintfOutputCalledTimes);
-    EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr));
     *reinterpret_cast<uint32_t *>(event->getHostAddress()) = Event::STATE_SIGNALED;
     EXPECT_EQ(ZE_RESULT_SUCCESS, event->hostSynchronize(std::numeric_limits<uint64_t>::max()));
     EXPECT_EQ(1u, kernel->printPrintfOutputCalledTimes);
@@ -884,7 +886,7 @@ HWTEST_F(CommandListAppendLaunchKernel, WhenAppendingMultipleTimesThenDshIsNotDe
     EXPECT_NE(initialAllocation, reallocatedAllocation);
 }
 
-using TimestampEventSupport = IsWithinProducts<IGFX_SKYLAKE, IGFX_TIGERLAKE_LP>;
+using TimestampEventSupport = IsGen12LP;
 HWTEST2_F(CommandListAppendLaunchKernel, givenTimestampEventsWhenAppendingKernelThenSRMAndPCEncoded, TimestampEventSupport) {
     using GPGPU_WALKER = typename FamilyType::GPGPU_WALKER;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
@@ -1104,8 +1106,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenForcePipeControlPriorToWalkerKeyAn
     EXPECT_NE(firstBatchBufferAllocation, secondBatchBufferAllocation);
 }
 
-using SupportedPlatforms = IsWithinProducts<IGFX_SKYLAKE, IGFX_DG1>;
-HWTEST2_F(CommandListAppendLaunchKernel, givenCommandListWhenAppendLaunchKernelSeveralTimesThenAlwaysFirstEventPacketIsUsed, SupportedPlatforms) {
+HWTEST2_F(CommandListAppendLaunchKernel, givenCommandListWhenAppendLaunchKernelSeveralTimesThenAlwaysFirstEventPacketIsUsed, IsGen12LP) {
     createKernel();
     ze_result_t returnValue;
     std::unique_ptr<L0::CommandList> commandList(L0::CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
@@ -1299,7 +1300,7 @@ HWTEST_F(CommandListAppendLaunchKernel, givenCommandListWhenResetCalledThenState
     }
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     auto heaplessStateInitEnabled = compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled);
 
     if (!heaplessStateInitEnabled) {
@@ -1457,7 +1458,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenImmediateCommandListWhenAppendLaun
     ze_command_queue_desc_t queueDesc = {};
     auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
 
-    MockCommandListImmediateHw<gfxCoreFamily> cmdList;
+    MockCommandListImmediateHw<FamilyType::gfxCoreFamily> cmdList;
     cmdList.isFlushTaskSubmissionEnabled = true;
     cmdList.cmdListType = CommandList::CommandListType::typeImmediate;
     cmdList.cmdQImmediate = queue.get();
@@ -1481,7 +1482,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenImmediateCommandListWhenAppendLaun
     ze_command_queue_desc_t queueDesc = {};
     auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
 
-    MockCommandListImmediateHw<gfxCoreFamily> cmdList;
+    MockCommandListImmediateHw<FamilyType::gfxCoreFamily> cmdList;
     cmdList.isFlushTaskSubmissionEnabled = false;
     cmdList.cmdListType = CommandList::CommandListType::typeImmediate;
     cmdList.cmdQImmediate = queue.get();
@@ -1499,7 +1500,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenImmediateCommandListWhenAppendLaun
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
 }
 
-HWTEST2_F(CommandListAppendLaunchKernel, GivenImmCmdListAndKernelWithImageWriteArgAndPlatformRequiresFlushWhenLaunchingKernelThenPipeControlWithTextureCacheInvalidationIsAdded, MatchAny) {
+HWTEST_F(CommandListAppendLaunchKernel, GivenImmCmdListAndKernelWithImageWriteArgAndPlatformRequiresFlushWhenLaunchingKernelThenPipeControlWithTextureCacheInvalidationIsAdded) {
     if (!device->getProductHelper().isPostImageWriteFlushRequired()) {
         GTEST_SKIP();
     }
@@ -1513,7 +1514,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, GivenImmCmdListAndKernelWithImageWriteA
     ze_command_queue_desc_t queueDesc = {};
     auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
 
-    MockCommandListImmediateHw<gfxCoreFamily> commandList;
+    MockCommandListImmediateHw<FamilyType::gfxCoreFamily> commandList;
     commandList.isFlushTaskSubmissionEnabled = false;
     commandList.cmdListType = CommandList::CommandListType::typeImmediate;
     commandList.cmdQImmediate = queue.get();
@@ -1544,7 +1545,19 @@ HWTEST2_F(CommandListAppendLaunchKernel, GivenImmCmdListAndKernelWithImageWriteA
     EXPECT_TRUE(cmd->getTextureCacheInvalidationEnable());
 }
 
-HWTEST2_F(CommandListAppendLaunchKernel, whenUpdateStreamPropertiesIsCalledThenCorrectThreadArbitrationPolicyIsSet, MatchAny) {
+template <GFXCORE_FAMILY gfxCoreFamily>
+struct MockCommandListCoreFamilyWithoutHeapSupport : public WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>> {
+    using BaseClass = WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>;
+    using BaseClass::appendVfeStateCmdToPatch;
+    using BaseClass::BaseClass;
+};
+
+HWTEST2_F(CommandListAppendLaunchKernel, whenAppendVfeStateCmdPatchIsCalledAndHeaplessRequiredThenDoNothing, IsHeaplessRequired) {
+    auto commandList = std::make_unique<MockCommandListCoreFamilyWithoutHeapSupport<FamilyType::gfxCoreFamily>>();
+    commandList->appendVfeStateCmdToPatch();
+}
+
+HWTEST2_F(CommandListAppendLaunchKernel, whenUpdateStreamPropertiesIsCalledThenCorrectThreadArbitrationPolicyIsSet, IsHeapfulSupported) {
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.set(1);
 
@@ -1558,7 +1571,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, whenUpdateStreamPropertiesIsCalledThenC
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 

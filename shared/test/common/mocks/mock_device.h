@@ -6,8 +6,6 @@
  */
 
 #pragma once
-
-#include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/device/root_device.h"
 #include "shared/source/device/sub_device.h"
 #include "shared/source/execution_environment/execution_environment.h"
@@ -33,7 +31,7 @@ extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executio
 struct MockSubDevice : public SubDevice {
     using Device::allEngines;
     using Device::createEngines;
-    using Device::maxAllocationsSavedForReuseSize;
+    using Device::secondaryEngines;
     using SubDevice::getDeviceBitfield;
     using SubDevice::getGlobalMemorySize;
     using SubDevice::SubDevice;
@@ -42,9 +40,7 @@ struct MockSubDevice : public SubDevice {
         EXPECT_EQ(nullptr, this->getDebugSurface());
     }
 
-    std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const override {
-        return std::unique_ptr<CommandStreamReceiver>(createCommandStreamReceiverFunc(*executionEnvironment, getRootDeviceIndex(), getDeviceBitfield()));
-    }
+    std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const override;
     static decltype(&createCommandStream) createCommandStreamReceiverFunc;
 
     bool failOnCreateEngine = false;
@@ -67,8 +63,7 @@ class MockDevice : public RootDevice {
     using Device::generateUuidFromPciBusInfo;
     using Device::getGlobalMemorySize;
     using Device::initializeCaps;
-    using Device::initUsmReuseMaxSize;
-    using Device::maxAllocationsSavedForReuseSize;
+    using Device::initUsmReuseLimits;
     using Device::maxBufferPoolCount;
     using Device::microsecondResolution;
     using Device::preemptionMode;
@@ -78,6 +73,7 @@ class MockDevice : public RootDevice {
     using Device::rtMemoryBackedBuffer;
     using Device::secondaryCsrs;
     using Device::secondaryEngines;
+    using Device::usmMemAllocPool;
     using Device::uuid;
     using RootDevice::createEngines;
     using RootDevice::defaultEngineIndex;
@@ -155,9 +151,7 @@ class MockDevice : public RootDevice {
         return Device::create<MockSubDevice>(executionEnvironment, subDeviceIndex, *this);
     }
 
-    std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const override {
-        return std::unique_ptr<CommandStreamReceiver>(createCommandStreamReceiverFunc(*executionEnvironment, getRootDeviceIndex(), getDeviceBitfield()));
-    }
+    std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const override;
 
     bool verifyAdapterLuid() override;
 
@@ -170,7 +164,7 @@ class MockDevice : public RootDevice {
         rtDispatchGlobalsForceAllocation = true;
     }
 
-    bool isAnyDirectSubmissionEnabled(bool light) const override {
+    bool isAnyDirectSubmissionEnabledImpl(bool light) const override {
         return anyDirectSubmissionEnabledReturnValue;
     }
 

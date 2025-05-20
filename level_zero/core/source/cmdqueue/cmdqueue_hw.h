@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -27,7 +27,8 @@ struct CommandQueueHw : public CommandQueueImp {
     ze_result_t executeCommandLists(uint32_t numCommandLists,
                                     ze_command_list_handle_t *phCommandLists,
                                     ze_fence_handle_t hFence, bool performMigration,
-                                    NEO::LinearStream *parentImmediateCommandlistLinearStream) override;
+                                    NEO::LinearStream *parentImmediateCommandlistLinearStream,
+                                    std::unique_lock<std::mutex> *outerLockForIndirect) override;
 
     void programStateBaseAddress(uint64_t gsba, bool useLocalMemoryForIndirectHeap, NEO::LinearStream &commandStream, bool cachedMOCSAllowed, NEO::StreamProperties *streamProperties);
     size_t estimateStateBaseAddressCmdSize();
@@ -83,6 +84,7 @@ struct CommandQueueHw : public CommandQueueImp {
         void *currentPatchForChainedBbStart = nullptr;
         NEO::ScratchSpaceController *scratchSpaceController = nullptr;
         NEO::GraphicsAllocation *globalStatelessAllocation = nullptr;
+        std::unique_lock<std::mutex> *outerLockForIndirect = nullptr;
 
         NEO::PreemptionMode preemptionMode{};
         NEO::PreemptionMode statePreemption{};
@@ -112,6 +114,8 @@ struct CommandQueueHw : public CommandQueueImp {
         bool containsParentImmediateStream = false;
     };
 
+    inline void processMemAdviseOperations(CommandList *commandList);
+
     ze_result_t executeCommandListsRegularHeapless(CommandListExecutionContext &ctx,
                                                    uint32_t numCommandLists,
                                                    ze_command_list_handle_t *commandListHandles,
@@ -132,11 +136,11 @@ struct CommandQueueHw : public CommandQueueImp {
     inline size_t computePreemptionSizeForCommandList(CommandListExecutionContext &ctx,
                                                       CommandList *commandList,
                                                       bool &dirtyState);
-    inline void setupCmdListsAndContextParams(CommandListExecutionContext &ctx,
-                                              ze_command_list_handle_t *phCommandLists,
-                                              uint32_t numCommandLists,
-                                              ze_fence_handle_t hFence,
-                                              NEO::LinearStream *parentImmediateCommandlistLinearStream);
+    inline ze_result_t setupCmdListsAndContextParams(CommandListExecutionContext &ctx,
+                                                     ze_command_list_handle_t *phCommandLists,
+                                                     uint32_t numCommandLists,
+                                                     ze_fence_handle_t hFence,
+                                                     NEO::LinearStream *parentImmediateCommandlistLinearStream);
     MOCKABLE_VIRTUAL bool isDispatchTaskCountPostSyncRequired(ze_fence_handle_t hFence, bool containsAnyRegularCmdList, bool containsParentImmediateStream) const;
     inline size_t estimateLinearStreamSizeInitial(CommandListExecutionContext &ctx);
     size_t estimateStreamSizeForExecuteCommandListsRegularHeapless(CommandListExecutionContext &ctx,
@@ -152,7 +156,7 @@ struct CommandQueueHw : public CommandQueueImp {
     inline size_t estimateLinearStreamSizeComplementary(CommandListExecutionContext &ctx,
                                                         ze_command_list_handle_t *phCommandLists,
                                                         uint32_t numCommandLists);
-    MOCKABLE_VIRTUAL ze_result_t makeAlignedChildStreamAndSetGpuBase(NEO::LinearStream &child, size_t requiredSize);
+    MOCKABLE_VIRTUAL ze_result_t makeAlignedChildStreamAndSetGpuBase(NEO::LinearStream &child, size_t requiredSize, CommandListExecutionContext &ctx);
     inline void getGlobalFenceAndMakeItResident();
     inline void getWorkPartitionAndMakeItResident();
     inline void getGlobalStatelessHeapAndMakeItResident(CommandListExecutionContext &ctx);

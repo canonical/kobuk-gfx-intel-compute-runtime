@@ -18,7 +18,7 @@
 
 namespace NEO {
 
-GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getGmmUsageType(AllocationType allocationType, bool forceUncached, const ProductHelper &productHelper) {
+GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getGmmUsageType(AllocationType allocationType, bool forceUncached, const ProductHelper &productHelper, const HardwareInfo *hwInfo) {
     if (debugManager.flags.ForceUncachedGmmUsageType.get()) {
         UNRECOVERABLE_IF(allocationType == AllocationType::unknown);
         if ((1llu << (static_cast<int64_t>(allocationType) - 1)) & debugManager.flags.ForceUncachedGmmUsageType.get()) {
@@ -29,7 +29,7 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getGmmUsageType(AllocationType
     if (forceUncached || debugManager.flags.ForceAllResourcesUncached.get()) {
         return getDefaultUsageTypeWithCachingDisabled(allocationType, productHelper);
     } else {
-        return getDefaultUsageTypeWithCachingEnabled(allocationType, productHelper);
+        return getDefaultUsageTypeWithCachingEnabled(allocationType, productHelper, hwInfo);
     }
 }
 
@@ -47,7 +47,7 @@ bool CacheSettingsHelper::preferNoCpuAccess(GMM_RESOURCE_USAGE_TYPE_ENUM gmmReso
     return (gmmResourceUsageType != GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER);
 }
 
-GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCachingEnabled(AllocationType allocationType, const ProductHelper &productHelper) {
+GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCachingEnabled(AllocationType allocationType, const ProductHelper &productHelper, const HardwareInfo *hwInfo) {
     if (productHelper.overrideUsageForDcFlushMitigation(allocationType)) {
         return getDefaultUsageTypeWithCachingDisabled(allocationType, productHelper);
     }
@@ -55,6 +55,12 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCaching
     if (debugManager.flags.ForceGmmSystemMemoryBufferForAllocations.get()) {
         UNRECOVERABLE_IF(allocationType == AllocationType::unknown);
         if ((1llu << (static_cast<int64_t>(allocationType))) & debugManager.flags.ForceGmmSystemMemoryBufferForAllocations.get()) {
+            return GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
+        }
+    }
+
+    if (hwInfo->capabilityTable.isIntegratedDevice) {
+        if (AllocationType::ringBuffer == allocationType || AllocationType::semaphoreBuffer == allocationType) {
             return GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
         }
     }
@@ -81,11 +87,11 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCaching
             return getDefaultUsageTypeWithCachingDisabled(allocationType, productHelper);
         }
         return GMM_RESOURCE_USAGE_OCL_BUFFER;
-    case AllocationType::externalHostPtr:
     case AllocationType::bufferHostMemory:
+    case AllocationType::externalHostPtr:
+    case AllocationType::fillPattern:
     case AllocationType::internalHostMemory:
     case AllocationType::mapAllocation:
-    case AllocationType::fillPattern:
     case AllocationType::svmCpu:
     case AllocationType::svmZeroCopy:
     case AllocationType::tagBuffer:
@@ -126,8 +132,8 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCaching
 }
 
 // Set 2-way coherency for allocations which are not aligned to cacheline
-GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getGmmUsageTypeForUserPtr(const void *userPtr, size_t size, const ProductHelper &productHelper) {
-    if (!isL3Capable(userPtr, size) && productHelper.isMisalignedUserPtr2WayCoherent()) {
+GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getGmmUsageTypeForUserPtr(bool isCacheFlushRequired, const void *userPtr, size_t size, const ProductHelper &productHelper) {
+    if (isCacheFlushRequired && !isL3Capable(userPtr, size) && productHelper.isMisalignedUserPtr2WayCoherent()) {
         return GMM_RESOURCE_USAGE_HW_CONTEXT;
     } else {
         return GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;

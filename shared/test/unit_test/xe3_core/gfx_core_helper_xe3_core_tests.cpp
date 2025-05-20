@@ -480,33 +480,45 @@ XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, whenNonBcsEngineIsVerifiedThenReturnFa
 XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenGfxCoreHelperWhenAskedIfFenceAllocationRequiredThenReturnCorrectValue) {
     DebugManagerStateRestore dbgRestore;
 
-    auto hwInfo = *defaultHwInfo;
-    auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    const auto hwInfo = *defaultHwInfo;
+    const auto &gfxCoreHelper = getHelper<GfxCoreHelper>();
+    const auto &productHelper = getHelper<ProductHelper>();
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(-1);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(-1);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(-1);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(-1);
+    EXPECT_EQ(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper), !hwInfo.capabilityTable.isIntegratedDevice);
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_FALSE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_FALSE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(1);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(1);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 
     debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
     debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
     debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(1);
-    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo));
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(0);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
+
+    debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.set(0);
+    debugManager.flags.ProgramGlobalFenceAsPostSyncOperationInComputeWalker.set(0);
+    debugManager.flags.ProgramGlobalFenceAsKernelInstructionInEUKernel.set(0);
+    debugManager.flags.DirectSubmissionInsertExtraMiMemFenceCommands.set(1);
+    EXPECT_TRUE(gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper));
 }
 
 XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenDefaultMemorySynchronizationCommandsWhenGettingSizeForAdditionalSynchronizationThenCorrectValueIsReturned) {
@@ -685,12 +697,17 @@ XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenIsBlitterForImage
 
 XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenAskingForGlobalFenceSupportThenReturnTrue) {
     auto &productHelper = getHelper<ProductHelper>();
-    EXPECT_TRUE(productHelper.isGlobalFenceInCommandStreamRequired(*defaultHwInfo));
+    EXPECT_EQ(productHelper.isGlobalFenceInCommandStreamRequired(*defaultHwInfo), !defaultHwInfo->capabilityTable.isIntegratedDevice);
 }
 
 XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenCallDeferMOCSToPatThenTrueIsReturned) {
     const auto &productHelper = getHelper<ProductHelper>();
-    EXPECT_TRUE(productHelper.deferMOCSToPatIndex());
+    EXPECT_TRUE(productHelper.deferMOCSToPatIndex(false));
+}
+
+XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenCallDeferMOCSToPatOnWSLThenTrueIsReturned) {
+    const auto &productHelper = getHelper<ProductHelper>();
+    EXPECT_TRUE(productHelper.deferMOCSToPatIndex(true));
 }
 
 XE3_CORETEST_F(ProductHelperTestXe3Core, givenProductHelperWhenAskingForCooperativeEngineSupportThenReturnFalse) {
@@ -833,6 +850,26 @@ XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenGfxCoreHelperWhenFlagSetAndCallGe
 
     debugManager.flags.SetAmountOfReusableAllocations.set(1);
     EXPECT_EQ(gfxCoreHelper.getAmountOfAllocationsToFill(), 1u);
+}
+
+XE3_CORETEST_F(GfxCoreHelperTestsXe3Core, givenGfxCoreHelperWhenUsmCompressionSupportedCalledThenReturnTrue) {
+    VariableBackup<HardwareInfo> backupHwInfo(defaultHwInfo.get());
+    DebugManagerStateRestore restorer;
+    MockExecutionEnvironment mockExecutionEnvironment{};
+    auto &gfxCoreHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>();
+
+    defaultHwInfo->capabilityTable.ftrRenderCompressedBuffers = false;
+    EXPECT_FALSE(gfxCoreHelper.usmCompressionSupported(*defaultHwInfo));
+
+    defaultHwInfo->capabilityTable.ftrRenderCompressedBuffers = true;
+    EXPECT_TRUE(gfxCoreHelper.usmCompressionSupported(*defaultHwInfo));
+
+    debugManager.flags.RenderCompressedBuffersEnabled.set(0);
+    EXPECT_FALSE(gfxCoreHelper.usmCompressionSupported(*defaultHwInfo));
+
+    debugManager.flags.RenderCompressedBuffersEnabled.set(1);
+    defaultHwInfo->capabilityTable.ftrRenderCompressedBuffers = false;
+    EXPECT_TRUE(gfxCoreHelper.usmCompressionSupported(*defaultHwInfo));
 }
 
 using ProductHelperTestXe3 = ::testing::Test;

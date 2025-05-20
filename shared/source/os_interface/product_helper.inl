@@ -385,21 +385,6 @@ bool ProductHelperHw<gfxProduct>::restartDirectSubmissionForHostptrFree() const 
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::isAdjustDirectSubmissionTimeoutOnThrottleAndAcLineStatusEnabled() const {
-    return false;
-}
-
-template <PRODUCT_FAMILY gfxProduct>
-TimeoutParams ProductHelperHw<gfxProduct>::getDirectSubmissionControllerTimeoutParams(bool acLineConnected, QueueThrottle queueThrottle) const {
-    TimeoutParams params{};
-    params.maxTimeout = std::chrono::microseconds{DirectSubmissionController::defaultTimeout};
-    params.timeout = std::chrono::microseconds{DirectSubmissionController::defaultTimeout};
-    params.timeoutDivisor = 1;
-    params.directSubmissionEnabled = true;
-    return params;
-}
-
-template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::isForceEmuInt32DivRemSPWARequired(const HardwareInfo &hwInfo) const {
     return false;
 }
@@ -534,6 +519,11 @@ bool ProductHelperHw<gfxProduct>::isCopyEngineSelectorEnabled(const HardwareInfo
 template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const {
     return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isGlobalFenceInPostSyncRequired(const HardwareInfo &hwInfo) const {
+    return !hwInfo.capabilityTable.isIntegratedDevice;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -1032,6 +1022,11 @@ bool ProductHelperHw<gfxProduct>::isMisalignedUserPtr2WayCoherent() const {
 }
 
 template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isSvmHeapReservationSupported() const {
+    return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::isTimestampWaitSupportedForQueues(bool heaplessEnabled) const {
     return false;
 }
@@ -1114,6 +1109,11 @@ bool ProductHelperHw<gfxProduct>::isCompressionForbiddenCommon(bool defaultValue
     } else {
         return (images == 0 && buffers == 0);
     }
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isExposingSubdevicesAllowed() const {
+    return true;
 }
 
 } // namespace NEO

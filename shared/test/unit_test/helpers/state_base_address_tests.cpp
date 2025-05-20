@@ -8,6 +8,7 @@
 #include "shared/test/unit_test/helpers/state_base_address_tests.h"
 
 #include "shared/source/command_container/encode_surface_state.h"
+#include "shared/source/command_stream/stream_properties.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/state_base_address_helper.h"
 #include "shared/source/memory_manager/allocation_properties.h"
@@ -17,9 +18,7 @@
 
 #include "encode_surface_state_args.h"
 
-using IsBetweenSklAndTgllp = IsWithinProducts<IGFX_SKYLAKE, IGFX_TIGERLAKE_LP>;
-
-HWTEST2_F(SbaTest, WhenAppendStateBaseAddressParametersIsCalledThenSBACmdHasBindingSurfaceStateProgrammed, IsBetweenSklAndTgllp) {
+HWTEST2_F(SbaTest, WhenAppendStateBaseAddressParametersIsCalledThenSBACmdHasBindingSurfaceStateProgrammed, IsGen12LP) {
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     STATE_BASE_ADDRESS stateBaseAddress;

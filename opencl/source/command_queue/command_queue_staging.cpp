@@ -15,6 +15,7 @@
 #include "opencl/source/context/context.h"
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/helpers/base_object.h"
+#include "opencl/source/helpers/mipmap.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/image.h"
 
@@ -54,8 +55,10 @@ cl_int CommandQueue::enqueueStagingImageTransfer(cl_command_type commandType, Im
 
     bool isSingleTransfer = false;
     ChunkTransferImageFunc chunkWrite = [&](void *stagingBuffer, const size_t *origin, const size_t *region) -> int32_t {
-        auto isFirstTransfer = (globalOrigin[1] == origin[1]);
-        auto isLastTransfer = (globalOrigin[1] + globalRegion[1] == origin[1] + region[1]);
+        auto isFirstTransfer = (globalOrigin[1] == origin[1] && globalOrigin[2] == origin[2]);
+
+        auto isLastTransfer = (globalOrigin[1] + globalRegion[1] == origin[1] + region[1]) &&
+                              (globalOrigin[2] + globalRegion[2] == origin[2] + region[2]);
         isSingleTransfer = isFirstTransfer && isLastTransfer;
         cl_event *outEvent = assignEventForStaging(event, &profilingEvent, isFirstTransfer, isLastTransfer);
         cl_int ret = 0;
@@ -69,9 +72,11 @@ cl_int CommandQueue::enqueueStagingImageTransfer(cl_command_type commandType, Im
     };
     auto bytesPerPixel = image->getSurfaceFormatInfo().surfaceFormat.imageElementSizeInBytes;
     auto dstRowPitch = inputRowPitch ? inputRowPitch : globalRegion[0] * bytesPerPixel;
+    auto dstSlicePitch = inputSlicePitch ? inputSlicePitch : globalRegion[1] * dstRowPitch;
+    auto isMipMap3D = isMipMapped(image->getImageDesc()) && image->getImageDesc().image_type == CL_MEM_OBJECT_IMAGE3D;
 
     auto stagingBufferManager = this->context->getStagingBufferManager();
-    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, bytesPerPixel, chunkWrite, &csr, isRead);
+    auto ret = stagingBufferManager->performImageTransfer(ptr, globalOrigin, globalRegion, dstRowPitch, dstSlicePitch, bytesPerPixel, isMipMap3D, chunkWrite, &csr, isRead);
 
     if (isRead && context->isProvidingPerformanceHints()) {
         auto hostPtrSize = calculateHostPtrSizeForImage(globalRegion, inputRowPitch, inputSlicePitch, image);
@@ -198,6 +203,7 @@ bool CommandQueue::isValidForStagingTransfer(MemObj *memObj, const void *ptr, si
         return isValidForStaging && !this->bufferCpuCopyAllowed(castToObject<Buffer>(memObj), commandType, isBlocking, size, const_cast<void *>(ptr), 0, nullptr);
     case CL_MEM_OBJECT_IMAGE1D:
     case CL_MEM_OBJECT_IMAGE2D:
+    case CL_MEM_OBJECT_IMAGE3D:
         return isValidForStaging;
     default:
         return false;

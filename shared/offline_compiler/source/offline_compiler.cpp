@@ -31,6 +31,7 @@
 #include "shared/source/helpers/string.h"
 #include "shared/source/helpers/validators.h"
 #include "shared/source/release_helper/release_helper.h"
+#include "shared/source/utilities/io_functions.h"
 
 #include "offline_compiler_ext.h"
 #include "platforms.h"
@@ -43,11 +44,9 @@
 
 #ifdef _WIN32
 #include <direct.h>
-#define MakeDirectory _mkdir
 #define GetCurrentWorkingDirectory _getcwd
 #else
 #include <sys/stat.h>
-#define MakeDirectory(dir) mkdir(dir, 0777)
 #define GetCurrentWorkingDirectory getcwd
 #endif
 
@@ -101,6 +100,9 @@ OfflineCompiler *OfflineCompiler::create(size_t numArgs, const std::vector<std::
         pOffCompiler->fclFacade = std::make_unique<OclocFclFacade>(helper);
         pOffCompiler->igcFacade = std::make_unique<OclocIgcFacade>(helper);
         retVal = pOffCompiler->initialize(numArgs, allArgs, dumpFiles);
+        if (pOffCompiler->useIgcAsFcl()) {
+            pOffCompiler->fclFacade = std::make_unique<OclocIgcAsFcl>(helper);
+        }
     }
 
     if (retVal != OCLOC_SUCCESS) {
@@ -537,22 +539,20 @@ int OfflineCompiler::buildToIrBinary() {
         fclSrc = fclFacade->createConstBuffer(sourceCode.c_str(), sourceCode.size() + 1);
     }
 
-    auto fclTranslationCtx = fclFacade->createTranslationContext(srcType, intermediateRepresentation, err.get());
+    if (false == NEO::areNotNullptr(fclSrc.get(), pBuildInfo->fclOptions.get(), pBuildInfo->fclInternalOptions.get())) {
+        retVal = OCLOC_OUT_OF_HOST_MEMORY;
+        return retVal;
+    }
+
+    pBuildInfo->fclOutput = fclFacade->translate(srcType, intermediateRepresentation, err.get(),
+                                                 fclSrc.get(), pBuildInfo->fclOptions.get(),
+                                                 pBuildInfo->fclInternalOptions.get(), nullptr, 0);
 
     if (true == NEO::areNotNullptr(err->GetMemory<char>())) {
         updateBuildLog(err->GetMemory<char>(), err->GetSizeRaw());
         retVal = OCLOC_BUILD_PROGRAM_FAILURE;
         return retVal;
     }
-
-    if (false == NEO::areNotNullptr(fclSrc.get(), pBuildInfo->fclOptions.get(), pBuildInfo->fclInternalOptions.get(),
-                                    fclTranslationCtx.get())) {
-        retVal = OCLOC_OUT_OF_HOST_MEMORY;
-        return retVal;
-    }
-
-    pBuildInfo->fclOutput = fclTranslationCtx->Translate(fclSrc.get(), pBuildInfo->fclOptions.get(),
-                                                         pBuildInfo->fclInternalOptions.get(), nullptr, 0);
 
     if (pBuildInfo->fclOutput == nullptr) {
         retVal = OCLOC_OUT_OF_HOST_MEMORY;
@@ -1223,7 +1223,7 @@ void OfflineCompiler::appendExtraInternalOptions(std::string &internalOptions) {
     }
 
     CompilerOptions::concatenateAppend(internalOptions, compilerProductHelper->getCachingPolicyOptions(false));
-    CompilerOptions::applyExtraInternalOptions(internalOptions, *compilerProductHelper, this->heaplessMode);
+    CompilerOptions::applyExtraInternalOptions(internalOptions, hwInfo, *compilerProductHelper, this->heaplessMode);
 }
 
 void OfflineCompiler::parseDebugSettings() {
@@ -1646,7 +1646,7 @@ void OfflineCompiler::writeOutAllFiles() {
 }
 
 void OfflineCompiler::createDir(const std::string &path) {
-    MakeDirectory(path.c_str());
+    IoFunctions::mkdirPtr(path.c_str());
 }
 
 bool OfflineCompiler::readOptionsFromFile(std::string &options, const std::string &file, OclocArgHelper *helper) {
@@ -1704,6 +1704,21 @@ std::string generateFilePath(const std::string &directory, const std::string &fi
     ret.append(extension);
 
     return ret;
+}
+
+bool OfflineCompiler::useIgcAsFcl() {
+    if (0 != debugManager.flags.UseIgcAsFcl.get()) {
+        if (1 == debugManager.flags.UseIgcAsFcl.get()) {
+            return true;
+        } else if (2 == debugManager.flags.UseIgcAsFcl.get()) {
+            return false;
+        }
+    }
+
+    if (nullptr == compilerProductHelper) {
+        return false;
+    }
+    return compilerProductHelper->useIgcAsFcl();
 }
 
 } // namespace NEO

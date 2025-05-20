@@ -40,10 +40,10 @@ typedef enum _zet_intel_metric_source_id_exp_version_t {
 /// @brief Query an unique identifier representing the source of a metric group
 /// This structure can be passed in the 'pNext' of zet_metric_group_properties_t
 typedef struct _zet_intel_metric_source_id_exp_t {
-    zet_structure_type_t stype; ///< [in] type of this structure
-    const void *pNext;          ///< [in][optional] must be null or a pointer to an extension-specific
-                                ///< structure (i.e. contains stype and pNext).
-    uint32_t sourceId;          ///< [out] Returns an unique source Id of the metric group
+    zet_structure_type_ext_t stype; ///< [in] type of this structure
+    const void *pNext;              ///< [in][optional] must be null or a pointer to an extension-specific
+                                    ///< structure (i.e. contains stype and pNext).
+    uint32_t sourceId;              ///< [out] Returns an unique source Id of the metric group
 } zet_intel_metric_source_id_exp_t;
 
 #ifndef ZET_INTEL_METRIC_APPEND_MARKER_EXP_NAME
@@ -207,15 +207,16 @@ typedef enum _zet_intel_metric_calculate_exp_version_t {
 /// @brief Query an  metric group calculate properties
 /// This structure can be passed in the 'pNext' of zet_metric_group_properties_t
 typedef struct _zet_intel_metric_group_calculate_properties_exp_t {
-    zet_structure_type_t stype; ///< [in] type of this structure
-    void *pNext;                ///< [in][optional] must be null or a pointer to an extension-specific
-                                ///< structure (i.e. contains stype and pNext).
-    bool isTimeFilterSupported; ///< [out] Flag to indicate if the metric group supports time filtering for
-                                ///< metrics calculation.
+    zet_structure_type_ext_t stype; ///< [in] type of this structure
+    void *pNext;                    ///< [in][optional] must be null or a pointer to an extension-specific
+                                    ///< structure (i.e. contains stype and pNext).
+    bool isTimeFilterSupported;     ///< [out] Flag to indicate if the metric group supports time filtering for
+                                    ///< metrics calculation.
 } zet_intel_metric_group_calculate_properties_exp_t;
 
 ///////////////////////////////////////////////////////////////////////////////
 /// @brief Handle of metric calculate operation
+struct _zet_intel_metric_calculate_operation_exp_handle_t {};
 typedef struct _zet_intel_metric_calculate_operation_exp_handle_t *zet_intel_metric_calculate_operation_exp_handle_t;
 
 typedef struct _zet_intel_metric_calculate_time_window_exp_t {
@@ -226,7 +227,7 @@ typedef struct _zet_intel_metric_calculate_time_window_exp_t {
 } zet_intel_metric_calculate_time_window_exp_t;
 
 typedef struct _zet_intel_metric_calculate_exp_desc_t {
-    zet_structure_type_t stype;                                          ///< [in] type of this structure
+    zet_structure_type_ext_t stype;                                      ///< [in] type of this structure
     const void *pNext;                                                   ///< [in][optional] must be null or a pointer to an extension-specific
                                                                          ///< structure (i.e. contains stype and pNext).
     uint32_t metricGroupCount;                                           ///< [in] [in] count for metric group handles in metric hMetricGroups array.
@@ -267,11 +268,11 @@ typedef struct _zet_intel_metric_result_exp_t {
     zet_intel_metric_calculate_result_status_exp_t resultStatus; ///< [out] type of the result for the filters applied to the calculation.
 } zet_intel_metric_result_exp_t;
 typedef struct _zet_intel_metric_decoded_buffer_exp_properties_t {
-    zet_structure_type_t stype; ///< [in] type of this structure
-    void *pNext;                ///< [in][optional] must be null or a pointer to an extension-specific
-                                ///< structure (i.e. contains stype and pNext).
-    uint64_t minTimeStamp;      ///< [out] minimum timestamp contained in the raw data buffer
-    uint64_t maxTimeStamp;      ///< [out] maximum timestamp contained in the raw data buffer
+    zet_structure_type_ext_t stype; ///< [in] type of this structure
+    void *pNext;                    ///< [in][optional] must be null or a pointer to an extension-specific
+                                    ///< structure (i.e. contains stype and pNext).
+    uint64_t minTimeStamp;          ///< [out] minimum timestamp contained in the raw data buffer
+    uint64_t maxTimeStamp;          ///< [out] maximum timestamp contained in the raw data buffer
 } zet_intel_metric_decoded_buffer_exp_properties_t;
 
 ze_result_t ZE_APICALL
@@ -309,9 +310,9 @@ ze_result_t ZE_APICALL zetIntelMetricCalculateGetReportFormatExp(
 ze_result_t ZE_APICALL
 zetIntelMetricDecodeCalculateMultipleValuesExp(
     zet_metric_decoder_exp_handle_t hMetricDecoder,                        ///< [in] handle of the metric decoder object
-    size_t rawDataSize,                                                    ///< [in] size in bytes of raw data buffer.
-    size_t *offset,                                                        ///< [in,out] On input, the offset from the beginning of the data to decode. On output,
-                                                                           ///< the number raw bytes processed
+    const size_t rawDataSize,                                              ///< [in] size in bytes of raw data buffer.
+    size_t *offset,                                                        ///< [in,out] On input, the offset from the beginning of pRawData to decode
+                                                                           ///< and calculate. On output, the number raw bytes processed
     const uint8_t *pRawData,                                               ///< [in,out][range(0, *rawDataSize)] buffer containing tracer
                                                                            ///< data in raw format
     zet_intel_metric_calculate_operation_exp_handle_t hCalculateOperation, ///< [in] Calculate operation handle
@@ -359,8 +360,8 @@ zetIntelMetricDecodeToBinaryBufferExp(
 
 ze_result_t ZE_APICALL
 zetIntelMetricCalculateMultipleValuesExp(
-    size_t rawDataSize,                                                    ///< [in] size in bytes of raw data buffer.
-    size_t *offset,                                                        ///< [in,out] On input, the offset from the beginning of the data to decode. On output,
+    const size_t rawDataSize,                                              ///< [in] size in bytes of raw data buffer.
+    size_t *offset,                                                        ///< [in,out] On input, the offset from the beginning of pRawData calculate. On output,
                                                                            ///< the number raw bytes processed
     const uint8_t *pRawData,                                               ///< [in,out][range(0, *rawDataSize)] buffer containing tracer
                                                                            ///< data in raw format
@@ -382,6 +383,24 @@ zetIntelMetricCalculateMultipleValuesExp(
                                                                            ///< the number of reports available in the raw data buffer, then the driver shall
                                                                            ///< update the value with the actual number of metric reports calculated. If set
                                                                            ///< to null, then driver will only update the value of pSetCount
+    zet_intel_metric_result_exp_t *pMetricResults);                        ///< [in,out][optional][range(0, *pTotalMetricResultsCount)] buffer of calculated
+                                                                           ///< metrics results.
+
+ze_result_t ZE_APICALL
+zetIntelMetricCalculateValuesExp(
+    const size_t rawDataSize,                                              ///< [in] size in bytes of raw data buffer.
+    size_t *pOffset,                                                       ///< [in,out] On input, the offset from the beginning of the pRawData to calculate
+                                                                           ///< On output, the number raw bytes processed
+    const uint8_t *pRawData,                                               ///< [in,out][range(0, *rawDataSize)] buffer containing tracer
+                                                                           ///< data in raw format
+    zet_intel_metric_calculate_operation_exp_handle_t hCalculateOperation, ///< [in] Calculate operation handle
+    uint32_t *pTotalMetricReportCount,                                     ///< [in,out] [optional] pointer to the total number of metric reports calculated,
+                                                                           ///< If count is zero, then the driver shall update the value with the total number of
+                                                                           ///< metric reports to be calculated. If count is greater than zero but less than the
+                                                                           ///< total number of reports available in the raw data, then only that number of
+                                                                           ///< reports will be calculated. If count is greater than the number of reports
+                                                                           ///< available in the raw data buffer, then the driver shall update the value with
+                                                                           ///< the actual number of metric reports calculated.
     zet_intel_metric_result_exp_t *pMetricResults);                        ///< [in,out][optional][range(0, *pTotalMetricResultsCount)] buffer of calculated
                                                                            ///< metrics results.
 

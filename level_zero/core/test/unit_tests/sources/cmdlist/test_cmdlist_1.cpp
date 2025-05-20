@@ -11,6 +11,7 @@
 #include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
+#include "shared/source/unified_memory/usm_memory_support.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/relaxed_ordering_commands_helper.h"
@@ -184,7 +185,7 @@ TEST_F(CommandListCreateTests, givenNonExistingPtrThenAppendMemoryPrefetchReturn
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, res);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseFailsThenReturnSuccess) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrWhenExecuteMemAdviseFailsThenReturnSuccess) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -203,14 +204,183 @@ TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseFailsThenReturnSu
     auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
     memoryManager->failSetMemAdvise = true;
 
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = context->freeMem(ptr);
+    ASSERT_EQ(res, ZE_RESULT_SUCCESS);
+}
+
+TEST_F(CommandListCreateTests, givenValidSystemAlloctedPtrAndNotSharedSystemAllocationsAllowedWhenExecuteMemAdviseFailsThenReturnError) {
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableSharedSystemUsmSupport.set(1u);
+    debugManager.flags.EnableRecoverablePageFaults.set(1u);
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
+    ASSERT_NE(nullptr, commandList);
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
+
+    sharedSystemMemCapabilities = 0; // enables return false for Device::areSharedSystemAllocationsAllowed()
+
+    size_t size = 10;
+    void *ptr = nullptr;
+
+    ptr = malloc(size);
+    EXPECT_NE(nullptr, ptr);
+
+    auto res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, res);
+
+    free(ptr);
+}
+
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrWhenAppendMemAdviseSuccedsThenMemAdviseOperationsGrows) {
+
+    size_t size = 10;
+    size_t alignment = 1u;
+    void *ptr = nullptr;
+
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    auto res = context->allocDeviceMem(device->toHandle(),
+                                       &deviceDesc,
+                                       size, alignment, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_NE(nullptr, ptr);
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
+    ASSERT_NE(nullptr, commandList);
+
     res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    EXPECT_EQ(1u, commandList->getMemAdviseOperations().size());
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     res = context->freeMem(ptr);
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseSucceedsThenReturnSuccess) {
+TEST_F(CommandListCreateTests, givenValidSystemAlloctedPtrAndSharedSystemAllocationsAllowedWhenAppendMemAdviseSuccedsThenMemAdviseOperationsGrows) {
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableSharedSystemUsmSupport.set(1u);
+    debugManager.flags.EnableRecoverablePageFaults.set(1u);
+
+    size_t size = 10;
+    void *ptr = nullptr;
+
+    ptr = malloc(size);
+    EXPECT_NE(nullptr, ptr);
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
+    ASSERT_NE(nullptr, commandList);
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
+
+    sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+
+    auto res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    EXPECT_EQ(1u, commandList->getMemAdviseOperations().size());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    free(ptr);
+}
+
+using ::testing::ValuesIn;
+
+class SupportedMemAdviceSystemAllocatorTests : public CommandListCreateTests, public ::testing::WithParamInterface<ze_memory_advice_t> {};
+
+TEST_P(SupportedMemAdviceSystemAllocatorTests, givenValidSystemAlloctedPtrWhenExecuteMemAdviseWithSupportedAdviceFailsThenReturnSuccess) {
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableSharedSystemUsmSupport.set(1u);
+    debugManager.flags.EnableRecoverablePageFaults.set(1u);
+
+    size_t size = 10;
+    void *ptr = nullptr;
+
+    ptr = malloc(size);
+    EXPECT_NE(nullptr, ptr);
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
+    ASSERT_NE(nullptr, commandList);
+
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->failSetSharedSystemMemAdvise = true;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
+
+    sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+
+    auto res = commandList->executeMemAdvise(device, ptr, size, GetParam());
+    EXPECT_EQ(1u, memoryManager->setSharedSystemMemAdviseCalledCount);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    free(ptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SupportedMemAdviceTests,
+    SupportedMemAdviceSystemAllocatorTests,
+    ValuesIn(std::vector<ze_memory_advice_t>{
+        ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION,
+        ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION,
+        ZE_MEMORY_ADVICE_SET_SYSTEM_MEMORY_PREFERRED_LOCATION,
+        ZE_MEMORY_ADVICE_CLEAR_SYSTEM_MEMORY_PREFERRED_LOCATION}));
+
+class UnSupportedMemAdviceSystemAllocatorTests : public CommandListCreateTests, public ::testing::WithParamInterface<ze_memory_advice_t> {};
+
+TEST_P(UnSupportedMemAdviceSystemAllocatorTests, givenValidSystemAlloctedPtrWhenExecuteMemAdviseWithUnSupportedAdviceFailsThenReturnSuccess) {
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableSharedSystemUsmSupport.set(1u);
+    debugManager.flags.EnableRecoverablePageFaults.set(1u);
+
+    size_t size = 10;
+    void *ptr = nullptr;
+
+    ptr = malloc(size);
+    EXPECT_NE(nullptr, ptr);
+
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
+    ASSERT_NE(nullptr, commandList);
+
+    auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
+    memoryManager->failSetSharedSystemMemAdvise = true;
+
+    auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
+    VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
+
+    sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+
+    auto res = commandList->executeMemAdvise(device, ptr, size, GetParam());
+    EXPECT_EQ(0u, memoryManager->setSharedSystemMemAdviseCalledCount);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    free(ptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    UnSupportedMemAdviceTests,
+    UnSupportedMemAdviceSystemAllocatorTests,
+    ValuesIn(std::vector<ze_memory_advice_t>{
+        ZE_MEMORY_ADVICE_SET_READ_MOSTLY,
+        ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY,
+        ZE_MEMORY_ADVICE_SET_NON_ATOMIC_MOSTLY,
+        ZE_MEMORY_ADVICE_CLEAR_NON_ATOMIC_MOSTLY,
+        ZE_MEMORY_ADVICE_BIAS_CACHED,
+        ZE_MEMORY_ADVICE_BIAS_UNCACHED,
+        ZE_MEMORY_ADVICE_FORCE_UINT32}));
+
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrWhenExecuteMemAdviseSucceedsThenReturnSuccess) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -226,14 +396,14 @@ TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseSucceedsThenRetur
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     res = context->freeMem(ptr);
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetWithMaxHintThenSuccessReturned) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrThenExecuteMemAdviseSetWithMaxHintThenSuccessReturned) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -249,14 +419,14 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetWithMaxHintThe
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_FORCE_UINT32);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_FORCE_UINT32);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     res = context->freeMem(ptr);
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearReadMostlyThenMemAdviseReadOnlySet) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrThenExecuteMemAdviseSetAndClearReadMostlyThenMemAdviseReadOnlySet) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -273,13 +443,13 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearReadMo
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
     L0::DeviceImp *deviceImp = static_cast<L0::DeviceImp *>((L0::Device::fromHandle(device)));
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.readOnly);
@@ -288,7 +458,7 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearReadMo
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearPreferredLocationThenMemAdvisePreferredDeviceSet) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrThenExecuteMemAdviseSetAndClearPreferredLocationThenMemAdvisePreferredDeviceSet) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -305,13 +475,13 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearPrefer
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
     L0::DeviceImp *deviceImp = static_cast<L0::DeviceImp *>((L0::Device::fromHandle(device)));
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.devicePreferredLocation);
@@ -320,7 +490,7 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearPrefer
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseIsCalledWithSetAndClearSystemMemoryPreferredLocationThenMemAdviseSetPreferredSystemMemoryFlagIsSetCorrectly) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrWhenExecuteMemAdviseIsCalledWithSetAndClearSystemMemoryPreferredLocationThenMemAdviseSetPreferredSystemMemoryFlagIsSetCorrectly) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -339,13 +509,13 @@ TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseIsCalledWithSetAn
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_SYSTEM_MEMORY_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_SYSTEM_MEMORY_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
     L0::DeviceImp *deviceImp = static_cast<L0::DeviceImp *>((L0::Device::fromHandle(device)));
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.systemPreferredLocation);
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_SYSTEM_MEMORY_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_SYSTEM_MEMORY_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.systemPreferredLocation);
@@ -354,7 +524,7 @@ TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseIsCalledWithSetAn
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseSetAndClearNonAtomicMostlyThenMemAdviseNonAtomicIgnored) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrWhenExecuteMemAdviseSetAndClearNonAtomicMostlyThenMemAdviseNonAtomicIgnored) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -371,13 +541,13 @@ TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseSetAndClearNonAto
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_NON_ATOMIC_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_NON_ATOMIC_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
     L0::DeviceImp *deviceImp = static_cast<L0::DeviceImp *>((L0::Device::fromHandle(device)));
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.nonAtomic);
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_NON_ATOMIC_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_NON_ATOMIC_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.nonAtomic);
@@ -386,7 +556,7 @@ TEST_F(CommandListCreateTests, givenValidPtrWhenAppendMemAdviseSetAndClearNonAto
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearCachingThenMemAdviseCachingSet) {
+TEST_F(CommandListCreateTests, givenValidDeviceMemPtrThenExecuteMemAdviseSetAndClearCachingThenMemAdviseCachingSet) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -403,7 +573,7 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearCachin
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
     ASSERT_NE(nullptr, commandList);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_BIAS_CACHED);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_BIAS_CACHED);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
     L0::DeviceImp *deviceImp = static_cast<L0::DeviceImp *>((L0::Device::fromHandle(device)));
@@ -411,7 +581,7 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearCachin
     EXPECT_EQ(1, flags.cachedMemory);
     auto memoryManager = static_cast<MockMemoryManager *>(device->getDriverHandle()->getMemoryManager());
     EXPECT_EQ(1, memoryManager->memAdviseFlags.cachedMemory);
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_BIAS_UNCACHED);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_BIAS_UNCACHED);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.cachedMemory);
@@ -423,7 +593,7 @@ TEST_F(CommandListCreateTests, givenValidPtrThenAppendMemAdviseSetAndClearCachin
 
 using CommandListMemAdvisePageFault = Test<PageFaultDeviceFixture>;
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerThenAppendMemAdviseWithReadOnlyAndDevicePreferredClearsMigrationBlocked) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerThenExecuteMemAdviseWithReadOnlyAndDevicePreferredClearsMigrationBlocked) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -447,20 +617,20 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerThenAppend
     flags.cpuMigrationBlocked = 1;
     deviceImp->memAdviseSharedAllocations[allocData] = flags;
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.readOnly);
@@ -471,7 +641,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerThenAppend
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerThenGpuDomainHanlderWithHintsIsSet) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerThenGpuDomainHanlderWithHintsIsSet) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -494,12 +664,12 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerThenGpuDom
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     deviceImp->memAdviseSharedAllocations[allocData] = flags;
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
@@ -512,7 +682,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerThenGpuDom
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetThenHandlerBlocksCpuMigration) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetThenHandlerBlocksCpuMigration) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -533,12 +703,12 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
@@ -558,7 +728,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndOnlyReadOnlyOrDevicePreferredHintThenHandlerAllowsCpuMigration) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndOnlyReadOnlyOrDevicePreferredHintThenHandlerAllowsCpuMigration) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -579,7 +749,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
@@ -599,12 +769,12 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.cpuMigrationBlocked);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.readOnly);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
@@ -613,7 +783,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.cpuMigrationBlocked);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_CLEAR_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(0, flags.devicePreferredLocation);
@@ -626,7 +796,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndWithPrintUsmSharedMigrationDebugKeyThenMessageIsPrinted) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndWithPrintUsmSharedMigrationDebugKeyThenMessageIsPrinted) {
     DebugManagerStateRestore restorer;
     debugManager.flags.PrintUmdSharedMigration.set(1);
 
@@ -652,7 +822,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
@@ -687,7 +857,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndInvalidHintsThenHandlerAllowsCpuMigration) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndInvalidHintsThenHandlerAllowsCpuMigration) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -708,7 +878,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_BIAS_CACHED);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_BIAS_CACHED);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.cachedMemory);
@@ -729,7 +899,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndCpuDomainThenHandlerAllowsCpuMigration) {
+TEST_F(CommandListMemAdvisePageFault, givenValidDeviceMemPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetAndCpuDomainThenHandlerAllowsCpuMigration) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -750,12 +920,12 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
 
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
@@ -776,7 +946,7 @@ TEST_F(CommandListMemAdvisePageFault, givenValidPtrAndPageFaultHandlerAndGpuDoma
     ASSERT_EQ(res, ZE_RESULT_SUCCESS);
 }
 
-TEST_F(CommandListMemAdvisePageFault, givenInvalidPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetThenHandlerAllowsCpuMigration) {
+TEST_F(CommandListMemAdvisePageFault, givenInvalidDeviceMemPtrAndPageFaultHandlerAndGpuDomainHandlerWithHintsSetThenHandlerAllowsCpuMigration) {
     size_t size = 10;
     size_t alignment = 1u;
     void *ptr = nullptr;
@@ -797,12 +967,12 @@ TEST_F(CommandListMemAdvisePageFault, givenInvalidPtrAndPageFaultHandlerAndGpuDo
 
     auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(ptr);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_READ_MOSTLY);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.readOnly);
 
-    res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
+    res = commandList->executeMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     flags = deviceImp->memAdviseSharedAllocations[allocData];
     EXPECT_EQ(1, flags.devicePreferredLocation);
@@ -1166,7 +1336,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
     ultCsr->recordFlushedBatchBuffer = true;
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     auto heaplessStateInitEnabled = compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled);
 
     auto verifyFlags = [&ultCsr, useImmediateFlushTask](ze_result_t result, bool dispatchFlag, bool bbFlag) {
@@ -1211,7 +1381,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
         auto mockBuiltinKernel = static_cast<Mock<::L0::KernelImp> *>(kernel);
         mockBuiltinKernel->setArgRedescribedImageCallBase = false;
 
-        auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+        auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
         ze_image_region_t imgRegion = {1, 1, 1, 1, 1, 1};
         ze_image_desc_t zeDesc = {};
         zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
@@ -1354,7 +1524,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
             auto mockBuiltinKernel = static_cast<Mock<::L0::KernelImp> *>(kernel);
             mockBuiltinKernel->setArgRedescribedImageCallBase = false;
 
-            auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+            auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
             ze_image_region_t imgRegion = {1, 1, 1, 1, 1, 1};
             ze_image_desc_t zeDesc = {};
             zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
@@ -1621,7 +1791,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
             auto mockBuiltinKernel = static_cast<Mock<::L0::KernelImp> *>(kernel);
             mockBuiltinKernel->setArgRedescribedImageCallBase = false;
 
-            auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+            auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
             ze_image_region_t imgRegion = {1, 1, 1, 1, 1, 1};
             ze_image_desc_t zeDesc = {};
             zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
@@ -2631,7 +2801,7 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandListCreateTests, whenCommandListIsCreatedT
     EXPECT_TRUE(cmdSba->getSurfaceStateBaseAddressModifyEnable());
     EXPECT_EQ(ssh->getHeapGpuBase(), cmdSba->getSurfaceStateBaseAddress());
 
-    EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
+    EXPECT_EQ(gmmHelper->getL3EnabledMOCS(), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
 }
 
 HWTEST_F(CommandListCreateTests, givenCommandListWithCopyOnlyWhenCreatedThenStateBaseAddressCmdIsNotProgrammedAndHeapIsNotAllocated) {
@@ -2709,7 +2879,7 @@ HWTEST_F(CommandListCreateTests, whenCommandListIsResetThenContainsStatelessUnca
 HWTEST_F(CommandListCreateTests, givenBindlessModeDisabledWhenCommandListsResetThenSbaReloaded) {
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
 
     if (compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled)) {
         GTEST_SKIP();
@@ -2816,9 +2986,9 @@ HWTEST_F(CommandListCreateTests, givenCommandListWhenAppendingBarrierWithIncorre
 }
 
 HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingBeforeCommandForCopyOnlyThenCommandsHaveCorrectEventOffsets, MatchAny) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
@@ -2854,9 +3024,9 @@ HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingBeforeCommand
 }
 
 HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingAfterCommandForCopyOnlyThenCommandsHaveCorrectEventOffsets, MatchAny) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
@@ -2889,7 +3059,7 @@ HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingAfterCommandF
 }
 
 HWTEST2_F(CommandListCreateTests, givenNullEventWhenAppendEventAfterWalkerThenNothingAddedToStream, MatchAny) {
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
 
     auto usedBefore = commandList->getCmdContainer().getCommandStream()->getUsed();
@@ -2983,7 +3153,7 @@ HWTEST2_F(CommandListCreateTests, givenDummyBlitRequiredWhenEncodeMiFlushWithPos
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceDummyBlitWa.set(1);
-    MockCommandListCoreFamily<gfxCoreFamily> cmdlist;
+    MockCommandListCoreFamily<FamilyType::gfxCoreFamily> cmdlist;
     cmdlist.initialize(device, NEO::EngineGroupType::copy, 0u);
 
     auto &commandContainer = cmdlist.getCmdContainer();
@@ -3011,7 +3181,7 @@ HWTEST2_F(CommandListCreateTests, givenDummyBlitRequiredWhenEncodeMiFlushWithout
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceDummyBlitWa.set(1);
-    MockCommandListCoreFamily<gfxCoreFamily> cmdlist;
+    MockCommandListCoreFamily<FamilyType::gfxCoreFamily> cmdlist;
     cmdlist.initialize(device, NEO::EngineGroupType::copy, 0u);
 
     auto &commandContainer = cmdlist.getCmdContainer();
@@ -3036,7 +3206,7 @@ HWTEST2_F(CommandListCreateTests, givenDummyBlitNotRequiredWhenEncodeMiFlushThen
     using MI_FLUSH_DW = typename FamilyType::MI_FLUSH_DW;
     DebugManagerStateRestore restorer;
     debugManager.flags.ForceDummyBlitWa.set(0);
-    MockCommandListCoreFamily<gfxCoreFamily> cmdlist;
+    MockCommandListCoreFamily<FamilyType::gfxCoreFamily> cmdlist;
     cmdlist.initialize(device, NEO::EngineGroupType::copy, 0u);
 
     auto &commandContainer = cmdlist.getCmdContainer();
@@ -3057,7 +3227,7 @@ HWTEST2_F(CommandListCreateTests, givenDummyBlitNotRequiredWhenEncodeMiFlushThen
 }
 
 HWTEST2_F(CommandListCreateTests, givenEmptySvmManagerWhenIsAllocationImportedThenFalseIsReturned, MatchAny) {
-    auto commandListCore = std::make_unique<WhiteBox<L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandListCore = std::make_unique<WhiteBox<L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandListCore->initialize(device, NEO::EngineGroupType::compute, 0u);
 
     NEO::SVMAllocsManager *svmManager = nullptr;

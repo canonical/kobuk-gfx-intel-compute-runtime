@@ -17,6 +17,9 @@
 namespace NEO {
 
 template <PRODUCT_FAMILY gfxProduct>
+CompilerProductHelperHw<gfxProduct>::CompilerProductHelperHw() = default;
+
+template <PRODUCT_FAMILY gfxProduct>
 bool CompilerProductHelperHw<gfxProduct>::isMidThreadPreemptionSupported(const HardwareInfo &hwInfo) const {
     return hwInfo.featureTable.flags.ftrWalkerMTP;
 }
@@ -221,7 +224,7 @@ StackVec<OclCVersion, 5> CompilerProductHelperHw<gfxProduct>::getDeviceOpenCLCVe
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool CompilerProductHelperHw<gfxProduct>::isHeaplessModeEnabled() const {
+bool CompilerProductHelperHw<gfxProduct>::isHeaplessModeEnabled(const HardwareInfo &hwInfo) const {
     return false;
 }
 
@@ -307,8 +310,8 @@ bool CompilerProductHelperHw<gfxProduct>::isBindlessAddressingDisabled(const Rel
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool CompilerProductHelperHw<gfxProduct>::isForceBindlessRequired() const {
-    return this->isHeaplessModeEnabled();
+bool CompilerProductHelperHw<gfxProduct>::isForceBindlessRequired(const HardwareInfo &hwInfo) const {
+    return this->isHeaplessModeEnabled(hwInfo);
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -317,8 +320,18 @@ const char *CompilerProductHelperHw<gfxProduct>::getCustomIgcLibraryName() const
 }
 
 template <PRODUCT_FAMILY gfxProduct>
+bool CompilerProductHelperHw<gfxProduct>::useIgcAsFcl() const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
 const char *CompilerProductHelperHw<gfxProduct>::getFinalizerLibraryName() const {
     return nullptr;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+IGC::CodeType::CodeType_t CompilerProductHelperHw<gfxProduct>::getPreferredIntermediateRepresentation() const {
+    return IGC::CodeType::spirV;
 }
 
 } // namespace NEO

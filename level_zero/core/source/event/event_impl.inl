@@ -53,7 +53,8 @@ Event *Event::create(const EventDescriptor &eventDescriptor, Device *device, ze_
 
     event->totalEventSize = eventDescriptor.totalEventSize;
     event->eventPoolOffset = eventDescriptor.index * event->totalEventSize;
-    event->hostAddressFromPool = ptrOffset(baseHostAddress, event->eventPoolOffset);
+    event->offsetInSharedAlloc = eventDescriptor.offsetInSharedAlloc;
+    event->hostAddressFromPool = ptrOffset(baseHostAddress, event->eventPoolOffset + event->offsetInSharedAlloc);
     event->signalScope = eventDescriptor.signalScope;
 
     if (NEO::debugManager.flags.ForceHostSignalScope.get() == 1) {
@@ -119,23 +120,27 @@ Event *Event::create(const EventDescriptor &eventDescriptor, Device *device, ze_
 template <typename TagSizeT>
 Event *Event::create(EventPool *eventPool, const ze_event_desc_t *desc, Device *device) {
     EventDescriptor eventDescriptor = {
-        &eventPool->getAllocation(),                   // eventPoolAllocation
-        desc->pNext,                                   // extensions
-        eventPool->getEventSize(),                     // totalEventSize
-        eventPool->getMaxKernelCount(),                // maxKernelCount
-        eventPool->getEventMaxPackets(),               // maxPacketsCount
-        eventPool->getCounterBasedFlags(),             // counterBasedFlags
-        desc->index,                                   // index
-        desc->signal,                                  // signalScope
-        desc->wait,                                    // waitScope
-        eventPool->isEventPoolTimestampFlagSet(),      // timestampPool
-        eventPool->isEventPoolKernelMappedTsFlagSet(), // kernelMappedTsPoolFlag
-        eventPool->getImportedIpcPool(),               // importedIpcPool
-        eventPool->isIpcPoolFlagSet(),                 // ipcPool
+        .eventPoolAllocation = &eventPool->getAllocation(),
+        .extensions = desc->pNext,
+        .totalEventSize = eventPool->getEventSize(),
+        .maxKernelCount = eventPool->getMaxKernelCount(),
+        .maxPacketsCount = eventPool->getEventMaxPackets(),
+        .counterBasedFlags = eventPool->getCounterBasedFlags(),
+        .index = desc->index,
+        .signalScope = desc->signal,
+        .waitScope = desc->wait,
+        .timestampPool = eventPool->isEventPoolTimestampFlagSet(),
+        .kernelMappedTsPoolFlag = eventPool->isEventPoolKernelMappedTsFlagSet(),
+        .importedIpcPool = eventPool->getImportedIpcPool(),
+        .ipcPool = eventPool->isIpcPoolFlagSet(),
     };
 
-    if (eventPool->getCounterBasedFlags() != 0 && standaloneInOrderTimestampAllocationEnabled()) {
+    if (eventPool->getCounterBasedFlags() != 0) {
         eventDescriptor.eventPoolAllocation = nullptr;
+    }
+
+    if (eventPool->getSharedTimestampAllocation()) {
+        eventDescriptor.offsetInSharedAlloc = eventPool->getSharedTimestampAllocation()->getOffset();
     }
 
     ze_result_t result = ZE_RESULT_SUCCESS;
@@ -700,7 +705,8 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
     }
 
     TaskCountType taskCountToWaitForL3Flush = 0;
-    if (((this->isCounterBased() && !this->inOrderTimestampNode.empty()) || this->mitigateHostVisibleSignal) && this->device->getProductHelper().isDcFlushAllowed() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    auto &hwInfo = this->device->getHwInfo();
+    if (((this->isCounterBased() && !this->inOrderTimestampNode.empty()) || this->mitigateHostVisibleSignal) && this->device->getProductHelper().isDcFlushAllowed() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled(hwInfo)) {
         auto lock = this->csrs[0]->obtainUniqueOwnership();
         this->csrs[0]->flushTagUpdate();
         taskCountToWaitForL3Flush = this->csrs[0]->peekLatestFlushedTaskCount();
@@ -712,7 +718,7 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
     const bool fenceWait = isKmdWaitModeEnabled() && isCounterBased() && csrs[0]->waitUserFenceSupported();
 
     do {
-        if (this->isCounterBased() && !this->inOrderTimestampNode.empty() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled()) {
+        if (this->isCounterBased() && !this->inOrderTimestampNode.empty() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled(hwInfo)) {
             synchronizeTimestampCompletionWithTimeout();
             if (this->isTimestampPopulated()) {
                 inOrderExecInfo->setLastWaitedCounterValue(getInOrderExecSignalValueWithSubmissionCounter());

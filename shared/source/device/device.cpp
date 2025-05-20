@@ -43,7 +43,7 @@ extern CommandStreamReceiver *createCommandStream(ExecutionEnvironment &executio
                                                   const DeviceBitfield deviceBitfield);
 
 Device::Device(ExecutionEnvironment *executionEnvironment, const uint32_t rootDeviceIndex)
-    : executionEnvironment(executionEnvironment), rootDeviceIndex(rootDeviceIndex), isaPoolAllocator(this) {
+    : executionEnvironment(executionEnvironment), rootDeviceIndex(rootDeviceIndex), isaPoolAllocator(this), deviceTimestampPoolAllocator(this) {
     this->executionEnvironment->incRefInternal();
     this->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setDummyBlitProperties(rootDeviceIndex);
     if (auto ailHelper = this->executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->getAILConfigurationHelper(); ailHelper && ailHelper->isAdjustMicrosecondResolutionRequired()) {
@@ -73,6 +73,7 @@ Device::~Device() {
 
     syncBufferHandler.reset();
     isaPoolAllocator.releasePools();
+    deviceTimestampPoolAllocator.releasePools();
     if (deviceUsmMemAllocPoolsManager) {
         deviceUsmMemAllocPoolsManager->cleanup();
     }
@@ -92,7 +93,11 @@ bool Device::genericSubDevicesAllowed() {
     auto deviceMask = executionEnvironment->rootDeviceEnvironments[getRootDeviceIndex()]->deviceAffinityMask.getGenericSubDevicesMask();
     uint32_t subDeviceCount = GfxCoreHelper::getSubDevicesCount(&getHardwareInfo());
     deviceBitfield = maxNBitValue(subDeviceCount);
-    deviceBitfield &= deviceMask;
+
+    if (!executionEnvironment->rootDeviceEnvironments[getRootDeviceIndex()]->isExposeSingleDeviceMode()) {
+        deviceBitfield &= deviceMask;
+    }
+
     numSubDevices = static_cast<uint32_t>(deviceBitfield.count());
     if (numSubDevices == 1 && (executionEnvironment->getDeviceHierarchyMode() != DeviceHierarchyMode::combined || subDeviceCount == 1)) {
         numSubDevices = 0;
@@ -140,7 +145,9 @@ bool Device::createDeviceImpl() {
         }
 
         // initialize common resources once
-        initializeCommonResources();
+        if (!initializeCommonResources()) {
+            return false;
+        }
     }
 
     // create engines
@@ -174,15 +181,14 @@ bool Device::initDeviceWithEngines() {
     return createEngines();
 }
 
-void Device::initializeCommonResources() {
+bool Device::initializeCommonResources() {
     if (getExecutionEnvironment()->isDebuggingEnabled()) {
         const auto rootDeviceIndex = getRootDeviceIndex();
         auto rootDeviceEnvironment = getExecutionEnvironment()->rootDeviceEnvironments[rootDeviceIndex].get();
         rootDeviceEnvironment->initDebuggerL0(this);
         if (rootDeviceEnvironment->debugger == nullptr) {
-            NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr,
-                                  "Debug mode is not enabled in the system.\n");
-            getExecutionEnvironment()->setDebuggingMode(DebuggingMode::disabled);
+            NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Debug mode is not enabled in the system.\n");
+            return false;
         }
     }
 
@@ -200,9 +206,14 @@ void Device::initializeCommonResources() {
         allocateDebugSurface(debugSurfaceSize);
     }
 
-    if (ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
-        getProductHelper().isDeviceUsmPoolAllocatorSupported() &&
-        NEO::debugManager.flags.ExperimentalUSMAllocationReuseVersion.get() == 2) {
+    bool usmPoolManagerEnabled = ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
+                                 getProductHelper().isDeviceUsmPoolAllocatorSupported();
+
+    if (NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() != -1) {
+        usmPoolManagerEnabled = NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() > 0;
+    }
+
+    if (usmPoolManagerEnabled && NEO::debugManager.flags.ExperimentalUSMAllocationReuseVersion.get() == 2) {
 
         RootDeviceIndicesContainer rootDeviceIndices;
         rootDeviceIndices.pushUnique(getRootDeviceIndex());
@@ -210,10 +221,10 @@ void Device::initializeCommonResources() {
         deviceBitfields.emplace(getRootDeviceIndex(), getDeviceBitfield());
         deviceUsmMemAllocPoolsManager.reset(new UsmMemAllocPoolsManager(getMemoryManager(), rootDeviceIndices, deviceBitfields, this, InternalMemoryType::deviceUnifiedMemory));
     }
-    initUsmReuseMaxSize();
+    return true;
 }
 
-void Device::initUsmReuseMaxSize() {
+void Device::initUsmReuseLimits() {
     const bool usmDeviceAllocationsCacheEnabled = NEO::ApiSpecificConfig::isDeviceAllocationCacheEnabled() && this->getProductHelper().isDeviceUsmAllocationReuseSupported();
     auto ailConfiguration = this->getAilConfigurationHelper();
     const bool limitDeviceMemoryForReuse = ailConfiguration && ailConfiguration->limitAmountOfDeviceMemoryForRecycling();
@@ -222,13 +233,46 @@ void Device::initUsmReuseMaxSize() {
         fractionOfTotalMemoryForRecycling = 0.01 * std::min(100, debugManager.flags.ExperimentalEnableDeviceAllocationCache.get());
     }
     const auto totalDeviceMemory = this->getGlobalMemorySize(static_cast<uint32_t>(this->getDeviceBitfield().to_ulong()));
-    this->maxAllocationsSavedForReuseSize = static_cast<uint64_t>(fractionOfTotalMemoryForRecycling * totalDeviceMemory);
+    auto maxAllocationsSavedForReuseSize = static_cast<uint64_t>(fractionOfTotalMemoryForRecycling * totalDeviceMemory);
+
+    auto limitAllocationsReuseThreshold = static_cast<uint64_t>(0.8 * totalDeviceMemory);
+    const auto limitFlagValue = debugManager.flags.ExperimentalUSMAllocationReuseLimitThreshold.get();
+    if (limitFlagValue != -1) {
+        if (limitFlagValue == 0) {
+            limitAllocationsReuseThreshold = UsmReuseInfo::notLimited;
+        } else {
+            const auto fractionOfTotalMemoryToLimitReuse = limitFlagValue / 100.0;
+            limitAllocationsReuseThreshold = static_cast<uint64_t>(fractionOfTotalMemoryToLimitReuse * totalDeviceMemory);
+        }
+    }
+    this->usmReuseInfo.init(maxAllocationsSavedForReuseSize, limitAllocationsReuseThreshold);
+}
+
+bool Device::shouldLimitAllocationsReuse() const {
+    const bool isIntegratedDevice = getHardwareInfo().capabilityTable.isIntegratedDevice;
+    if (isIntegratedDevice) {
+        return getMemoryManager()->shouldLimitAllocationsReuse();
+    }
+    return getMemoryManager()->getUsedLocalMemorySize(getRootDeviceIndex()) >= this->usmReuseInfo.getLimitAllocationsReuseThreshold();
+}
+
+void Device::resetUsmAllocationPool(UsmMemAllocPool *usmMemAllocPool) {
+    this->usmMemAllocPool.reset(usmMemAllocPool);
+}
+
+void Device::cleanupUsmAllocationPool() {
+    if (usmMemAllocPool) {
+        usmMemAllocPool->cleanup();
+    }
 }
 
 bool Device::initDeviceFully() {
-    for (auto &subdevice : this->subdevices) {
-        if (subdevice && !subdevice->initDeviceFully()) {
-            return false;
+
+    if (!getRootDeviceEnvironment().isExposeSingleDeviceMode()) {
+        for (auto &subdevice : this->subdevices) {
+            if (subdevice && !subdevice->initDeviceFully()) {
+                return false;
+            }
         }
     }
 
@@ -269,6 +313,7 @@ bool Device::initDeviceFully() {
 
     createBindlessHeapsHelper();
     uuid.isValid = false;
+    initUsmReuseLimits();
 
     if (getRootDeviceEnvironment().osInterface == nullptr) {
         return true;
@@ -297,6 +342,11 @@ bool Device::createEngines() {
     auto gpgpuEngines = gfxCoreHelper.getGpgpuEngineInstances(getRootDeviceEnvironment());
 
     for (auto &engine : gpgpuEngines) {
+
+        if (isSubDevice() && getRootDeviceEnvironment().isExposeSingleDeviceMode() && EngineHelpers::isComputeEngine(engine.first)) {
+            continue;
+        }
+
         if (!createEngine(engine)) {
             return false;
         }
@@ -542,7 +592,7 @@ bool Device::initializeEngines() {
         }
 
         auto &compilerProductHelper = this->getCompilerProductHelper();
-        auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+        auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(this->getHardwareInfo());
 
         bool isHeaplessStateInit = engine.osContext->getIsPrimaryEngine() && compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled);
         bool initializeDevice = (engine.osContext->isPartOfContextGroup() || isHeaplessStateInit) && !firstSubmissionDone;
@@ -565,14 +615,14 @@ bool Device::createSecondaryEngine(CommandStreamReceiver *primaryCsr, EngineType
         return false;
     }
 
-    EngineDescriptor engineDescriptor(engineTypeUsage, getDeviceBitfield(), preemptionMode, primaryCsr->getOsContext().isRootDevice());
+    EngineDescriptor engineDescriptor(engineTypeUsage, primaryCsr->peekDeviceBitfield(), preemptionMode, primaryCsr->getOsContext().isRootDevice());
 
     auto osContext = executionEnvironment->memoryManager->createAndRegisterSecondaryOsContext(&primaryCsr->getOsContext(), commandStreamReceiver.get(), engineDescriptor);
     osContext->incRefInternal();
     commandStreamReceiver->setupContext(*osContext);
     commandStreamReceiver->setPrimaryCsr(primaryCsr);
 
-    DEBUG_BREAK_IF(getDeviceBitfield().count() > 1 && !osContext->isRootDevice());
+    DEBUG_BREAK_IF(osContext->getDeviceBitfield().count() > 1 && !osContext->isRootDevice());
 
     EngineControl engine{commandStreamReceiver.get(), osContext};
 
@@ -1075,7 +1125,15 @@ void Device::stopDirectSubmissionAndWaitForCompletion() {
     }
 }
 
-bool Device::isAnyDirectSubmissionEnabled(bool light) const {
+bool Device::isAnyDirectSubmissionEnabled() const {
+    return this->isAnyDirectSubmissionEnabledImpl(false);
+}
+
+bool Device::isAnyDirectSubmissionLightEnabled() const {
+    return this->isAnyDirectSubmissionEnabledImpl(true);
+}
+
+bool Device::isAnyDirectSubmissionEnabledImpl(bool light) const {
     for (const auto &engine : allEngines) {
         auto enabled = light ? engine.osContext->isDirectSubmissionLightActive() : engine.commandStreamReceiver->isAnyDirectSubmissionEnabled();
         if (enabled) {
@@ -1152,7 +1210,7 @@ void Device::allocateRTDispatchGlobals(uint32_t maxBvhLevels) {
         dispatchGlobalsAsArray[7] = 1;
 
         if (releaseHelper) {
-            bool heaplessEnabled = this->getCompilerProductHelper().isHeaplessModeEnabled();
+            bool heaplessEnabled = this->getCompilerProductHelper().isHeaplessModeEnabled(this->getHardwareInfo());
             releaseHelper->adjustRTDispatchGlobals(static_cast<void *>(&dispatchGlobals), rtStacksPerDss, heaplessEnabled, maxBvhLevels);
         }
 

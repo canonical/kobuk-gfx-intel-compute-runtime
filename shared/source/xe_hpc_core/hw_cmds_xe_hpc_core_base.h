@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -131,6 +131,7 @@ struct XeHpcCoreFamily : public XeHpcCore {
     static constexpr bool isQwordInOrderCounter = false;
     static constexpr bool walkerPostSyncSupport = true;
     static constexpr size_t indirectDataAlignment = COMPUTE_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE;
+    static constexpr GFXCORE_FAMILY gfxCoreFamily = IGFX_XE_HPC_CORE;
 
     static constexpr bool supportsCmdSet(GFXCORE_FAMILY cmdSetBaseFamily) {
         return cmdSetBaseFamily == IGFX_XE_HP_CORE;
@@ -153,6 +154,10 @@ struct XeHpcCoreFamily : public XeHpcCore {
 
     template <typename WalkerType>
     static constexpr bool isHeaplessMode() {
+        return false;
+    }
+
+    static constexpr bool isHeaplessRequired() {
         return false;
     }
 

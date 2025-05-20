@@ -122,7 +122,6 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, givenDebugFlagSetWhenSubmittingThenCall
             }
         }
     }
-    memoryManager->peekGemCloseWorker()->close(true);
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamTest, WhenMakingResidentThenSucceeds) {
@@ -200,7 +199,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, WhenFlushingThenAvailableSpaceDoesNotCh
     EXPECT_NE(cs.getCpuBase(), nullptr);
     EXPECT_EQ(availableSpacePriorToFlush, cs.getAvailableSpace());
 
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpected.gemClose = 1;
     mock->ioctlTearDownExpects = true;
 
@@ -289,7 +288,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenLowPriorityContextWhenFlushingThen
     EXPECT_EQ(1, mock->ioctlCount.gemUserptr);
     EXPECT_EQ(1, mock->ioctlCount.execbuffer2);
 
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpected.gemClose = 1;
     mock->ioctlTearDownExpects = true;
 
@@ -335,7 +334,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenNotEmptyBbWhenFlushingThenSucceeds
     EXPECT_EQ(1, mock->ioctlCount.gemUserptr);
     EXPECT_EQ(1, mock->ioctlCount.execbuffer2);
 
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpected.gemClose = 1;
     mock->ioctlTearDownExpects = true;
 
@@ -357,7 +356,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenNotEmptyNotPaddedBbWhenFlushingThe
     EXPECT_EQ(1, mock->ioctlCount.gemUserptr);
     EXPECT_EQ(1, mock->ioctlCount.execbuffer2);
 
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpected.gemClose = 1;
     mock->ioctlTearDownExpects = true;
 
@@ -385,7 +384,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenNotAlignedWhenFlushingThenSucceeds
     EXPECT_EQ(1, mock->ioctlCount.gemUserptr);
     EXPECT_EQ(1, mock->ioctlCount.execbuffer2);
 
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpected.gemClose = 1;
     mock->ioctlTearDownExpects = true;
 
@@ -436,7 +435,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenCheckDrmFreeWhenFlushingThenSuccee
     EXPECT_EQ(1, mock->ioctlCount.execbuffer2);
 
     mock->ioctlTearDownExpected.gemClose = 1;
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpects = true;
 
     EXPECT_EQ(expectedBatchStartOffset, mock->execBuffers.back().getBatchStartOffset());
@@ -479,7 +478,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamTest, GivenCheckDrmFreeCloseFailedWhenFlushin
     EXPECT_EQ(1, mock->ioctlCount.execbuffer2);
 
     mock->ioctlTearDownExpected.gemClose = 1;
-    mock->ioctlTearDownExpected.gemWait = 2;
+    mock->ioctlTearDownExpected.gemWait = 1;
     mock->ioctlTearDownExpects = true;
 
     EXPECT_EQ(expectedBatchStartOffset, mock->execBuffers.back().getBatchStartOffset());
@@ -806,15 +805,13 @@ struct MockDrmDirectSubmissionToTestDtor : public DrmDirectSubmission<GfxFamily,
 };
 
 HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionWhenCheckingIsKmdWaitOnTaskCountAllowedThenTrueIsReturned) {
-    mock->isVmBindAvailableCall.callParent = false;
-    mock->isVmBindAvailableCall.returnValue = true;
+    *const_cast<bool *>(&static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->vmBindAvailable) = true;
     EXPECT_TRUE(csr->isDirectSubmissionEnabled());
     EXPECT_TRUE(csr->isKmdWaitOnTaskCountAllowed());
 }
 
 HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmissionAndDisabledBindWhenCheckingIsKmdWaitOnTaskCountAllowedThenFalseIsReturned) {
-    mock->isVmBindAvailableCall.callParent = false;
-    mock->isVmBindAvailableCall.returnValue = false;
+    *const_cast<bool *>(&static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->vmBindAvailable) = false;
     EXPECT_TRUE(csr->isDirectSubmissionEnabled());
     EXPECT_FALSE(csr->isKmdWaitOnTaskCountAllowed());
 }
@@ -977,6 +974,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamDirectSubmissionTest, givenEnabledDirectSubmi
     uint8_t bbStart[64];
     batchBuffer.endCmdPtr = &bbStart[0];
     static_cast<DrmMockCustom *>(static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->drm)->isVmBindAvailableCall.callParent = false;
+    *const_cast<bool *>(&static_cast<TestedDrmCommandStreamReceiver<FamilyType> *>(csr)->vmBindAvailable) = true;
 
     auto flushStamp = csr->obtainCurrentFlushStamp();
     csr->flush(batchBuffer, csr->getResidencyAllocations());

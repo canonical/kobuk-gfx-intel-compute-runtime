@@ -101,9 +101,18 @@ std::string SysmanKmdInterfaceXe::getEnergyCounterNodeFile(zes_power_domain_t po
     return filePath;
 }
 
-ze_result_t SysmanKmdInterfaceXe::getEngineActivityFdList(zes_engine_group_t engineGroup, uint32_t engineInstance, uint32_t gtId, PmuInterface *const &pPmuInterface, std::vector<std::pair<int64_t, int64_t>> &fdList) {
+ze_result_t SysmanKmdInterfaceXe::getEngineActivityFdListAndConfigPair(zes_engine_group_t engineGroup,
+                                                                       uint32_t engineInstance,
+                                                                       uint32_t gtId,
+                                                                       PmuInterface *const &pPmuInterface,
+                                                                       std::vector<std::pair<int64_t, int64_t>> &fdList,
+                                                                       std::pair<uint64_t, uint64_t> &configPair) {
 
     ze_result_t result = ZE_RESULT_SUCCESS;
+
+    if (isGroupEngineHandle(engineGroup)) {
+        return result;
+    }
 
     auto engineClass = engineGroupToEngineClass.find(engineGroup);
     if (engineClass == engineGroupToEngineClass.end()) {
@@ -112,47 +121,27 @@ ze_result_t SysmanKmdInterfaceXe::getEngineActivityFdList(zes_engine_group_t eng
         return result;
     }
 
-    const std::string activeTicksEventFile = std::string(sysDevicesDir) + sysmanDeviceDirName + "/events/engine-active-ticks";
+    const std::string sysmanDeviceDir = std::string(sysDevicesDir) + sysmanDeviceDirName;
     uint64_t activeTicksConfig = UINT64_MAX;
-    auto ret = pPmuInterface->getConfigFromEventFile(activeTicksEventFile, activeTicksConfig);
-    if (ret < 0) {
-        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get config for the active ticks from event file and returning error:0x%x\n", __FUNCTION__, result);
-        return result;
-    }
-
-    const std::string totalTicksEventFile = std::string(sysDevicesDir) + "/" + sysmanDeviceDirName + "/events/engine-total-ticks";
     uint64_t totalTicksConfig = UINT64_MAX;
-    ret = pPmuInterface->getConfigFromEventFile(totalTicksEventFile, totalTicksConfig);
+
+    auto ret = pPmuInterface->getPmuConfigs(sysmanDeviceDir, engineClass->second, engineInstance, gtId, activeTicksConfig, totalTicksConfig);
     if (ret < 0) {
         result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get config for the total ticks from event file and returning error:0x%x\n", __FUNCTION__, result);
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get configs and returning error:0x%x\n", __FUNCTION__, result);
         return result;
     }
 
-    const std::string formatDir = std::string(sysDevicesDir) + sysmanDeviceDirName + "/format/";
-    ret = pPmuInterface->getConfigAfterFormat(formatDir, activeTicksConfig, engineClass->second, engineInstance, gtId);
-    if (ret < 0) {
-        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get config for the active ticks after format and returning error:0x%x\n", __FUNCTION__, result);
-        return result;
-    }
-
-    ret = pPmuInterface->getConfigAfterFormat(formatDir, totalTicksConfig, engineClass->second, engineInstance, gtId);
-    if (ret < 0) {
-        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get config for the total ticks after format and returning error:0x%x\n", __FUNCTION__, result);
-        return result;
-    }
+    configPair = std::make_pair(activeTicksConfig, totalTicksConfig);
 
     int64_t fd[2];
-    fd[0] = pPmuInterface->pmuInterfaceOpen(activeTicksConfig, -1, PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_GROUP);
+    fd[0] = pPmuInterface->pmuInterfaceOpen(configPair.first, -1, PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_GROUP);
     if (fd[0] < 0) {
         NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Could not open Busy Ticks Handle \n", __FUNCTION__);
         return checkErrorNumberAndReturnStatus();
     }
 
-    fd[1] = pPmuInterface->pmuInterfaceOpen(totalTicksConfig, static_cast<int>(fd[0]), PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_GROUP);
+    fd[1] = pPmuInterface->pmuInterfaceOpen(configPair.second, static_cast<int>(fd[0]), PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_GROUP);
     if (fd[1] < 0) {
         NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Could not open Total Active Ticks Handle \n", __FUNCTION__);
         close(static_cast<int>(fd[0]));

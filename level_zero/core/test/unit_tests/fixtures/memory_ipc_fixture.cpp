@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -507,6 +507,7 @@ NEO::GraphicsAllocation *MemoryManagerIpcImplicitScalingMock::createGraphicsAllo
 void MemoryExportImportImplicitScalingTest::SetUp() {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableImplicitScaling.set(1);
+    debugManager.flags.EnableWalkerPartition.set(1);
 
     neoDevice =
         NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(NEO::defaultHwInfo.get());
@@ -535,6 +536,11 @@ void MemoryExportImportImplicitScalingTest::SetUp() {
 }
 
 void MemoryExportImportImplicitScalingTest::TearDown() {
+    // cleanup pool before restoring svm manager
+    for (auto device : driverHandle->devices) {
+        device->getNEODevice()->cleanupUsmAllocationPool();
+        device->getNEODevice()->resetUsmAllocationPool(nullptr);
+    }
     driverHandle->svmAllocsManager = prevSvmAllocsManager;
     delete currSvmAllocsManager;
     driverHandle->setMemoryManager(prevMemoryManager);

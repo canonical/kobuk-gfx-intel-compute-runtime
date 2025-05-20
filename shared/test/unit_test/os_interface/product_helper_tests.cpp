@@ -468,6 +468,10 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsS
     EXPECT_TRUE(productHelper->isDisableScratchPagesRequiredForDebugger());
 }
 
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfPlatformSupportsSvmHeapReservationThenReturnTrue, IsXeHpcCore) {
+    EXPECT_TRUE(productHelper->isSvmHeapReservationSupported());
+}
+
 HWTEST_F(ProductHelperTest, givenProductHelperWhenCheckBlitEnqueuePreferredThenReturnTrue) {
     EXPECT_TRUE(productHelper->blitEnqueuePreferred(false));
 }
@@ -609,7 +613,7 @@ HWTEST2_F(ProductHelperTest, WhenFillingScmPropertiesSupportThenExpectUseCorrect
     EXPECT_EQ(productHelper->getScmPropertyZPassAsyncComputeThreadLimitSupport(), scmPropertiesSupport.zPassAsyncComputeThreadLimit);
     EXPECT_EQ(productHelper->getScmPropertyPixelAsyncComputeThreadLimitSupport(), scmPropertiesSupport.pixelAsyncComputeThreadLimit);
     EXPECT_EQ(productHelper->getScmPropertyDevicePreemptionModeSupport(), scmPropertiesSupport.devicePreemptionMode);
-    if constexpr (TestTraits<gfxCoreFamily>::largeGrfModeInStateComputeModeSupported) {
+    if constexpr (TestTraits<FamilyType::gfxCoreFamily>::largeGrfModeInStateComputeModeSupported) {
         EXPECT_EQ(productHelper->isGrfNumReportedWithScm(), scmPropertiesSupport.largeGrfMode);
     }
 }
@@ -1163,4 +1167,8 @@ HWTEST2_F(ProductHelperTest, givenProductHelperThenCompressionIsNotForbidden, Is
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenQueryIsPostImageWriteFlushRequiredThenFalseReturned) {
     EXPECT_FALSE(productHelper->isPostImageWriteFlushRequired());
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWhenIsExposingSubdevicesAllowedThenTrueIsReturned) {
+    EXPECT_TRUE(productHelper->isExposingSubdevicesAllowed());
 }
