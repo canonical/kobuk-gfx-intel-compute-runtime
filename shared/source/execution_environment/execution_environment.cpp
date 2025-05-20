@@ -88,7 +88,7 @@ bool ExecutionEnvironment::initializeMemoryManager() {
     } break;
     }
 
-    memoryManager->initUsmReuseMaxSize();
+    memoryManager->initUsmReuseLimits();
 
     return memoryManager->isInitialized();
 }
@@ -119,7 +119,7 @@ void ExecutionEnvironment::calculateMaxOsContextCount() {
 
             auto groupCount = gfxCoreHelper.getContextGroupContextsCount();
             if (rootDeviceEnvironment->osInterface && rootDeviceEnvironment->osInterface->getAggregatedProcessCount() > 1) {
-                groupCount = std::min(groupCount / rootDeviceEnvironment->osInterface->getAggregatedProcessCount(), 2u);
+                groupCount = std::max(groupCount / rootDeviceEnvironment->osInterface->getAggregatedProcessCount(), 2u);
             }
             numSecondaryContexts += numRegularEngines * groupCount;
             numSecondaryContexts += numHpEngines * groupCount;
@@ -152,16 +152,16 @@ DirectSubmissionController *ExecutionEnvironment::initializeDirectSubmissionCont
     return directSubmissionController.get();
 }
 
-void ExecutionEnvironment::initializeUnifiedMemoryReuseCleaner(bool enable) {
+void ExecutionEnvironment::initializeUnifiedMemoryReuseCleaner(bool isAnyDirectSubmissionLightEnabled) {
     std::lock_guard<std::mutex> lock(initializeUnifiedMemoryReuseCleanerMutex);
-    auto initializeUnifiedMemoryReuseCleaner = UnifiedMemoryReuseCleaner::isSupported() && enable;
+    auto initializeUnifiedMemoryReuseCleaner = UnifiedMemoryReuseCleaner::isSupported() && !isAnyDirectSubmissionLightEnabled;
 
     if (debugManager.flags.ExperimentalUSMAllocationReuseCleaner.get() != -1) {
         initializeUnifiedMemoryReuseCleaner = debugManager.flags.ExperimentalUSMAllocationReuseCleaner.get() == 1;
     }
 
     if (initializeUnifiedMemoryReuseCleaner && nullptr == this->unifiedMemoryReuseCleaner) {
-        this->unifiedMemoryReuseCleaner = std::make_unique<UnifiedMemoryReuseCleaner>();
+        this->unifiedMemoryReuseCleaner = std::make_unique<UnifiedMemoryReuseCleaner>(isAnyDirectSubmissionLightEnabled);
         this->unifiedMemoryReuseCleaner->startThread();
     }
 }

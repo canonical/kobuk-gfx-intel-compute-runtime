@@ -16,6 +16,7 @@
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/in_order_cmd_helpers.h"
 #include "shared/source/helpers/pipe_control_args.h"
+#include "shared/source/indirect_heap/indirect_heap.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -35,6 +36,13 @@
 
 using namespace NEO;
 using CommandEncoderTests = ::testing::Test;
+
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
+
+HWTEST2_F(CommandEncoderTests, whenPushBindingTableAndSurfaceStatesIsCalledAndHeaplessRequiredThenFail, IsHeaplessRequired) {
+    std::byte mockHeap[sizeof(IndirectHeap)];
+    EXPECT_ANY_THROW(EncodeSurfaceState<FamilyType>::pushBindingTableAndSurfaceStates(reinterpret_cast<IndirectHeap &>(mockHeap), nullptr, 0, 0, 0));
+}
 
 HWTEST_F(CommandEncoderTests, givenMisalignedSizeWhenProgrammingSurfaceStateForBufferThenAlignedSizeIsProgrammed) {
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
@@ -174,7 +182,7 @@ HWTEST_F(CommandEncoderTests, givenDifferentInputParamsWhenCreatingInOrderExecIn
         EXPECT_FALSE(inOrderExecInfo->isHostStorageDuplicated());
         EXPECT_FALSE(inOrderExecInfo->isRegularCmdList());
 
-        auto heaplessEnabled = mockDevice.getCompilerProductHelper().isHeaplessModeEnabled();
+        auto heaplessEnabled = mockDevice.getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo);
 
         if (heaplessEnabled) {
             EXPECT_TRUE(inOrderExecInfo->isAtomicDeviceSignalling());
@@ -691,11 +699,62 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncoderTests, givenDebugFlagSetWhenProgrammi
 }
 
 HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandEncoderTests, givenPreXeHpPlatformWhenSetupPostSyncMocsThenNothingHappen) {
-    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
-
-    DefaultWalkerType walkerCmd{};
     MockExecutionEnvironment executionEnvironment{};
-    EXPECT_NO_THROW(EncodeDispatchKernel<FamilyType>::setupPostSyncMocs(walkerCmd, *executionEnvironment.rootDeviceEnvironments[0], false));
+    uint32_t mocs = EncodePostSync<FamilyType>::getPostSyncMocs(*executionEnvironment.rootDeviceEnvironments[0], false);
+    EXPECT_EQ(0u, mocs);
+}
+
+HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandEncoderTests, givenPreXeHpPlatformWhenCallingAdjustTimestampPacketThenNothingHappen) {
+    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
+    MockExecutionEnvironment executionEnvironment{};
+    DefaultWalkerType walkerCmd{};
+    DefaultWalkerType walkerOnStart{};
+
+    EncodePostSyncArgs args = {.isTimestampEvent = true};
+    EncodePostSync<FamilyType>::template adjustTimestampPacket<DefaultWalkerType>(walkerCmd, args);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(DefaultWalkerType))); // no change
+}
+
+HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandEncoderTests, givenPreXeHpPlatformWhenCallingEncodeL3FlushThenNothingHappen) {
+    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
+    MockExecutionEnvironment executionEnvironment{};
+    DefaultWalkerType walkerCmd{};
+    DefaultWalkerType walkerOnStart{};
+
+    EncodePostSyncArgs args = {.isFlushL3ForExternalAllocationRequired = true};
+    EncodePostSync<FamilyType>::template encodeL3Flush<DefaultWalkerType>(walkerCmd, args);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(DefaultWalkerType))); // no change
+
+    args = {.isFlushL3ForHostUsmRequired = true};
+    EncodePostSync<FamilyType>::template encodeL3Flush<DefaultWalkerType>(walkerCmd, args);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(DefaultWalkerType))); // no change
+}
+
+HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandEncoderTests, givenPreXeHpPlatformWhenCallingSetupPostSyncForRegularEventThenNothingHappen) {
+    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
+    MockExecutionEnvironment executionEnvironment{};
+    DefaultWalkerType walkerCmd{};
+    DefaultWalkerType walkerOnStart{};
+
+    EncodePostSyncArgs args = {.eventAddress = 0x1234};
+    EncodePostSync<FamilyType>::template setupPostSyncForRegularEvent<DefaultWalkerType>(walkerCmd, args);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(DefaultWalkerType))); // no change
+}
+
+HWCMDTEST_F(IGFX_GEN12LP_CORE, CommandEncoderTests, givenPreXeHpPlatformWhenCallingSetupPostSyncForInOrderExecThenNothingHappen) {
+    using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
+    MockExecutionEnvironment executionEnvironment{};
+    MockDevice mockDevice;
+    DefaultWalkerType walkerCmd{};
+    DefaultWalkerType walkerOnStart{};
+
+    MockTagAllocator<DeviceAllocNodeType<true>> deviceTagAllocator(0, mockDevice.getMemoryManager());
+    auto deviceNode = deviceTagAllocator.getTag();
+
+    InOrderExecInfo inOrderExecInfo(deviceNode, nullptr, mockDevice, 2, true, true);
+    EncodePostSyncArgs args = {.inOrderExecInfo = &inOrderExecInfo};
+    EncodePostSync<FamilyType>::template setupPostSyncForInOrderExec<DefaultWalkerType>(walkerCmd, args);
+    EXPECT_EQ(0, memcmp(&walkerOnStart, &walkerCmd, sizeof(DefaultWalkerType))); // no change
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncoderTests, givenAtLeastXeHpPlatformWhenSetupPostSyncMocsThenCorrect) {
@@ -708,10 +767,12 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncoderTests, givenAtLeastXeHpPlatformWhenSe
 
     {
         DefaultWalkerType walkerCmd{};
-        EncodeDispatchKernel<FamilyType>::setupPostSyncMocs(walkerCmd, rootDeviceEnvironment, dcFlush);
+        uint32_t mocs = 0;
+        EXPECT_NO_THROW(mocs = EncodePostSync<FamilyType>::getPostSyncMocs(*executionEnvironment.rootDeviceEnvironments[0], dcFlush));
+        EXPECT_NO_THROW(walkerCmd.getPostSync().setMocs(mocs));
 
         auto gmmHelper = rootDeviceEnvironment.getGmmHelper();
-        auto expectedMocs = dcFlush ? gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) : gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER);
+        auto expectedMocs = dcFlush ? gmmHelper->getUncachedMOCS() : gmmHelper->getL3EnabledMOCS();
 
         EXPECT_EQ(expectedMocs, walkerCmd.getPostSync().getMocs());
     }
@@ -720,7 +781,9 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncoderTests, givenAtLeastXeHpPlatformWhenSe
         auto expectedMocs = 9u;
         debugManager.flags.OverridePostSyncMocs.set(expectedMocs);
         DefaultWalkerType walkerCmd{};
-        EncodeDispatchKernel<FamilyType>::setupPostSyncMocs(walkerCmd, rootDeviceEnvironment, dcFlush);
+        uint32_t mocs = 0;
+        EXPECT_NO_THROW(mocs = EncodePostSync<FamilyType>::getPostSyncMocs(*executionEnvironment.rootDeviceEnvironments[0], false));
+        EXPECT_NO_THROW(walkerCmd.getPostSync().setMocs(mocs));
         EXPECT_EQ(expectedMocs, walkerCmd.getPostSync().getMocs());
     }
 }
@@ -951,9 +1014,9 @@ HWTEST2_F(CommandEncoderTests, whenAskingForImplicitScalingValuesThenAlwaysRetur
 }
 
 HWTEST2_F(CommandEncoderTests, givenInterfaceDescriptorWhenEncodeEuSchedulingPolicyIsCalledThenChanged, IsAtLeastXe3Core) {
-    using INTERFACE_DESCRIPTOR_DATA = typename FamilyType::INTERFACE_DESCRIPTOR_DATA;
+    using INTERFACE_DESCRIPTOR_DATA = typename EncodeDispatchKernel<FamilyType>::INTERFACE_DESCRIPTOR_DATA;
 
-    INTERFACE_DESCRIPTOR_DATA idd = FamilyType::cmdInitInterfaceDescriptorData;
+    auto idd = FamilyType::template getInitInterfaceDescriptor<INTERFACE_DESCRIPTOR_DATA>();
 
     KernelDescriptor kernelDescriptor;
     kernelDescriptor.kernelAttributes.threadArbitrationPolicy = ThreadArbitrationPolicy::AgeBased;

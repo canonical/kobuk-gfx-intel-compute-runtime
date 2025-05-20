@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -725,4 +725,14 @@ __kernel void CopyImage3dToBuffer16Bytes(__read_only image3d_t input,
     else{
         *(__global uint4*)(dst + DstOffset + x * 16) = c;
     }
+}
+
+__kernel void FillImage1dBuffer(
+    __write_only image1d_buffer_t output,
+    uint4 color,
+    int4 dstOffset) {
+    const int x = get_global_id(0);
+
+    const int dstCoord = x + dstOffset.x;
+    write_imageui(output, dstCoord, color);
 }

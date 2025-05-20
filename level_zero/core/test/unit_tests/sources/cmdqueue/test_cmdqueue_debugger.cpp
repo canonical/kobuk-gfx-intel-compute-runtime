@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023-2024 Intel Corporation
+ * Copyright (C) 2023-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -34,7 +34,7 @@ HWTEST_F(L0CmdQueueDebuggerTest, givenDebuggingEnabledWhenCmdListRequiringSbaPro
     debugManager.flags.EnableStateBaseAddressTracking.set(1);
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
 
     if (heaplessEnabled) {
         GTEST_SKIP();
@@ -73,7 +73,7 @@ HWTEST_F(L0CmdQueueDebuggerTest, givenDebuggingEnabledWhenCmdListRequiringSbaPro
         ze_command_list_handle_t commandListHandle = commandList->toHandle();
         const uint32_t numCommandLists = 1u;
 
-        result = cmdQ->executeCommandLists(numCommandLists, &commandListHandle, nullptr, true, nullptr);
+        result = cmdQ->executeCommandLists(numCommandLists, &commandListHandle, nullptr, true, nullptr, nullptr);
         ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
         auto usedSpaceAfter = cmdStream.getUsed();
@@ -143,7 +143,7 @@ HWTEST2_F(L0CmdQueueDebuggerTest, givenDebuggingEnabledAndRequiredGsbaWhenIntern
     auto cmdQ = CommandQueue::create(productFamily, device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc, false, true, false, returnValue);
     ASSERT_NE(nullptr, cmdQ);
 
-    auto cmdQHw = static_cast<CommandQueueHw<gfxCoreFamily> *>(cmdQ);
+    auto cmdQHw = static_cast<CommandQueueHw<FamilyType::gfxCoreFamily> *>(cmdQ);
     StackVec<char, 4096> buffer(4096);
     NEO::LinearStream cmdStream(buffer.begin(), buffer.size());
 
@@ -174,7 +174,7 @@ HWTEST2_F(L0CmdQueueDebuggerTest, givenDebugEnabledWhenCommandsAreExecutedTwoTim
     DebugManagerStateRestore restorer;
 
     auto &compilerProductHelper = device->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     auto heplessStateInitEnabled = compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled);
     if (heplessStateInitEnabled) {
         GTEST_SKIP();
@@ -209,7 +209,7 @@ HWTEST2_F(L0CmdQueueDebuggerTest, givenDebugEnabledWhenCommandsAreExecutedTwoTim
         ze_command_list_handle_t commandListHandle = commandList->toHandle();
         const uint32_t numCommandLists = 1u;
 
-        result = cmdQ->executeCommandLists(numCommandLists, &commandListHandle, nullptr, true, nullptr);
+        result = cmdQ->executeCommandLists(numCommandLists, &commandListHandle, nullptr, true, nullptr, nullptr);
         ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
         auto usedSpaceAfter = cmdStream.getUsed();
@@ -228,7 +228,7 @@ HWTEST2_F(L0CmdQueueDebuggerTest, givenDebugEnabledWhenCommandsAreExecutedTwoTim
             EXPECT_EQ(cmdList.end(), itCsrCommand);
         }
 
-        result = cmdQ->executeCommandLists(numCommandLists, &commandListHandle, nullptr, true, nullptr);
+        result = cmdQ->executeCommandLists(numCommandLists, &commandListHandle, nullptr, true, nullptr, nullptr);
         ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
         GenCmdList cmdList2;

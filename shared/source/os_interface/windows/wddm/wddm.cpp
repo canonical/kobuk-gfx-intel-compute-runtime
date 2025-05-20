@@ -130,6 +130,7 @@ bool Wddm::init() {
     if (productHelper.configureHwInfoWddm(hardwareInfo, hardwareInfo, rootDeviceEnvironment)) {
         return false;
     }
+    rootDeviceEnvironment.initWaitUtils();
     setPlatformSupportEvictIfNecessaryFlag(productHelper);
 
     auto preemptionMode = PreemptionHelper::getDefaultPreemptionMode(*hardwareInfo);
@@ -541,6 +542,7 @@ bool Wddm::makeResident(const D3DKMT_HANDLE *handles, uint32_t count, bool cantT
         success = true;
     } else {
         DEBUG_BREAK_IF(cantTrimFurther);
+        DEBUG_BREAK_IF(makeResident.NumAllocations != 0u && makeResident.NumAllocations != count);
         perfLogResidencyTrimRequired(residencyLogger.get(), makeResident.NumBytesToTrim);
         if (numberOfBytesToTrim != nullptr) {
             *numberOfBytesToTrim = makeResident.NumBytesToTrim;
@@ -838,9 +840,8 @@ bool Wddm::destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationC
     destroyAllocation.AllocationCount = allocationCount;
     destroyAllocation.Flags.AssumeNotInUse = debugManager.flags.SetAssumeNotInUse.get();
 
-    DeallocateGmm deallocateGmm{&destroyAllocation, getGdi()};
-
     if (debugManager.flags.DestroyAllocationsViaGmm.get()) {
+        DeallocateGmm deallocateGmm{&destroyAllocation, getGdi()};
         status = static_cast<NTSTATUS>(this->rootDeviceEnvironment.getGmmClientContext()->deallocate2(&deallocateGmm));
     } else {
         status = getGdi()->destroyAllocation2(&destroyAllocation);

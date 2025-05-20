@@ -46,6 +46,7 @@ struct MemoryRegion {
     MemoryClassInstance region;
     uint64_t probedSize;
     uint64_t unallocatedSize;
+    uint64_t cpuVisibleSize;
     std::bitset<4> tilesMask;
 };
 
@@ -129,6 +130,7 @@ class IoctlHelper {
     virtual uint32_t getPreferredLocationAdvise() = 0;
     virtual std::optional<MemoryClassInstance> getPreferredLocationRegion(PreferredLocation memoryLocation, uint32_t memoryInstance) = 0;
     virtual bool setVmBoAdvise(int32_t handle, uint32_t attribute, void *region) = 0;
+    virtual bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) { return true; }
     virtual bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) = 0;
     virtual bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) = 0;
     virtual bool setGemTiling(void *setTiling) = 0;
@@ -193,6 +195,11 @@ class IoctlHelper {
     virtual void setupIpVersion();
     virtual bool isImmediateVmBindRequired() const { return false; }
 
+    virtual void configureCcsMode(std::vector<std::string> &files, const std::string expectedFilePrefix, uint32_t ccsMode,
+                                  std::vector<std::tuple<std::string, uint32_t>> &deviceCcsModeVec) = 0;
+
+    void writeCcsMode(const std::string &gtFile, uint32_t ccsMode,
+                      std::vector<std::tuple<std::string, uint32_t>> &deviceCcsModeVec);
     uint32_t getFlagsForPrimeHandleToFd() const;
     virtual std::unique_ptr<MemoryInfo> createMemoryInfo() = 0;
     virtual size_t getLocalMemoryRegionsSize(const MemoryInfo *memoryInfo, uint32_t subDevicesCount, uint32_t deviceBitfield) const = 0;
@@ -268,6 +275,8 @@ class IoctlHelperI915 : public IoctlHelper {
     std::string getFileForMaxGpuFrequency() const override;
     std::string getFileForMaxGpuFrequencyOfSubDevice(int tileId) const override;
     std::string getFileForMaxMemoryFrequencyOfSubDevice(int tileId) const override;
+    void configureCcsMode(std::vector<std::string> &files, const std::string expectedFilePrefix, uint32_t ccsMode,
+                          std::vector<std::tuple<std::string, uint32_t>> &deviceCcsModeVec) override;
     bool getTopologyDataAndMap(const HardwareInfo &hwInfo, DrmQueryTopologyData &topologyData, TopologyMap &topologyMap) override;
     bool getFdFromVmExport(uint32_t vmId, uint32_t flags, int32_t *fd) override;
     uint32_t createGem(uint64_t size, uint32_t memoryBanks, std::optional<bool> isCoherent) override;

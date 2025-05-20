@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -22,11 +22,15 @@ namespace ult {
 using CommandQueueCommandsXe2HpgCore = Test<DeviceFixture>;
 
 HWTEST2_F(CommandQueueCommandsXe2HpgCore, givenCommandQueueWhenExecutingCommandListsThenStateSystemMemFenceAddressCmdIsGenerated, IsXe2HpgCore) {
+    if (neoDevice->getHardwareInfo().capabilityTable.isIntegratedDevice) {
+        GTEST_SKIP();
+    }
+
     using STATE_SYSTEM_MEM_FENCE_ADDRESS = typename FamilyType::STATE_SYSTEM_MEM_FENCE_ADDRESS;
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
 
-    auto commandQueue = new MockCommandQueueHw<gfxCoreFamily>(device, csr, &desc);
+    auto commandQueue = new MockCommandQueueHw<FamilyType::gfxCoreFamily>(device, csr, &desc);
     commandQueue->initialize(false, false, false);
 
     ze_result_t returnValue;
@@ -34,7 +38,7 @@ HWTEST2_F(CommandQueueCommandsXe2HpgCore, givenCommandQueueWhenExecutingCommandL
     auto commandListHandle = commandList->toHandle();
     commandList->close();
 
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
 
     auto globalFence = csr->getGlobalFenceAllocation();
 
@@ -57,7 +61,7 @@ HWTEST2_F(CommandQueueCommandsXe2HpgCore, givenCommandQueueWhenExecutingCommandL
     ze_command_queue_desc_t desc = {};
     auto csr = neoDevice->getDefaultEngine().commandStreamReceiver;
 
-    auto commandQueue = new MockCommandQueueHw<gfxCoreFamily>(device, csr, &desc);
+    auto commandQueue = new MockCommandQueueHw<FamilyType::gfxCoreFamily>(device, csr, &desc);
     commandQueue->initialize(false, false, false);
 
     ze_result_t returnValue;
@@ -65,9 +69,9 @@ HWTEST2_F(CommandQueueCommandsXe2HpgCore, givenCommandQueueWhenExecutingCommandL
     auto commandListHandle = commandList->toHandle();
     commandList->close();
 
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
     auto usedSpaceAfter1stExecute = commandQueue->commandStream.getUsed();
-    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
     auto usedSpaceOn2ndExecute = commandQueue->commandStream.getUsed() - usedSpaceAfter1stExecute;
 
     GenCmdList cmdList;

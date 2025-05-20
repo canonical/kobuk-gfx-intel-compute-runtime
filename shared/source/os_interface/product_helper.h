@@ -44,7 +44,6 @@ class Image;
 class GraphicsAllocation;
 class MemoryManager;
 struct RootDeviceEnvironment;
-struct TimeoutParams;
 class OSInterface;
 class DriverModel;
 enum class DriverModelType;
@@ -113,8 +112,6 @@ class ProductHelper {
     virtual bool isDirectSubmissionSupported(ReleaseHelper *releaseHelper) const = 0;
     virtual bool isDirectSubmissionConstantCacheInvalidationNeeded(const HardwareInfo &hwInfo) const = 0;
     virtual bool restartDirectSubmissionForHostptrFree() const = 0;
-    virtual bool isAdjustDirectSubmissionTimeoutOnThrottleAndAcLineStatusEnabled() const = 0;
-    virtual TimeoutParams getDirectSubmissionControllerTimeoutParams(bool acLineConnected, QueueThrottle queueThrottle) const = 0;
     virtual std::pair<bool, bool> isPipeControlPriorToNonPipelinedStateCommandsWARequired(const HardwareInfo &hwInfo, bool isRcs, const ReleaseHelper *releaseHelper) const = 0;
     virtual bool heapInLocalMem(const HardwareInfo &hwInfo) const = 0;
     virtual void setCapabilityCoherencyFlag(const HardwareInfo &hwInfo, bool &coherencyFlag) const = 0;
@@ -146,6 +143,7 @@ class ProductHelper {
     virtual bool isSystolicModeConfigurable(const HardwareInfo &hwInfo) const = 0;
     virtual bool isInitBuiltinAsyncSupported(const HardwareInfo &hwInfo) const = 0;
     virtual bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isGlobalFenceInPostSyncRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const = 0;
@@ -247,7 +245,7 @@ class ProductHelper {
     virtual std::optional<GfxMemoryAllocationMethod> getPreferredAllocationMethod(AllocationType allocationType) const = 0;
     virtual bool isCachingOnCpuAvailable() const = 0;
     virtual bool isNewCoherencyModelSupported() const = 0;
-    virtual bool deferMOCSToPatIndex() const = 0;
+    virtual bool deferMOCSToPatIndex(bool isWddmOnLinux) const = 0;
     virtual const std::vector<uint32_t> getSupportedLocalDispatchSizes(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getMaxLocalRegionSize(const HardwareInfo &hwInfo) const = 0;
     virtual uint32_t getMaxLocalSubRegionSize(const HardwareInfo &hwInfo) const = 0;
@@ -268,8 +266,10 @@ class ProductHelper {
     virtual bool isL3FlushAfterPostSyncRequired(bool heaplessEnabled) const = 0;
     virtual void overrideDirectSubmissionTimeouts(std::chrono::microseconds &timeout, std::chrono::microseconds &maxTimeout) const = 0;
     virtual bool isMisalignedUserPtr2WayCoherent() const = 0;
+    virtual bool isSvmHeapReservationSupported() const = 0;
     virtual void setRenderCompressedFlags(HardwareInfo &hwInfo) const = 0;
     virtual bool isCompressionForbidden(const HardwareInfo &hwInfo) const = 0;
+    virtual bool isExposingSubdevicesAllowed() const = 0;
 
     virtual ~ProductHelper() = default;
 

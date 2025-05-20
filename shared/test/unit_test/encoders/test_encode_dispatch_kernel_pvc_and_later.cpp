@@ -21,10 +21,11 @@
 #include "shared/test/unit_test/mocks/mock_dispatch_kernel_encoder_interface.h"
 
 using namespace NEO;
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
 
 using CommandEncodeStatesTestPvcAndLater = Test<CommandEncodeStatesFixture>;
 
-HWTEST2_F(CommandEncodeStatesTestPvcAndLater, givenOverrideSlmTotalSizeDebugVariableWhenDispatchingKernelThenSharedMemorySizeIsSetCorrectly, IsAtLeastXeHpcCore) {
+HWTEST2_F(CommandEncodeStatesTestPvcAndLater, givenOverrideSlmTotalSizeDebugVariableWhenDispatchingKernelThenSharedMemorySizeIsSetCorrectly, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     using DefaultWalkerType = typename FamilyType::DefaultWalkerType;
     DebugManagerStateRestore restorer;
     uint32_t dims[] = {2, 1, 1};
@@ -90,7 +91,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandEncodeStatesTestPvcAndLater, givenCommandCon
     auto &rootDeviceEnvironment = *executionEnvironment.rootDeviceEnvironments[0];
     auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
     auto &compilerProductHelper = rootDeviceEnvironment.getHelper<CompilerProductHelper>();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (heaplessEnabled) {
         GTEST_SKIP();
     }
@@ -125,9 +126,9 @@ HWTEST2_F(CommandEncodeStatesTestPvcAndLater, givenDebugVariableWhenPostSyncIsPr
 
     auto inOrderExecInfo = InOrderExecInfo::create(deviceTagAllocator.getTag(), nullptr, *pDevice, 1, false);
 
-    dispatchArgs.inOrderExecInfo = inOrderExecInfo.get();
-
-    EncodeDispatchKernel<FamilyType>::template setupPostSyncForInOrderExec<DefaultWalkerType>(walkerCmd, dispatchArgs);
+    dispatchArgs.postSyncArgs.inOrderExecInfo = inOrderExecInfo.get();
+    auto &postSyncArgs = dispatchArgs.postSyncArgs;
+    EncodePostSync<FamilyType>::template setupPostSyncForInOrderExec<DefaultWalkerType>(walkerCmd, postSyncArgs);
 
     auto &postSyncData = walkerCmd.getPostSync();
     EXPECT_FALSE(postSyncData.getDataportPipelineFlush());

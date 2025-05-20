@@ -13,10 +13,12 @@
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/helpers/options.h"
+#include "shared/source/memory_manager/unified_memory_reuse.h"
 #include "shared/source/os_interface/performance_counters.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/utilities/isa_pool_allocator.h"
 #include "shared/source/utilities/reference_tracked_object.h"
+#include "shared/source/utilities/timestamp_pool_allocator.h"
 
 #include <array>
 #include <mutex>
@@ -40,6 +42,7 @@ class SipExternalLib;
 class SubDevice;
 class SyncBufferHandler;
 class UsmMemAllocPoolsManager;
+class UsmMemAllocPool;
 enum class EngineGroupType : uint32_t;
 struct PhysicalDevicePciBusInfo;
 
@@ -200,11 +203,18 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
     ISAPoolAllocator &getIsaPoolAllocator() {
         return isaPoolAllocator;
     }
+    TimestampPoolAllocator &getDeviceTimestampPoolAllocator() {
+        return deviceTimestampPoolAllocator;
+    }
     UsmMemAllocPoolsManager *getUsmMemAllocPoolsManager() {
         return deviceUsmMemAllocPoolsManager.get();
     }
+    UsmMemAllocPool *getUsmMemAllocPool() {
+        return usmMemAllocPool.get();
+    }
     MOCKABLE_VIRTUAL void stopDirectSubmissionAndWaitForCompletion();
-    MOCKABLE_VIRTUAL bool isAnyDirectSubmissionEnabled(bool light) const;
+    bool isAnyDirectSubmissionEnabled() const;
+    bool isAnyDirectSubmissionLightEnabled() const;
     bool isStateSipRequired() const {
         return (getPreemptionMode() == PreemptionMode::MidThread || getDebugger() != nullptr) && getCompilerInterface();
     }
@@ -222,25 +232,8 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
 
     void stopDirectSubmissionForCopyEngine();
 
-    uint64_t getMaxAllocationsSavedForReuseSize() const {
-        return maxAllocationsSavedForReuseSize;
-    }
+    bool shouldLimitAllocationsReuse() const;
 
-    std::unique_lock<std::mutex> obtainAllocationsReuseLock() const {
-        return std::unique_lock<std::mutex>(allocationsReuseMtx);
-    }
-
-    void recordAllocationSaveForReuse(size_t size) {
-        allocationsSavedForReuseSize += size;
-    }
-
-    void recordAllocationGetFromReuse(size_t size) {
-        allocationsSavedForReuseSize -= size;
-    }
-
-    uint64_t getAllocationsSavedForReuseSize() const {
-        return allocationsSavedForReuseSize;
-    }
     uint32_t getMicrosecondResolution() const {
         return microsecondResolution;
     }
@@ -262,6 +255,11 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
         bufferPoolCount -= size;
     }
 
+    UsmReuseInfo usmReuseInfo;
+
+    void resetUsmAllocationPool(UsmMemAllocPool *usmMemAllocPool);
+    void cleanupUsmAllocationPool();
+
   protected:
     Device() = delete;
     Device(ExecutionEnvironment *executionEnvironment, const uint32_t rootDeviceIndex);
@@ -279,9 +277,9 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
 
     MOCKABLE_VIRTUAL bool createDeviceImpl();
     bool initDeviceWithEngines();
-    void initializeCommonResources();
+    bool initializeCommonResources();
     bool initDeviceFully();
-    void initUsmReuseMaxSize();
+    void initUsmReuseLimits();
     virtual bool createEngines();
 
     void addEngineToEngineGroup(EngineControl &engine);
@@ -292,6 +290,7 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
     MOCKABLE_VIRTUAL std::unique_ptr<CommandStreamReceiver> createCommandStreamReceiver() const;
     MOCKABLE_VIRTUAL SubDevice *createSubDevice(uint32_t subDeviceIndex);
     MOCKABLE_VIRTUAL size_t getMaxParameterSizeFromIGC() const;
+    MOCKABLE_VIRTUAL bool isAnyDirectSubmissionEnabledImpl(bool light) const;
     double getPercentOfGlobalMemoryAvailable() const;
     virtual void createBindlessHeapsHelper() {}
     bool createSubDevices();
@@ -337,13 +336,12 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
     std::vector<RTDispatchGlobalsInfo *> rtDispatchGlobalsInfos;
 
     ISAPoolAllocator isaPoolAllocator;
+    TimestampPoolAllocator deviceTimestampPoolAllocator;
     std::unique_ptr<UsmMemAllocPoolsManager> deviceUsmMemAllocPoolsManager;
+    std::unique_ptr<UsmMemAllocPool> usmMemAllocPool;
 
-    uint64_t allocationsSavedForReuseSize = 0u;
-    uint64_t maxAllocationsSavedForReuseSize = 0u;
     std::atomic_uint32_t bufferPoolCount = 0u;
     uint32_t maxBufferPoolCount = 0u;
-    mutable std::mutex allocationsReuseMtx;
     uint32_t microsecondResolution = 1000u;
 
     struct {

@@ -33,6 +33,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/kernel_binary_helper.h"
+#include "shared/test/common/helpers/mock_file_io.h"
 #include "shared/test/common/helpers/test_files.h"
 #include "shared/test/common/libult/global_environment.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
@@ -729,6 +730,8 @@ TEST_F(MinimumProgramFixture, givenApplicationContextMarkedAsNonZebinWhenBuildin
 }
 
 TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenBuildingProgramThenSuccessOrCorrectErrorCodeIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     KernelBinaryHelper kbHelper(binaryFileName, true);
     auto device = pPlatform->getClDevice(0);
 
@@ -831,6 +834,7 @@ TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenBuildingProgramThenSucc
 }
 
 TEST_F(ProgramFromSourceTest, GivenDuplicateOptionsWhenCreatingWithSourceThenBuildSucceeds) {
+    USE_REAL_FILE_SYSTEM();
     KernelBinaryHelper kbHelper(binaryFileName, false);
 
     retVal = pProgram->build(pProgram->getDevices(), nullptr);
@@ -850,6 +854,7 @@ TEST_F(ProgramFromSourceTest, GivenDuplicateOptionsWhenCreatingWithSourceThenBui
 }
 
 TEST_F(ProgramFromSourceTest, WhenBuildingProgramThenFeaturesAndExtraExtensionsAreNotAdded) {
+    USE_REAL_FILE_SYSTEM();
     auto cip = new MockCompilerInterfaceCaptureBuildOptions();
     auto pClDevice = pContext->getDevice(0);
     pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -867,6 +872,8 @@ TEST_F(ProgramFromSourceTest, WhenBuildingProgramThenFeaturesAndExtraExtensionsA
 }
 
 TEST_F(ProgramFromSourceTest, givenFp64EmulationEnabledWhenBuildingProgramThenExtraExtensionsAreAdded) {
+    USE_REAL_FILE_SYSTEM();
+
     auto cip = new MockCompilerInterfaceCaptureBuildOptions();
     auto pClDevice = static_cast<ClDevice *>(devices[0]);
     pClDevice->getExecutionEnvironment()->setFP64EmulationEnabled();
@@ -883,6 +890,8 @@ TEST_F(ProgramFromSourceTest, givenFp64EmulationEnabledWhenBuildingProgramThenEx
 }
 
 TEST_F(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC20ThenExtraExtensionsAreAdded) {
+    USE_REAL_FILE_SYSTEM();
+
     auto cip = new MockCompilerInterfaceCaptureBuildOptions();
     auto pClDevice = pContext->getDevice(0);
     pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -903,6 +912,8 @@ TEST_F(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC20ThenExtraExtension
 }
 
 TEST_F(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC30ThenFeaturesAreAdded) {
+    USE_REAL_FILE_SYSTEM();
+
     auto cip = new MockCompilerInterfaceCaptureBuildOptions();
     auto pClDevice = pContext->getDevice(0);
     pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -925,6 +936,8 @@ TEST_F(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC30ThenFeaturesAreAdd
 }
 
 TEST_F(ProgramFromSourceTest, WhenBuildingProgramWithOpenClC30ThenFeaturesAreAddedOnlyOnce) {
+    USE_REAL_FILE_SYSTEM();
+
     auto cip = new MockCompilerInterfaceCaptureBuildOptions();
     auto pClDevice = pContext->getDevice(0);
     pClDevice->getExecutionEnvironment()->rootDeviceEnvironments[pClDevice->getRootDeviceIndex()]->compilerInterface.reset(cip);
@@ -1018,6 +1031,27 @@ TEST_F(ProgramFromSourceTest, WhenCompilingProgramWithOpenClC30ThenFeaturesAreAd
     EXPECT_TRUE(hasSubstr(pCompilerInterface->buildInternalOptions, extensionsWithFeaturesOption));
 }
 
+TEST_F(ProgramFromSourceTest, GivenDumpZEBinWhenBuildingProgramFromSourceThenZebinIsDumped) {
+    USE_REAL_FILE_SYSTEM();
+    DebugManagerStateRestore restorer;
+    debugManager.flags.DumpZEBin.set(1);
+
+    KernelBinaryHelper kbHelper(binaryFileName, true);
+
+    createProgramWithSource(
+        pContext,
+        sourceFileName);
+
+    std::string fileName = "dumped_zebin_module.elf";
+    EXPECT_FALSE(virtualFileExists(fileName));
+
+    retVal = pProgram->build(pProgram->getDevices(), nullptr);
+    EXPECT_EQ(CL_SUCCESS, retVal);
+
+    EXPECT_TRUE(virtualFileExists(fileName));
+    removeVirtualFile(fileName);
+}
+
 class Callback {
   public:
     Callback() {
@@ -1047,6 +1081,8 @@ class Callback {
 std::map<const void *, uint32_t> Callback::watchList;
 
 TEST_F(ProgramFromSourceTest, GivenDifferentCommpilerOptionsWhenBuildingProgramThenKernelHashesAreDifferent) {
+    USE_REAL_FILE_SYSTEM();
+
     KernelBinaryHelper kbHelper(binaryFileName, true);
 
     auto rootDeviceIndex = pContext->getDevice(0)->getRootDeviceIndex();
@@ -1113,6 +1149,8 @@ TEST_F(ProgramFromSourceTest, GivenEmptyProgramWhenCreatingProgramThenInvalidVal
 }
 
 TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenCompilingProgramThenSuccessOrCorrectErrorCodeIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     createProgramWithSource(
         pContext,
         sourceFileName);
@@ -1235,6 +1273,8 @@ TEST_F(ProgramFromSourceTest, GivenFlagsWhenCompilingProgramThenBuildOptionsHave
 }
 
 TEST_F(ProgramTests, GivenFlagsWhenLinkingProgramThenBuildOptionsHaveBeenApplied) {
+    USE_REAL_FILE_SYSTEM();
+
     auto cip = new MockCompilerInterfaceCaptureBuildOptions();
     auto pProgram = std::make_unique<SucceedingGenBinaryProgram>(toClDeviceVector(*pClDevice));
     pProgram->sourceCode = "__kernel mock() {}";
@@ -1265,6 +1305,8 @@ TEST_F(ProgramTests, GivenFlagsWhenLinkingProgramThenBuildOptionsHaveBeenApplied
 }
 
 TEST_F(ProgramFromSourceTest, GivenAdvancedOptionsWhenCreatingProgramThenSuccessIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     std::string testFile;
     size_t sourceSize = 0;
 
@@ -1317,6 +1359,8 @@ TEST_F(ProgramFromSourceTest, GivenAdvancedOptionsWhenCreatingProgramThenSuccess
 }
 
 TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenLinkingProgramThenSuccessOrCorrectErrorCodeIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     createProgramWithSource(
         pContext,
         sourceFileName);
@@ -1385,6 +1429,8 @@ TEST_F(ProgramFromSourceTest, GivenSpecificParamatersWhenLinkingProgramThenSucce
 }
 
 TEST_F(ProgramFromSourceTest, GivenInvalidOptionsWhenCreatingLibraryThenCorrectErrorIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     cl_program program = pProgram;
 
     // Order of following microtests is important - do not change.
@@ -1680,7 +1726,7 @@ TEST_F(ProgramTests, WhenCreatingProgramThenBindlessIsEnabledOnlyIfDebugFlagIsEn
     using namespace testing;
     DebugManagerStateRestore restorer;
 
-    if (!pDevice->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    if (!pDevice->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) {
         debugManager.flags.UseBindlessMode.set(0);
         MockProgram programNoBindless(pContext, false, toClDeviceVector(*pClDevice));
         auto internalOptionsNoBindless = programNoBindless.getInternalOptions();
@@ -1815,6 +1861,8 @@ TEST_F(ProgramTests, givenSkipLastExplicitArgWhenContainsStatefulAccessIsCalledT
 }
 
 TEST_F(ProgramTests, givenStatefulAndStatelessAccessesWhenProgramBuildIsCalledThenCorrectResultIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     DebugManagerStateRestore restorer;
     const auto &compilerProductHelper = pDevice->getRootDeviceEnvironment().getHelper<CompilerProductHelper>();
 
@@ -2143,6 +2191,8 @@ TEST_F(ProgramTests, givenExistingGlobalSurfacesWhenProcessGenBinaryThenCleanupT
 }
 
 TEST_F(ProgramTests, GivenNoCompilerInterfaceRootDeviceEnvironmentWhenRebuildingBinaryThenOutOfHostMemoryErrorIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     auto pDevice = pContext->getDevice(0);
     auto executionEnvironment = pDevice->getExecutionEnvironment();
     std::unique_ptr<RootDeviceEnvironment> rootDeviceEnvironment = std::make_unique<NoCompilerInterfaceRootDeviceEnvironment>(*executionEnvironment);
@@ -2393,6 +2443,8 @@ TEST(isValidSpirvBinary, whenBinaryDoesNotContainLllvMagicThenBinaryIsNotValidLL
 }
 
 TEST_F(ProgramTests, WhenLinkingTwoValidSpirvProgramsThenValidProgramIsReturned) {
+    USE_REAL_FILE_SYSTEM();
+
     const uint32_t spirv[16] = {0x03022307};
     cl_int errCode = CL_SUCCESS;
 
@@ -2464,6 +2516,8 @@ TEST_F(ProgramTests, givenProgramWithSpirvWhenRebuildProgramIsCalledThenSpirvPat
 }
 
 TEST_F(ProgramTests, givenProgramWithSpirvWhenRebuildIsCalledThenRebuildWarningIsIssued) {
+    USE_REAL_FILE_SYSTEM();
+
     const auto program{clUniquePtr(new MockProgram(toClDeviceVector(*pClDevice)))};
     uint32_t spirv[16] = {0x03022307, 0x23471113, 0x17192329};
     program->irBinary = makeCopy(spirv, sizeof(spirv));
@@ -2480,6 +2534,8 @@ TEST_F(ProgramTests, givenProgramWithSpirvWhenRebuildIsCalledThenRebuildWarningI
 }
 
 TEST_F(ProgramTests, givenProgramWithSpirvWhenRebuildIsCalledButSuppressFlagIsEnabledThenRebuildWarningIsNotIssued) {
+    USE_REAL_FILE_SYSTEM();
+
     const auto program{clUniquePtr(new MockProgram(toClDeviceVector(*pClDevice)))};
     uint32_t spirv[16] = {0x03022307, 0x23471113, 0x17192329};
     program->irBinary = makeCopy(spirv, sizeof(spirv));
@@ -2499,6 +2555,8 @@ TEST_F(ProgramTests, givenProgramWithSpirvWhenRebuildIsCalledButSuppressFlagIsEn
 }
 
 TEST_F(ProgramTests, givenProgramWithSpirvWhenRecompileIsCalledThenRebuildWarningIsIssued) {
+    USE_REAL_FILE_SYSTEM();
+
     const auto program{clUniquePtr(new MockProgram(toClDeviceVector(*pClDevice)))};
     uint32_t spirv[16] = {0x03022307, 0x23471113, 0x17192329};
     program->irBinary = makeCopy(spirv, sizeof(spirv));
@@ -2515,6 +2573,8 @@ TEST_F(ProgramTests, givenProgramWithSpirvWhenRecompileIsCalledThenRebuildWarnin
 }
 
 TEST_F(ProgramTests, givenProgramWithSpirvWhenRecompileIsCalledButSuppressFlagIsEnabledThenRebuildWarningIsNotIssued) {
+    USE_REAL_FILE_SYSTEM();
+
     const auto program{clUniquePtr(new MockProgram(toClDeviceVector(*pClDevice)))};
     uint32_t spirv[16] = {0x03022307, 0x23471113, 0x17192329};
     program->irBinary = makeCopy(spirv, sizeof(spirv));
@@ -3067,6 +3127,8 @@ struct DebugDataGuard {
 };
 
 TEST_F(ProgramBinTest, GivenBuildWithDebugDataThenBuildDataAvailableViaGetInfo) {
+    USE_REAL_FILE_SYSTEM();
+
     DebugDataGuard debugDataGuard;
 
     const char *sourceCode = "__kernel void\nCB(\n__global unsigned int* src, __global unsigned int* dst)\n{\nint id = (int)get_global_id(0);\ndst[id] = src[id];\n}\n";
@@ -3154,6 +3216,8 @@ TEST_F(ProgramBinTest, givenNoDebugDataAvailableThenDebugDataIsNotAvailableViaGe
 }
 
 TEST_F(ProgramBinTest, GivenDebugDataAvailableWhenLinkingProgramThenDebugDataIsStoredInProgram) {
+    USE_REAL_FILE_SYSTEM();
+
     DebugDataGuard debugDataGuard;
 
     const char *sourceCode = "__kernel void\nCB(\n__global unsigned int* src, __global unsigned int* dst)\n{\nint id = (int)get_global_id(0);\ndst[id] = src[id];\n}\n";
@@ -3212,6 +3276,8 @@ class MockCompilerInterfaceWithGtpinParam : public CompilerInterface {
 };
 
 TEST_F(ProgramBinTest, GivenSourceKernelWhenLinkingProgramThenGtpinInitInfoIsPassed) {
+    USE_REAL_FILE_SYSTEM();
+
     void *pIgcInitPtr = reinterpret_cast<void *>(0x1234);
     gtpinSetIgcInit(pIgcInitPtr);
     const char *sourceCode = "__kernel void\nCB(\n__global unsigned int* src, __global unsigned int* dst)\n{\nint id = (int)get_global_id(0);\ndst[id] = src[id];\n}\n";
@@ -3279,6 +3345,8 @@ TEST(ProgramCallbackTest, whenInvokeCallbackIsCalledThenFunctionIsProperlyInvoke
 }
 
 TEST(BuildProgramTest, givenMultiDeviceProgramWhenBuildingThenStoreAndProcessBinaryOnlyOncePerRootDevice) {
+    USE_REAL_FILE_SYSTEM();
+
     MockProgram *pProgram = nullptr;
     std::unique_ptr<char[]> pSource = nullptr;
     size_t sourceSize = 0;
@@ -3337,6 +3405,8 @@ TEST(BuildProgramTest, givenMultiDeviceProgramWhenBuildingThenStoreAndProcessBin
 }
 
 TEST(BuildProgramTest, givenMultiDeviceProgramWhenBuildingThenStoreKernelInfoPerEachRootDevice) {
+    USE_REAL_FILE_SYSTEM();
+
     MockProgram *pProgram = nullptr;
     std::unique_ptr<char[]> pSource = nullptr;
     size_t sourceSize = 0;

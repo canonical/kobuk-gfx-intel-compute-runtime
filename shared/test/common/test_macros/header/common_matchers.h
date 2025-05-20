@@ -8,6 +8,7 @@
 #pragma once
 
 using IsGen12LP = IsGfxCore<IGFX_GEN12LP_CORE>;
+using IsAtLeastGen12LP = IsAtLeastGfxCore<IGFX_GEN12LP_CORE>;
 using IsXeHpgCore = IsGfxCore<IGFX_XE_HPG_CORE>;
 using IsXeHpcCore = IsGfxCore<IGFX_XE_HPC_CORE>;
 using IsNotXeHpcCore = IsNotGfxCore<IGFX_XE_HPC_CORE>;
@@ -79,6 +80,7 @@ using IsAtLeastPVC = IsAtLeastProduct<IGFX_PVC>;
 using IsAtMostPVC = IsAtMostProduct<IGFX_PVC>;
 using IsNotPVC = IsNotWithinProducts<IGFX_PVC, IGFX_PVC>;
 using IsNotDG2 = IsNotWithinProducts<IGFX_DG2, IGFX_DG2>;
+using IsNotMTL = IsNotWithinProducts<IGFX_METEORLAKE, IGFX_METEORLAKE>;
 using IsNotPvcOrDg2 = IsNotWithinProducts<IGFX_DG2, IGFX_PVC>;
 
 using IsAtMostArl = IsAtMostProduct<IGFX_ARROWLAKE>;

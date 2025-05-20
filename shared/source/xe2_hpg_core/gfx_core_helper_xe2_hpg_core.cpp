@@ -79,9 +79,9 @@ uint32_t GfxCoreHelperHw<Family>::getMinimalSIMDSize() const {
 template <>
 uint32_t GfxCoreHelperHw<Family>::getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const {
     if (l3enabled) {
-        return gmmHelper.getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER) >> 1;
+        return gmmHelper.getL3EnabledMOCS() >> 1;
     }
-    return gmmHelper.getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED) >> 1;
+    return gmmHelper.getUncachedMOCS() >> 1;
 }
 
 template <>
@@ -110,7 +110,9 @@ aub_stream::MMIOList GfxCoreHelperHw<Family>::getExtraMmioList(const HardwareInf
 
 template <>
 size_t MemorySynchronizationCommands<Family>::getSizeForSingleAdditionalSynchronization(const RootDeviceEnvironment &rootDeviceEnvironment) {
-    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = rootDeviceEnvironment.getHardwareInfo()->capabilityTable.isIntegratedDevice ? AdditionalSynchronizationType::none : AdditionalSynchronizationType::fence;
+    const auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
+    auto &hwInfo = *rootDeviceEnvironment.getHardwareInfo();
+    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = !productHelper.isGlobalFenceInCommandStreamRequired(hwInfo) ? AdditionalSynchronizationType::none : AdditionalSynchronizationType::fence;
     if (debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get() != -1) {
         programGlobalFenceAsMiMemFenceCommandInCommandStream = static_cast<AdditionalSynchronizationType>(debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get());
     }
@@ -127,7 +129,9 @@ template <>
 void MemorySynchronizationCommands<Family>::setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment) {
     using MI_MEM_FENCE = typename Family::MI_MEM_FENCE;
     using MI_SEMAPHORE_WAIT = typename Family::MI_SEMAPHORE_WAIT;
-    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = rootDeviceEnvironment.getHardwareInfo()->capabilityTable.isIntegratedDevice ? AdditionalSynchronizationType::none : AdditionalSynchronizationType::fence;
+    const auto &productHelper = rootDeviceEnvironment.getHelper<ProductHelper>();
+    auto &hwInfo = *rootDeviceEnvironment.getHardwareInfo();
+    auto programGlobalFenceAsMiMemFenceCommandInCommandStream = !productHelper.isGlobalFenceInCommandStreamRequired(hwInfo) ? AdditionalSynchronizationType::none : AdditionalSynchronizationType::fence;
     if (debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get() != -1) {
         programGlobalFenceAsMiMemFenceCommandInCommandStream = static_cast<AdditionalSynchronizationType>(debugManager.flags.ProgramGlobalFenceAsMiMemFenceCommandInCommandStream.get());
     }
@@ -214,10 +218,13 @@ void GfxCoreHelperHw<Family>::setExtraAllocationData(AllocationData &allocationD
         }
 
         if (properties.allocationType == AllocationType::commandBuffer ||
-            properties.allocationType == AllocationType::ringBuffer ||
-            properties.allocationType == AllocationType::semaphoreBuffer) {
+            properties.allocationType == AllocationType::ringBuffer) {
             allocationData.flags.useSystemMemory = false;
             allocationData.flags.requiresCpuAccess = true;
+        }
+
+        if (properties.allocationType == AllocationType::semaphoreBuffer) {
+            allocationData.flags.useSystemMemory = true;
         }
     }
 }
@@ -261,15 +268,6 @@ template <>
 uint32_t GfxCoreHelperHw<Family>::adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, bool isHwLocalGeneration, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const {
     const uint32_t threadsPerThreadGroup = calculateNumThreadsPerThreadGroup(simd, defaultMaxGroupSize, grfCount, isHwLocalGeneration, rootDeviceEnvironment);
     return (threadsPerThreadGroup * simd);
-}
-
-template <>
-bool GfxCoreHelperHw<Family>::usmCompressionSupported(const NEO::HardwareInfo &hwInfo) const {
-    if (NEO::debugManager.flags.RenderCompressedBuffersEnabled.get() != -1) {
-        return !!NEO::debugManager.flags.RenderCompressedBuffersEnabled.get();
-    }
-
-    return hwInfo.capabilityTable.ftrRenderCompressedBuffers;
 }
 
 template <>

@@ -142,7 +142,7 @@ HWTEST_TEMPLATED_F(DrmCommandStreamEnhancedTestDrmPrelim, givenWaitUserFenceEnab
     testDrmCsr->useUserFenceWait = true;
     testDrmCsr->activePartitions = static_cast<uint32_t>(drmCtxSize);
 
-    const auto hasFirstSubmission = device->getCompilerProductHelper().isHeaplessModeEnabled() ? 1 : 0;
+    const auto hasFirstSubmission = device->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo) ? 1 : 0;
     auto tagPtr = const_cast<TagAddressType *>(testDrmCsr->getTagAddress());
     *tagPtr = hasFirstSubmission;
     uint64_t tagAddress = castToUint64(tagPtr);
@@ -414,7 +414,9 @@ class DrmCommandStreamForceTileTest : public ::testing::Test {
     template <typename GfxFamily>
     void tearDownT() {
         memoryManager->waitForDeletions();
-        memoryManager->peekGemCloseWorker()->close(true);
+        if (memoryManager->peekGemCloseWorker()) {
+            memoryManager->peekGemCloseWorker()->close(true);
+        }
         delete csr;
         // Expect 2 calls with DRM_IOCTL_I915_GEM_CONTEXT_DESTROY request on OsContextLinux destruction
         // Expect 1 call with DRM_IOCTL_GEM_CLOSE request on BufferObject close

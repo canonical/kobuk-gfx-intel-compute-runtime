@@ -7,10 +7,8 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 
-#include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/command_stream/aub_subcapture_status.h"
-#include "shared/source/command_stream/preemption.h"
 #include "shared/source/command_stream/scratch_space_controller.h"
 #include "shared/source/command_stream/submission_status.h"
 #include "shared/source/command_stream/submissions_aggregator.h"
@@ -30,8 +28,6 @@
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/pause_on_gpu_properties.h"
 #include "shared/source/helpers/ray_tracing_helper.h"
-#include "shared/source/helpers/string.h"
-#include "shared/source/helpers/timestamp_packet.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/memory_manager/memory_manager.h"
@@ -65,6 +61,8 @@ CommandStreamReceiver::CommandStreamReceiver(ExecutionEnvironment &executionEnvi
     residencyAllocations.reserve(startingResidencyContainerSize);
 
     latestSentStatelessMocsConfig = CacheSettings::unknownMocs;
+    lastSentSliceCount = QueueSliceCount::defaultSliceCount;
+    lastAdditionalKernelExecInfo = AdditionalKernelExecInfo::notSet;
     submissionAggregator.reset(new SubmissionAggregator());
     if (ApiSpecificConfig::getApiType() == ApiSpecificConfig::L0) {
         this->dispatchMode = DispatchMode::immediateDispatch;
@@ -99,7 +97,7 @@ CommandStreamReceiver::CommandStreamReceiver(ExecutionEnvironment &executionEnvi
     registeredClients.reserve(16);
 
     auto &compilerProductHelper = rootDeviceEnvironment.getHelper<CompilerProductHelper>();
-    this->heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    this->heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled(hwInfo);
     this->evictionAllocations.reserve(2 * MemoryConstants::kiloByte);
 }
 
@@ -648,7 +646,6 @@ void CommandStreamReceiver::downloadAllocation(GraphicsAllocation &gfxAllocation
 void CommandStreamReceiver::startControllingDirectSubmissions() {
     auto controller = this->executionEnvironment.directSubmissionController.get();
     if (controller) {
-        controller->setTimeoutParamsForPlatform(this->getProductHelper());
         controller->startControlling();
     }
 }
@@ -887,9 +884,10 @@ bool CommandStreamReceiver::createWorkPartitionAllocation(const Device &device) 
 }
 
 bool CommandStreamReceiver::createGlobalFenceAllocation() {
-    auto &gfxCoreHelper = getGfxCoreHelper();
-    auto &hwInfo = peekHwInfo();
-    if (!gfxCoreHelper.isFenceAllocationRequired(hwInfo)) {
+    const auto &gfxCoreHelper = this->getGfxCoreHelper();
+    const auto &hwInfo = this->peekHwInfo();
+    const auto &productHelper = this->getProductHelper();
+    if (!gfxCoreHelper.isFenceAllocationRequired(hwInfo, productHelper)) {
         return true;
     }
 

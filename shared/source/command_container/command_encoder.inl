@@ -42,6 +42,11 @@
 namespace NEO {
 
 template <typename Family>
+void EncodeStates<Family>::dshAlign(IndirectHeap *dsh) {
+    dsh->align(InterfaceDescriptorTraits<INTERFACE_DESCRIPTOR_DATA>::samplerStatePointerAlignSize);
+}
+
+template <typename Family>
 uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
                                                 uint32_t samplerStateOffset,
                                                 uint32_t samplerCount,
@@ -60,7 +65,8 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
     auto borderColor = reinterpret_cast<const SAMPLER_BORDER_COLOR_STATE *>(ptrOffset(fnDynamicStateHeap, borderColorOffset));
 
     auto &compilerProductHelper = rootDeviceEnvironment.getHelper<CompilerProductHelper>();
-    bool heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto &hwInfo = *rootDeviceEnvironment.getHardwareInfo();
+    bool heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(hwInfo);
 
     if (!bindlessHeapHelper || (!bindlessHeapHelper->isGlobalDshSupported())) {
         borderColorOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
@@ -71,7 +77,7 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
         auto borderColorDst = dsh->getSpace(borderColorSize);
         memcpy_s(borderColorDst, borderColorSize, borderColor, borderColorSize);
 
-        dsh->align(INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+        dsh->align(InterfaceDescriptorTraits<INTERFACE_DESCRIPTOR_DATA>::samplerStatePointerAlignSize);
         samplerStateOffsetInDsh = static_cast<uint32_t>(dsh->getUsed());
 
         dstSamplerState = reinterpret_cast<SAMPLER_STATE *>(dsh->getSpace(sizeSamplerState));
@@ -86,14 +92,13 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
         } else {
             borderColorOffsetInDsh = bindlessHeapHelper->getAlphaBorderColorOffset();
         }
-        dsh->align(INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+        dshAlign(dsh);
         auto samplerStateInDsh = bindlessHeapHelper->allocateSSInHeap(sizeSamplerState, nullptr, BindlessHeapsHelper::BindlesHeapType::globalDsh);
         dstSamplerState = reinterpret_cast<SAMPLER_STATE *>(samplerStateInDsh.ssPtr);
         samplerStateOffsetInDsh = static_cast<uint32_t>(samplerStateInDsh.surfaceStateOffset);
     }
 
     auto &helper = rootDeviceEnvironment.getHelper<ProductHelper>();
-    auto &hwInfo = *rootDeviceEnvironment.getHardwareInfo();
     auto srcSamplerState = reinterpret_cast<const SAMPLER_STATE *>(ptrOffset(fnDynamicStateHeap, samplerStateOffset));
     SAMPLER_STATE state = {};
     for (uint32_t i = 0; i < samplerCount; i++) {
@@ -112,7 +117,7 @@ uint32_t EncodeStates<Family>::copySamplerState(IndirectHeap *dsh,
 }
 
 template <typename Family>
-void EncodeMathMMIO<Family>::encodeMulRegVal(CommandContainer &container, uint32_t offset, uint32_t val, uint64_t dstAddress, bool isBcs) {
+void EncodeMathMMIO<Family>::encodeMulRegVal(CommandContainer &container, uint32_t offset, uint32_t val, uint64_t dstAddress, bool isBcs, EncodeStoreMMIOParams *outStoreMMIOParams) {
     int logLws = 0;
     int i = val;
     while (val >> logLws) {
@@ -134,7 +139,15 @@ void EncodeMathMMIO<Family>::encodeMulRegVal(CommandContainer &container, uint32
         EncodeSetMMIO<Family>::encodeREG(container, RegisterOffsets::csGprR0, RegisterOffsets::csGprR2, isBcs);
         i++;
     }
-    EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), RegisterOffsets::csGprR1, dstAddress, false, nullptr, isBcs);
+    void **outStoreMMIOCmd = nullptr;
+    if (outStoreMMIOParams) {
+        outStoreMMIOParams->address = dstAddress;
+        outStoreMMIOParams->offset = RegisterOffsets::csGprR1;
+        outStoreMMIOParams->workloadPartition = false;
+        outStoreMMIOParams->isBcs = isBcs;
+        outStoreMMIOCmd = &outStoreMMIOParams->command;
+    }
+    EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), RegisterOffsets::csGprR1, dstAddress, false, outStoreMMIOCmd, isBcs);
 }
 
 /*
@@ -465,7 +478,7 @@ void EncodeSurfaceState<Family>::encodeBuffer(EncodeSurfaceStateArgs &args) {
     }
 
     if (debugManager.flags.DisableCachingForStatefulBufferAccess.get()) {
-        surfaceState->setMemoryObjectControlState(args.gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED));
+        surfaceState->setMemoryObjectControlState(args.gmmHelper->getUncachedMOCS());
     }
 
     EncodeSurfaceState<Family>::encodeExtraBufferParams(args);
@@ -492,43 +505,48 @@ template <typename Family>
 size_t EncodeSurfaceState<Family>::pushBindingTableAndSurfaceStates(IndirectHeap &dstHeap,
                                                                     const void *srcKernelSsh, size_t srcKernelSshSize,
                                                                     size_t numberOfBindingTableStates, size_t offsetOfBindingTable) {
-    using BINDING_TABLE_STATE = typename Family::BINDING_TABLE_STATE;
+    if constexpr (Family::isHeaplessRequired()) {
+        UNRECOVERABLE_IF(true);
+        return 0;
+    } else {
+        using BINDING_TABLE_STATE = typename Family::BINDING_TABLE_STATE;
 
-    size_t sshSize = srcKernelSshSize;
-    DEBUG_BREAK_IF(srcKernelSsh == nullptr);
+        size_t sshSize = srcKernelSshSize;
+        DEBUG_BREAK_IF(srcKernelSsh == nullptr);
 
-    auto srcSurfaceState = srcKernelSsh;
-    // Allocate space for new ssh data
-    auto dstSurfaceState = dstHeap.getSpace(sshSize);
+        auto srcSurfaceState = srcKernelSsh;
+        // Allocate space for new ssh data
+        auto dstSurfaceState = dstHeap.getSpace(sshSize);
 
-    // Compiler sends BTI table that is already populated with surface state pointers relative to local SSH.
-    // We may need to patch these pointers so that they are relative to surface state base address
-    if (dstSurfaceState == dstHeap.getCpuBase()) {
-        // nothing to patch, we're at the start of heap (which is assumed to be the surface state base address)
-        // we need to simply copy the ssh (including BTIs from compiler)
-        memcpy_s(dstSurfaceState, sshSize, srcSurfaceState, sshSize);
-        return offsetOfBindingTable;
+        // Compiler sends BTI table that is already populated with surface state pointers relative to local SSH.
+        // We may need to patch these pointers so that they are relative to surface state base address
+        if (dstSurfaceState == dstHeap.getCpuBase()) {
+            // nothing to patch, we're at the start of heap (which is assumed to be the surface state base address)
+            // we need to simply copy the ssh (including BTIs from compiler)
+            memcpy_s(dstSurfaceState, sshSize, srcSurfaceState, sshSize);
+            return offsetOfBindingTable;
+        }
+
+        // We can copy-over the surface states, but BTIs will need to be patched
+        memcpy_s(dstSurfaceState, sshSize, srcSurfaceState, offsetOfBindingTable);
+
+        uint32_t surfaceStatesOffset = static_cast<uint32_t>(ptrDiff(dstSurfaceState, dstHeap.getCpuBase()));
+
+        // march over BTIs and offset the pointers based on surface state base address
+        auto *dstBtiTableBase = reinterpret_cast<BINDING_TABLE_STATE *>(ptrOffset(dstSurfaceState, offsetOfBindingTable));
+        DEBUG_BREAK_IF(reinterpret_cast<uintptr_t>(dstBtiTableBase) % Family::INTERFACE_DESCRIPTOR_DATA::BINDINGTABLEPOINTER_ALIGN_SIZE != 0);
+        auto *srcBtiTableBase = reinterpret_cast<const BINDING_TABLE_STATE *>(ptrOffset(srcSurfaceState, offsetOfBindingTable));
+        BINDING_TABLE_STATE bti = Family::cmdInitBindingTableState;
+        for (uint32_t i = 0, e = static_cast<uint32_t>(numberOfBindingTableStates); i != e; ++i) {
+            uint32_t localSurfaceStateOffset = srcBtiTableBase[i].getSurfaceStatePointer();
+            uint32_t offsetedSurfaceStateOffset = localSurfaceStateOffset + surfaceStatesOffset;
+            bti.setSurfaceStatePointer(offsetedSurfaceStateOffset); // patch just the SurfaceStatePointer bits
+            dstBtiTableBase[i] = bti;
+            DEBUG_BREAK_IF(bti.getRawData(0) % sizeof(BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE) != 0);
+        }
+
+        return ptrDiff(dstBtiTableBase, dstHeap.getCpuBase());
     }
-
-    // We can copy-over the surface states, but BTIs will need to be patched
-    memcpy_s(dstSurfaceState, sshSize, srcSurfaceState, offsetOfBindingTable);
-
-    uint32_t surfaceStatesOffset = static_cast<uint32_t>(ptrDiff(dstSurfaceState, dstHeap.getCpuBase()));
-
-    // march over BTIs and offset the pointers based on surface state base address
-    auto *dstBtiTableBase = reinterpret_cast<BINDING_TABLE_STATE *>(ptrOffset(dstSurfaceState, offsetOfBindingTable));
-    DEBUG_BREAK_IF(reinterpret_cast<uintptr_t>(dstBtiTableBase) % Family::INTERFACE_DESCRIPTOR_DATA::BINDINGTABLEPOINTER_ALIGN_SIZE != 0);
-    auto *srcBtiTableBase = reinterpret_cast<const BINDING_TABLE_STATE *>(ptrOffset(srcSurfaceState, offsetOfBindingTable));
-    BINDING_TABLE_STATE bti = Family::cmdInitBindingTableState;
-    for (uint32_t i = 0, e = static_cast<uint32_t>(numberOfBindingTableStates); i != e; ++i) {
-        uint32_t localSurfaceStateOffset = srcBtiTableBase[i].getSurfaceStatePointer();
-        uint32_t offsetedSurfaceStateOffset = localSurfaceStateOffset + surfaceStatesOffset;
-        bti.setSurfaceStatePointer(offsetedSurfaceStateOffset); // patch just the SurfaceStatePointer bits
-        dstBtiTableBase[i] = bti;
-        DEBUG_BREAK_IF(bti.getRawData(0) % sizeof(BINDING_TABLE_STATE::SURFACESTATEPOINTER_ALIGN_SIZE) != 0);
-    }
-
-    return ptrDiff(dstBtiTableBase, dstHeap.getCpuBase());
 }
 
 template <typename Family>
@@ -543,9 +561,7 @@ inline void EncodeDispatchKernel<Family>::encodeCommon(CommandContainer &contain
 
 template <typename Family>
 void *EncodeDispatchKernel<Family>::getInterfaceDescriptor(CommandContainer &container, IndirectHeap *childDsh, uint32_t &iddOffset) {
-
     if (container.nextIddInBlockRef() == container.getNumIddPerBlock()) {
-
         void *heapPointer = nullptr;
         size_t heapSize = sizeof(INTERFACE_DESCRIPTOR_DATA) * container.getNumIddPerBlock();
         if (childDsh != nullptr) {
@@ -578,44 +594,82 @@ bool EncodeDispatchKernel<Family>::inlineDataProgrammingRequired(const KernelDes
 }
 
 template <typename Family>
-void EncodeIndirectParams<Family>::encode(CommandContainer &container, uint64_t crossThreadDataGpuVa, DispatchKernelEncoderI *dispatchInterface, uint64_t implicitArgsGpuPtr) {
+void EncodeIndirectParams<Family>::encode(CommandContainer &container, uint64_t crossThreadDataGpuVa, DispatchKernelEncoderI *dispatchInterface, uint64_t implicitArgsGpuPtr, IndirectParamsInInlineDataArgs *outArgs) {
     const auto &kernelDescriptor = dispatchInterface->getKernelDescriptor();
-    setGroupCountIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.numWorkGroups, crossThreadDataGpuVa);
-    setGlobalWorkSizeIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.globalWorkSize, crossThreadDataGpuVa, dispatchInterface->getGroupSize());
+    if (outArgs) {
+        for (int i = 0; i < 3; i++) {
+            if (!NEO::isUndefinedOffset(kernelDescriptor.payloadMappings.dispatchTraits.numWorkGroups[i]) && kernelDescriptor.kernelAttributes.inlineDataPayloadSize > kernelDescriptor.payloadMappings.dispatchTraits.numWorkGroups[i]) {
+                outArgs->storeGroupCountInInlineData[i] = true;
+            }
+            if (!NEO::isUndefinedOffset(kernelDescriptor.payloadMappings.dispatchTraits.globalWorkSize[i]) && kernelDescriptor.kernelAttributes.inlineDataPayloadSize > kernelDescriptor.payloadMappings.dispatchTraits.globalWorkSize[i]) {
+                outArgs->storeGlobalWorkSizeInInlineData[i] = true;
+            }
+        }
+        if (!NEO::isUndefinedOffset(kernelDescriptor.payloadMappings.dispatchTraits.workDim) && kernelDescriptor.kernelAttributes.inlineDataPayloadSize > kernelDescriptor.payloadMappings.dispatchTraits.workDim) {
+            outArgs->storeWorkDimInInlineData = true;
+        }
+    }
+    setGroupCountIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.numWorkGroups, crossThreadDataGpuVa, outArgs);
+    setGlobalWorkSizeIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.globalWorkSize, crossThreadDataGpuVa, dispatchInterface->getGroupSize(), outArgs);
     UNRECOVERABLE_IF(NEO::isValidOffset(kernelDescriptor.payloadMappings.dispatchTraits.workDim) && (kernelDescriptor.payloadMappings.dispatchTraits.workDim & 0b11) != 0u);
-    setWorkDimIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.workDim, crossThreadDataGpuVa, dispatchInterface->getGroupSize());
+    setWorkDimIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.workDim, crossThreadDataGpuVa, dispatchInterface->getGroupSize(), outArgs);
     if (implicitArgsGpuPtr) {
         const auto version = container.getDevice()->getGfxCoreHelper().getImplicitArgsVersion();
         if (version == 0) {
             constexpr CrossThreadDataOffset groupCountOffset[] = {offsetof(ImplicitArgsV0, groupCountX), offsetof(ImplicitArgsV0, groupCountY), offsetof(ImplicitArgsV0, groupCountZ)};
             constexpr CrossThreadDataOffset globalSizeOffset[] = {offsetof(ImplicitArgsV0, globalSizeX), offsetof(ImplicitArgsV0, globalSizeY), offsetof(ImplicitArgsV0, globalSizeZ)};
             constexpr auto numWorkDimOffset = offsetof(ImplicitArgsV0, numWorkDim);
-            setGroupCountIndirect(container, groupCountOffset, implicitArgsGpuPtr);
-            setGlobalWorkSizeIndirect(container, globalSizeOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
-            setWorkDimIndirect(container, numWorkDimOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+            setGroupCountIndirect(container, groupCountOffset, implicitArgsGpuPtr, nullptr);
+            setGlobalWorkSizeIndirect(container, globalSizeOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
+            setWorkDimIndirect(container, numWorkDimOffset, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
         } else if (version == 1) {
             constexpr CrossThreadDataOffset groupCountOffsetV1[] = {offsetof(ImplicitArgsV1, groupCountX), offsetof(ImplicitArgsV1, groupCountY), offsetof(ImplicitArgsV1, groupCountZ)};
             constexpr CrossThreadDataOffset globalSizeOffsetV1[] = {offsetof(ImplicitArgsV1, globalSizeX), offsetof(ImplicitArgsV1, globalSizeY), offsetof(ImplicitArgsV1, globalSizeZ)};
             constexpr auto numWorkDimOffsetV1 = offsetof(ImplicitArgsV1, numWorkDim);
-            setGroupCountIndirect(container, groupCountOffsetV1, implicitArgsGpuPtr);
-            setGlobalWorkSizeIndirect(container, globalSizeOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
-            setWorkDimIndirect(container, numWorkDimOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize());
+            setGroupCountIndirect(container, groupCountOffsetV1, implicitArgsGpuPtr, nullptr);
+            setGlobalWorkSizeIndirect(container, globalSizeOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
+            setWorkDimIndirect(container, numWorkDimOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
         }
+    }
+    if (outArgs && !outArgs->commandsToPatch.empty()) {
+        auto &commandStream = *container.getCommandStream();
+        EncodeMiArbCheck<Family>::program(commandStream, true);
+        auto gpuVa = commandStream.getCurrentGpuAddressPosition() + EncodeBatchBufferStartOrEnd<Family>::getBatchBufferStartSize();
+        EncodeBatchBufferStartOrEnd<Family>::programBatchBufferStart(&commandStream, gpuVa, !(container.getFlushTaskUsedForImmediate() || container.isUsingPrimaryBuffer()), false, false);
+        EncodeMiArbCheck<Family>::program(commandStream, false);
     }
 }
 
 template <typename Family>
-void EncodeIndirectParams<Family>::setGroupCountIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress) {
+void EncodeIndirectParams<Family>::setGroupCountIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress, IndirectParamsInInlineDataArgs *outArgs) {
     for (int i = 0; i < 3; ++i) {
         if (NEO::isUndefinedOffset(offsets[i])) {
             continue;
         }
-        EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), RegisterOffsets::gpgpuDispatchDim[i], ptrOffset(crossThreadAddress, offsets[i]), false, nullptr, false);
+        void **storeCmd = nullptr;
+        if (outArgs && outArgs->storeGroupCountInInlineData[i]) {
+            outArgs->commandsToPatch.push_back({});
+            auto &commandArgs = outArgs->commandsToPatch.back();
+            storeCmd = &commandArgs.command;
+            commandArgs.address = offsets[i];
+            commandArgs.offset = RegisterOffsets::gpgpuDispatchDim[i];
+            commandArgs.isBcs = false;
+            commandArgs.workloadPartition = false;
+        }
+        EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), RegisterOffsets::gpgpuDispatchDim[i], ptrOffset(crossThreadAddress, offsets[i]), false, storeCmd, false);
     }
 }
 
 template <typename Family>
-void EncodeIndirectParams<Family>::setWorkDimIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset workDimOffset, uint64_t crossThreadAddress, const uint32_t *groupSize) {
+void EncodeIndirectParams<Family>::applyInlineDataGpuVA(IndirectParamsInInlineDataArgs &args, uint64_t inlineDataGpuVa) {
+    for (auto &commandArgs : args.commandsToPatch) {
+        auto commandToPatch = reinterpret_cast<MI_STORE_REGISTER_MEM *>(commandArgs.command);
+        EncodeStoreMMIO<Family>::encode(commandToPatch, commandArgs.offset, commandArgs.address + inlineDataGpuVa, commandArgs.workloadPartition, commandArgs.isBcs);
+    }
+}
+
+template <typename Family>
+void EncodeIndirectParams<Family>::setWorkDimIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset workDimOffset, uint64_t crossThreadAddress, const uint32_t *groupSize, IndirectParamsInInlineDataArgs *outArgs) {
     if (NEO::isValidOffset(workDimOffset)) {
         auto dstPtr = ptrOffset(crossThreadAddress, workDimOffset);
         constexpr uint32_t resultRegister = RegisterOffsets::csGprR0;
@@ -701,7 +755,17 @@ void EncodeIndirectParams<Family>::setWorkDimIndirect(CommandContainer &containe
                 EncodeMath<Family>::addition(container, resultAluRegister, backupAluRegister, resultAluRegister);
             }
         }
-        EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), resultRegister, dstPtr, false, nullptr, false);
+        void **storeCmd = nullptr;
+        if (outArgs && outArgs->storeWorkDimInInlineData) {
+            outArgs->commandsToPatch.push_back({});
+            auto &commandArgs = outArgs->commandsToPatch.back();
+            storeCmd = &commandArgs.command;
+            commandArgs.address = workDimOffset;
+            commandArgs.offset = resultRegister;
+            commandArgs.isBcs = false;
+            commandArgs.workloadPartition = false;
+        }
+        EncodeStoreMMIO<Family>::encode(*container.getCommandStream(), resultRegister, dstPtr, false, storeCmd, false);
     }
 }
 
@@ -715,7 +779,7 @@ bool EncodeSurfaceState<Family>::doBindingTablePrefetch() {
 }
 
 template <typename Family>
-void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
+void EncodeDispatchKernelWithHeap<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPTOR_DATA &interfaceDescriptor, uint32_t samplerCount, uint32_t bindingTableEntryCount) {
     auto enablePrefetch = EncodeSurfaceState<Family>::doBindingTablePrefetch();
 
     if (enablePrefetch) {
@@ -729,7 +793,6 @@ void EncodeDispatchKernel<Family>::adjustBindingTablePrefetch(INTERFACE_DESCRIPT
 
 template <typename Family>
 size_t EncodeDispatchKernel<Family>::getSizeRequiredDsh(const KernelDescriptor &kernelDescriptor, uint32_t iddCount) {
-    using INTERFACE_DESCRIPTOR_DATA = typename Family::INTERFACE_DESCRIPTOR_DATA;
     constexpr auto samplerStateSize = sizeof(typename Family::SAMPLER_STATE);
     const auto numSamplers = kernelDescriptor.payloadMappings.samplerTable.numSamplers;
     const auto additionalDshSize = additionalSizeRequiredDsh(iddCount);
@@ -742,7 +805,7 @@ size_t EncodeDispatchKernel<Family>::getSizeRequiredDsh(const KernelDescriptor &
     size = alignUp(size, EncodeDispatchKernel<Family>::getDefaultDshAlignment());
 
     size += numSamplers * samplerStateSize;
-    size = alignUp(size, INTERFACE_DESCRIPTOR_DATA::SAMPLERSTATEPOINTER_ALIGN_SIZE);
+    size = alignUp(size, InterfaceDescriptorTraits<INTERFACE_DESCRIPTOR_DATA>::samplerStatePointerAlignSize);
 
     if (additionalDshSize > 0) {
         size = alignUp(size, EncodeStates<Family>::alignInterfaceDescriptorData);
@@ -770,12 +833,20 @@ size_t EncodeDispatchKernel<Family>::getDefaultDshAlignment() {
 }
 
 template <typename Family>
-void EncodeIndirectParams<Family>::setGlobalWorkSizeIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress, const uint32_t *lws) {
+void EncodeIndirectParams<Family>::setGlobalWorkSizeIndirect(CommandContainer &container, const NEO::CrossThreadDataOffset offsets[3], uint64_t crossThreadAddress, const uint32_t *lws, IndirectParamsInInlineDataArgs *outArgs) {
     for (int i = 0; i < 3; ++i) {
         if (NEO::isUndefinedOffset(offsets[i])) {
             continue;
         }
-        EncodeMathMMIO<Family>::encodeMulRegVal(container, RegisterOffsets::gpgpuDispatchDim[i], lws[i], ptrOffset(crossThreadAddress, offsets[i]), false);
+        EncodeStoreMMIOParams *storeParams = nullptr;
+
+        auto patchLocation = ptrOffset(crossThreadAddress, offsets[i]);
+        if (outArgs && outArgs->storeGlobalWorkSizeInInlineData[i]) {
+            outArgs->commandsToPatch.push_back({});
+            storeParams = &outArgs->commandsToPatch.back();
+            patchLocation = offsets[i];
+        }
+        EncodeMathMMIO<Family>::encodeMulRegVal(container, RegisterOffsets::gpgpuDispatchDim[i], lws[i], patchLocation, false, storeParams);
     }
 }
 

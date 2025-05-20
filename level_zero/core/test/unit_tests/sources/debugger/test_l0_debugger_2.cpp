@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -37,7 +37,7 @@ HWTEST_P(L0DebuggerWithBlitterTest, givenFlushTaskSubmissionEnabledWhenCommandLi
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     auto &compilerProductHelper = neoDevice->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled)) {
         GTEST_SKIP();
     }
@@ -73,7 +73,7 @@ HWTEST_P(L0DebuggerWithBlitterTest, givenFlushTaskSubmissionDisabledWhenCommandL
     using STATE_BASE_ADDRESS = typename FamilyType::STATE_BASE_ADDRESS;
 
     auto &compilerProductHelper = neoDevice->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled)) {
         GTEST_SKIP();
     }
@@ -273,7 +273,7 @@ HWTEST2_P(L0DebuggerWithBlitterTest, givenImmediateFlushTaskWhenExecutingKernelT
     using STATE_SIP = typename FamilyType::STATE_SIP;
 
     auto &compilerProductHelper = neoDevice->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     auto heaplessStateInit = compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled);
     if (heaplessStateInit) {
         GTEST_SKIP();
@@ -326,7 +326,7 @@ HWTEST_P(L0DebuggerWithBlitterTest, givenInternalUsageImmediateCommandListWhenEx
     using STATE_SIP = typename FamilyType::STATE_SIP;
 
     auto &compilerProductHelper = neoDevice->getCompilerProductHelper();
-    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto heaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (compilerProductHelper.isHeaplessStateInitEnabled(heaplessEnabled)) {
         GTEST_SKIP();
     }
@@ -487,7 +487,7 @@ HWTEST2_P(L0DebuggerWithBlitterTest, givenUseCsrImmediateSubmissionEnabledForReg
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     commandList->close();
 
-    result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     commandQueue->synchronize(0);
@@ -554,16 +554,17 @@ HWTEST2_P(L0DebuggerWithBlitterTest, givenUseCsrImmediateSubmissionDisabledComma
 HWTEST2_P(L0DebuggerWithBlitterTest, givenDebuggingEnabledWhenInternalCmdQIsUsedThenDebuggerPathsAreNotExecuted, MatchAny) {
     ze_command_queue_desc_t queueDesc = {};
 
-    std::unique_ptr<MockCommandQueueHw<gfxCoreFamily>, Deleter> commandQueue(new MockCommandQueueHw<gfxCoreFamily>(device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc));
+    std::unique_ptr<MockCommandQueueHw<FamilyType::gfxCoreFamily>, Deleter> commandQueue(new MockCommandQueueHw<FamilyType::gfxCoreFamily>(device, neoDevice->getDefaultEngine().commandStreamReceiver, &queueDesc));
     commandQueue->initialize(false, true, true);
     EXPECT_TRUE(commandQueue->internalUsage);
     ze_result_t returnValue;
     ze_command_list_handle_t commandLists[] = {
         CommandList::createImmediate(productFamily, device, &queueDesc, true, NEO::EngineGroupType::renderCompute, returnValue)->toHandle()};
     uint32_t numCommandLists = sizeof(commandLists) / sizeof(commandLists[0]);
-    auto commandList = CommandList::fromHandle(commandLists[0]);
+    auto commandList = whiteboxCast(static_cast<L0::CommandListImp *>(CommandList::fromHandle(commandLists[0])));
+    commandList->closedCmdList = true;
 
-    auto result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true, nullptr);
+    auto result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto sbaBuffer = device->getL0Debugger()->getSbaTrackingBuffer(neoDevice->getDefaultEngine().commandStreamReceiver->getOsContext().getContextId());
@@ -625,7 +626,7 @@ HWTEST_P(L0DebuggerWithBlitterTest, givenDebuggingEnabledWhenCommandListIsExecut
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     commandList->close();
 
-    result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(numCommandLists, commandLists, nullptr, true, nullptr, nullptr);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto usedSpaceAfter = commandQueue->commandStream.getUsed();

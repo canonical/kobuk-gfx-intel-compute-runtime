@@ -274,12 +274,17 @@ ze_result_t ContextImp::allocDeviceMem(ze_device_handle_t hDevice,
         unifiedMemoryProperties.allocationFlags.flags.resource48Bit = productHelper.is48bResourceNeededForRayTracing();
     }
 
-    if (false == lookupTable.exportMemory &&
-        neoDevice->getUsmMemAllocPoolsManager()) {
-        neoDevice->getUsmMemAllocPoolsManager()->ensureInitialized(this->driverHandle->svmAllocsManager);
-        if (auto usmPtrFromPool = neoDevice->getUsmMemAllocPoolsManager()->createUnifiedMemoryAllocation(size, unifiedMemoryProperties)) {
-            *ptr = usmPtrFromPool;
-            return ZE_RESULT_SUCCESS;
+    if (false == lookupTable.exportMemory) {
+        if (neoDevice->getUsmMemAllocPoolsManager()) {
+            if (auto usmPtrFromPool = neoDevice->getUsmMemAllocPoolsManager()->createUnifiedMemoryAllocation(size, unifiedMemoryProperties)) {
+                *ptr = usmPtrFromPool;
+                return ZE_RESULT_SUCCESS;
+            }
+        } else if (neoDevice->getUsmMemAllocPool()) {
+            if (auto usmPtrFromPool = neoDevice->getUsmMemAllocPool()->createUnifiedMemoryAllocation(size, unifiedMemoryProperties)) {
+                *ptr = usmPtrFromPool;
+                return ZE_RESULT_SUCCESS;
+            }
         }
     }
 
@@ -464,6 +469,10 @@ ze_result_t ContextImp::freeMem(const void *ptr, bool blocking) {
                                                        blocking)) {
                 return ZE_RESULT_SUCCESS;
             }
+        } else if (auto deviceUsmPool = allocation->device->getUsmMemAllocPool()) {
+            if (deviceUsmPool->freeSVMAlloc(ptr, blocking)) {
+                return ZE_RESULT_SUCCESS;
+            }
         }
     }
     this->driverHandle->svmAllocsManager->freeSVMAlloc(const_cast<void *>(ptr), blocking);
@@ -485,6 +494,18 @@ ze_result_t ContextImp::freeMemExt(const ze_memory_free_ext_desc_t *pMemFreeDesc
 
         for (auto &pairDevice : this->devices) {
             this->freePeerAllocations(ptr, false, Device::fromHandle(pairDevice.second));
+        }
+
+        if (InternalMemoryType::hostUnifiedMemory == allocation->memoryType) {
+            if (this->driverHandle->usmHostMemAllocPool.freeSVMAlloc(ptr, false)) {
+                return ZE_RESULT_SUCCESS;
+            }
+        } else if (InternalMemoryType::deviceUnifiedMemory == allocation->memoryType) {
+            if (auto deviceUsmPool = allocation->device->getUsmMemAllocPool()) {
+                if (deviceUsmPool->freeSVMAlloc(ptr, false)) {
+                    return ZE_RESULT_SUCCESS;
+                }
+            }
         }
 
         this->driverHandle->svmAllocsManager->freeSVMAllocDefer(const_cast<void *>(ptr));
@@ -562,9 +583,9 @@ ze_result_t ContextImp::makeImageResident(ze_device_handle_t hDevice, ze_image_h
 
     NEO::Device *neoDevice = L0::Device::fromHandle(hDevice)->getNEODevice();
     NEO::MemoryOperationsHandler *memoryOperationsIface = neoDevice->getRootDeviceEnvironment().memoryOperationsInterface.get();
-    auto success = memoryOperationsIface->makeResident(neoDevice, ArrayRef<NEO::GraphicsAllocation *>(&alloc, 1), true, false);
+    auto success = memoryOperationsIface->makeResident(neoDevice, ArrayRef<NEO::GraphicsAllocation *>(&alloc, 1), true, true);
     if (implicitArgsAlloc) {
-        memoryOperationsIface->makeResident(neoDevice, ArrayRef<NEO::GraphicsAllocation *>(&implicitArgsAlloc, 1), true, false);
+        memoryOperationsIface->makeResident(neoDevice, ArrayRef<NEO::GraphicsAllocation *>(&implicitArgsAlloc, 1), true, true);
     }
     return changeMemoryOperationStatusToL0ResultType(success);
 }
@@ -638,6 +659,11 @@ void ContextImp::setIPCHandleData(NEO::GraphicsAllocation *graphicsAllocation, u
             auto neoDevice = device->getNEODevice();
             if (auto deviceUsmMemAllocPoolsManager = neoDevice->getUsmMemAllocPoolsManager()) {
                 if (auto poolOffset = deviceUsmMemAllocPoolsManager->getOffsetInPool(addrToPtr(ptrAddress))) {
+                    ipcData.poolOffset = poolOffset;
+                    break;
+                }
+            } else if (auto deviceUsmMemAllocPool = neoDevice->getUsmMemAllocPool()) {
+                if (auto poolOffset = deviceUsmMemAllocPool->getOffsetInPool(addrToPtr(ptrAddress))) {
                     ipcData.poolOffset = poolOffset;
                     break;
                 }
@@ -791,7 +817,12 @@ ze_result_t ContextImp::openIpcMemHandles(ze_device_handle_t hDevice,
 
         handles.push_back(static_cast<NEO::osHandle>(handle));
     }
-    auto neoDevice = Device::fromHandle(hDevice)->getNEODevice();
+
+    auto device = Device::fromHandle(hDevice);
+    auto neoDevice = device->getNEODevice();
+    if (device->isImplicitScalingCapable()) {
+        neoDevice = device->getNEODevice()->getRootDevice();
+    }
     NEO::SvmAllocationData allocDataInternal(neoDevice->getRootDeviceIndex());
     *pptr = this->driverHandle->importFdHandles(neoDevice, flags, handles, nullptr, nullptr, allocDataInternal);
     if (nullptr == *pptr) {
@@ -1067,6 +1098,13 @@ ze_result_t ContextImp::reserveVirtualMem(const void *pStart,
     if (castToUint64(pStart) <= maxCpuVa) {
         reserveOnSvmHeap = true;
     }
+
+    bool platformSupportSvmHeapReservation = true;
+    for (auto &device : this->driverHandle->devices) {
+        auto &productHelper = device->getNEODevice()->getProductHelper();
+        platformSupportSvmHeapReservation &= productHelper.isSvmHeapReservationSupported();
+    }
+    reserveOnSvmHeap &= platformSupportSvmHeapReservation;
     reserveOnSvmHeap &= NEO::debugManager.flags.EnableReservingInSvmRange.get();
 
     NEO::AddressRange addressRange{};

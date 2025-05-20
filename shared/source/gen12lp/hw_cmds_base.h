@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -138,6 +138,7 @@ struct Gen12LpFamily : public Gen12Lp {
     static constexpr bool isQwordInOrderCounter = false;
     static constexpr bool walkerPostSyncSupport = false;
     static constexpr size_t indirectDataAlignment = GPGPU_WALKER::INDIRECTDATASTARTADDRESS_ALIGN_SIZE;
+    static constexpr GFXCORE_FAMILY gfxCoreFamily = IGFX_GEN12LP_CORE;
 
     static constexpr bool supportsCmdSet(GFXCORE_FAMILY cmdSetBaseFamily) {
         return cmdSetBaseFamily == IGFX_GEN12LP_CORE;
@@ -155,6 +156,10 @@ struct Gen12LpFamily : public Gen12Lp {
 
     template <typename WalkerType>
     static constexpr bool isHeaplessMode() {
+        return false;
+    }
+
+    static constexpr bool isHeaplessRequired() {
         return false;
     }
 

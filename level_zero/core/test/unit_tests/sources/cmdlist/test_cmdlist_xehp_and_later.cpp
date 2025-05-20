@@ -34,6 +34,9 @@
 
 #include "test_traits_common.h"
 
+using namespace NEO;
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
+
 namespace L0 {
 namespace ult {
 
@@ -41,7 +44,7 @@ using CommandListTests = Test<DeviceFixture>;
 HWCMDTEST_F(IGFX_XE_HP_CORE, CommandListTests, whenCommandListIsCreatedThenPCAndStateBaseAddressCmdsAreAddedAndCorrectlyProgrammed) {
 
     auto &compilerProductHelper = device->getNEODevice()->getCompilerProductHelper();
-    auto isHeaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto isHeaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (isHeaplessEnabled) {
         GTEST_SKIP();
     }
@@ -112,13 +115,13 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, CommandListTests, whenCommandListIsCreatedThenPCAnd
         EXPECT_EQ(ssh->getHeapGpuBase(), cmdSba->getSurfaceStateBaseAddress());
     }
 
-    EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
+    EXPECT_EQ(gmmHelper->getL1EnabledMOCS(), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
 }
 
 HWTEST2_F(CommandListTests, whenCommandListIsCreatedAndProgramExtendedPipeControlPriorToNonPipelinedStateCommandIsEnabledThenPCAndStateBaseAddressCmdsAreAddedAndCorrectlyProgrammed, IsAtLeastXeHpCore) {
 
     auto &compilerProductHelper = device->getNEODevice()->getCompilerProductHelper();
-    auto isHeaplessEnabled = compilerProductHelper.isHeaplessModeEnabled();
+    auto isHeaplessEnabled = compilerProductHelper.isHeaplessModeEnabled(*defaultHwInfo);
     if (isHeaplessEnabled) {
         GTEST_SKIP();
     }
@@ -160,13 +163,13 @@ HWTEST2_F(CommandListTests, whenCommandListIsCreatedAndProgramExtendedPipeContro
     EXPECT_TRUE(cmdPc->getTextureCacheInvalidationEnable());
     EXPECT_TRUE(cmdPc->getCommandStreamerStallEnable());
 
-    if constexpr (TestTraits<gfxCoreFamily>::isPipeControlExtendedPriorToNonPipelinedStateCommandSupported) {
+    if constexpr (TestTraits<FamilyType::gfxCoreFamily>::isPipeControlExtendedPriorToNonPipelinedStateCommandSupported) {
         EXPECT_TRUE(cmdPc->getAmfsFlushEnable());
         EXPECT_TRUE(cmdPc->getInstructionCacheInvalidateEnable());
         EXPECT_TRUE(cmdPc->getConstantCacheInvalidationEnable());
         EXPECT_TRUE(cmdPc->getStateCacheInvalidationEnable());
 
-        if constexpr (TestTraits<gfxCoreFamily>::isUnTypedDataPortCacheFlushSupported) {
+        if constexpr (TestTraits<FamilyType::gfxCoreFamily>::isUnTypedDataPortCacheFlushSupported) {
             EXPECT_TRUE(cmdPc->getUnTypedDataPortCacheFlush());
         }
     }
@@ -200,19 +203,19 @@ HWTEST2_F(CommandListTests, whenCommandListIsCreatedAndProgramExtendedPipeContro
         EXPECT_EQ(ssh->getHeapGpuBase(), cmdSba->getSurfaceStateBaseAddress());
     }
 
-    EXPECT_EQ(gmmHelper->getMOCS(GMM_RESOURCE_USAGE_OCL_BUFFER_CONST), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
+    EXPECT_EQ(gmmHelper->getL1EnabledMOCS(), cmdSba->getStatelessDataPortAccessMemoryObjectControlState());
 }
 
 using CommandListTestsReserveSize = Test<DeviceFixture>;
-HWTEST2_F(CommandListTestsReserveSize, givenCommandListWhenGetReserveSshSizeThen16slotSpaceReturned, IsAtLeastXeHpCore) {
-    L0::CommandListCoreFamily<gfxCoreFamily> commandList(1u);
+HWTEST2_F(CommandListTestsReserveSize, givenCommandListWhenGetReserveSshSizeThen16slotSpaceReturned, IsHeapfulSupportedAndAtLeastXeHpCore) {
+    L0::CommandListCoreFamily<FamilyType::gfxCoreFamily> commandList(1u);
     commandList.initialize(device, NEO::EngineGroupType::compute, 0u);
 
     EXPECT_EQ(commandList.getReserveSshSize(), (16 * 2 + 1) * 2 * sizeof(typename FamilyType::RENDER_SURFACE_STATE));
 }
 
 using CommandListAppendLaunchKernel = Test<ModuleFixture>;
-HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsWhenUpdateStreamPropertiesIsCalledThenRequiredStateFinalStateAndCommandsToPatchAreCorrectlySet, IsAtLeastXeHpCore) {
+HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsWhenUpdateStreamPropertiesIsCalledThenRequiredStateFinalStateAndCommandsToPatchAreCorrectlySet, IsHeapfulSupportedAndAtLeastXeHpCore) {
     DebugManagerStateRestore restorer;
 
     debugManager.flags.AllowPatchingVfeStateInCommandLists.set(1);
@@ -226,7 +229,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsWhenUpdateStreamProp
     cooperativeKernel.module = pMockModule2.get();
     cooperativeKernel.immutableData.kernelDescriptor->kernelAttributes.flags.usesSyncBuffer = true;
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -288,7 +291,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsWhenUpdateStreamProp
     EXPECT_EQ(0u, pCommandList->commandsToPatch.size());
 }
 
-HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsAndPatchingDisallowedWhenUpdateStreamPropertiesIsCalledThenCommandsToPatchAreEmpty, IsAtLeastXeHpCore) {
+HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsAndPatchingDisallowedWhenUpdateStreamPropertiesIsCalledThenCommandsToPatchAreEmpty, IsHeapfulSupportedAndAtLeastXeHpCore) {
     DebugManagerStateRestore restorer;
 
     Mock<::L0::KernelImp> defaultKernel;
@@ -300,7 +303,7 @@ HWTEST2_F(CommandListAppendLaunchKernel, givenVariousKernelsAndPatchingDisallowe
     cooperativeKernel.module = pMockModule2.get();
     cooperativeKernel.immutableData.kernelDescriptor->kernelAttributes.flags.usesSyncBuffer = true;
 
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -473,7 +476,7 @@ HWTEST2_F(CommandListAppendLaunchKernelCompactL3FlushDisabledTest,
 
     input.eventPoolFlags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 HWTEST2_F(CommandListAppendLaunchKernelCompactL3FlushDisabledTest,
@@ -487,7 +490,7 @@ HWTEST2_F(CommandListAppendLaunchKernelCompactL3FlushDisabledTest,
 
     input.eventPoolFlags = 0;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 using CommandListAppendLaunchKernelCompactL3FlushEnabledTest = Test<CommandListAppendLaunchKernelCompactL3FlushEventFixture<1, 0>>;
@@ -504,7 +507,7 @@ HWTEST2_F(CommandListAppendLaunchKernelCompactL3FlushEnabledTest,
     input.eventPoolFlags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
     input.useFirstEventPacketAddress = true;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 HWTEST2_F(CommandListAppendLaunchKernelCompactL3FlushEnabledTest,
@@ -519,7 +522,7 @@ HWTEST2_F(CommandListAppendLaunchKernelCompactL3FlushEnabledTest,
     input.eventPoolFlags = 0;
     input.useFirstEventPacketAddress = true;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 using CommandListAppendLaunchKernelMultiTileCompactL3FlushDisabledTest = Test<CommandListAppendLaunchKernelCompactL3FlushEventFixture<0, 1>>;
@@ -535,7 +538,7 @@ HWTEST2_F(CommandListAppendLaunchKernelMultiTileCompactL3FlushDisabledTest,
 
     input.eventPoolFlags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 HWTEST2_F(CommandListAppendLaunchKernelMultiTileCompactL3FlushDisabledTest,
@@ -549,7 +552,7 @@ HWTEST2_F(CommandListAppendLaunchKernelMultiTileCompactL3FlushDisabledTest,
 
     input.eventPoolFlags = 0;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 using CommandListAppendLaunchKernelMultiTileCompactL3FlushEnabledTest = Test<CommandListAppendLaunchKernelCompactL3FlushEventFixture<1, 1>>;
@@ -566,7 +569,7 @@ HWTEST2_F(CommandListAppendLaunchKernelMultiTileCompactL3FlushEnabledTest,
     input.eventPoolFlags = ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
     input.useFirstEventPacketAddress = true;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 HWTEST2_F(CommandListAppendLaunchKernelMultiTileCompactL3FlushEnabledTest,
@@ -581,7 +584,7 @@ HWTEST2_F(CommandListAppendLaunchKernelMultiTileCompactL3FlushEnabledTest,
     input.eventPoolFlags = 0;
     input.useFirstEventPacketAddress = true;
 
-    testAppendLaunchKernelAndL3Flush<gfxCoreFamily>(input, arg);
+    testAppendLaunchKernelAndL3Flush<FamilyType::gfxCoreFamily>(input, arg);
 }
 
 template <uint32_t multiTile, uint32_t limitEventPacketes, uint32_t copyOnly>
@@ -1280,76 +1283,76 @@ struct CommandListSignalAllEventPacketFixture : public ModuleFixture {
 
 using CommandListSignalAllEventPacketTest = Test<CommandListSignalAllEventPacketFixture<0, 0, 0>>;
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendKernelThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendKernel<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendKernelThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(0);
+    testAppendKernel<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendWaitEventThenAllPacketWaitDispatched, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendWaitEventThenAllPacketWaitDispatched, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(0);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalProfilingEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventForProfiling<gfxCoreFamily>();
+    testAppendSignalEventForProfiling<FamilyType::gfxCoreFamily>();
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using MultiTileCommandListSignalAllEventPacketTest = Test<CommandListSignalAllEventPacketFixture<1, 0, 0>>;
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendKernelThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendKernel<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendKernelThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(0);
+    testAppendKernel<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendWaitEventThenAllPacketWaitDispatched, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendWaitEventThenAllPacketWaitDispatched, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(0);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalProfilingEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventForProfiling<gfxCoreFamily>();
+    testAppendSignalEventForProfiling<FamilyType::gfxCoreFamily>();
 }
 
 struct MultiTileCommandListSignalAllocLayoutTest : public MultiTileCommandListSignalAllEventPacketTest {
@@ -1359,239 +1362,243 @@ struct MultiTileCommandListSignalAllocLayoutTest : public MultiTileCommandListSi
 };
 
 HWTEST2_F(MultiTileCommandListSignalAllocLayoutTest, givenDynamicLayoutEnabledWhenAppendEventForProfilingCalledThenProgramOffsetMmio, IsAtLeastXeHpCore) {
-    EXPECT_NE(ImplicitScalingDispatch<FamilyType>::getImmediateWritePostSyncOffset(), ImplicitScalingDispatch<FamilyType>::getTimeStampPostSyncOffset());
+    if constexpr (FamilyType::isHeaplessRequired() == false) {
+        EXPECT_NE(ImplicitScalingDispatch<FamilyType>::getImmediateWritePostSyncOffset(), ImplicitScalingDispatch<FamilyType>::getTimeStampPostSyncOffset());
+    } else {
+        EXPECT_EQ(ImplicitScalingDispatch<FamilyType>::getImmediateWritePostSyncOffset(), ImplicitScalingDispatch<FamilyType>::getTimeStampPostSyncOffset());
+    }
 
-    testAppendSignalEventForProfiling<gfxCoreFamily>();
+    testAppendSignalEventForProfiling<FamilyType::gfxCoreFamily>();
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendResetEventWithSinglePacketThenAllPacketResetDispatchedUsingNonPartitionedWrite, IsAtLeastXeHpCore) {
     alignEventPacketsForReset = false;
 
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendResetEventWithSinglePacketThenAllPacketResetDispatchedUsingNonPartitionedWrite, IsAtLeastXeHpCore) {
     alignEventPacketsForReset = false;
 
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using CommandListSignalAllEventPacketForCompactEventTest = Test<CommandListSignalAllEventPacketFixture<0, 1, 0>>;
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendKernelThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendKernel<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendKernelThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(0);
+    testAppendKernel<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendWaitEventThenAllPacketWaitDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendWaitEventThenAllPacketWaitDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(0);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalProfilingEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventForProfiling<gfxCoreFamily>();
+    testAppendSignalEventForProfiling<FamilyType::gfxCoreFamily>();
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using MultiTileCommandListSignalAllEventPacketForCompactEventTest = Test<CommandListSignalAllEventPacketFixture<1, 1, 0>>;
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendKernelThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendKernel<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendKernelThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendKernel<gfxCoreFamily>(0);
+    testAppendKernel<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendWaitEventThenAllPacketWaitDispatchedAsDefaultActiveSinglePacket, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendWaitEventThenAllPacketWaitDispatchedAsDefaultActiveSinglePacket, IsAtLeastXeHpCore) {
-    testAppendWaitEvent<gfxCoreFamily>(0);
+    testAppendWaitEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalProfilingEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventForProfiling<gfxCoreFamily>();
+    testAppendSignalEventForProfiling<FamilyType::gfxCoreFamily>();
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendResetEventWithSinglePacketThenAllPacketResetDispatchedUsingNonPartitionedWrite, IsAtLeastXeHpCore) {
     alignEventPacketsForReset = false;
 
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendResetEventWithSinglePacketThenAllPacketResetDispatchedUsingNonPartitionedWrite, IsAtLeastXeHpCore) {
     alignEventPacketsForReset = false;
 
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using CopyCommandListSignalAllEventPacketTest = Test<CommandListSignalAllEventPacketFixture<0, 0, 1>>;
 HWTEST2_F(CopyCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using MultiTileCopyCommandListSignalAllEventPacketTest = Test<CommandListSignalAllEventPacketFixture<1, 0, 1>>;
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatched, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatched, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using CopyCommandListSignalAllEventPacketForCompactEventTest = Test<CommandListSignalAllEventPacketFixture<0, 1, 1>>;
 HWTEST2_F(CopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(CopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest = Test<CommandListSignalAllEventPacketFixture<1, 1, 1>>;
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendSignalEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEvent<gfxCoreFamily>(0);
+    testAppendSignalEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalImmediateEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(0);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(0);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsEventWhenAppendSignalTimestampEventThenAllPacketCompletionDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendSignalEventPostAppendCall<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendSignalEventPostAppendCall<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsTimestampEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP);
 }
 
 HWTEST2_F(MultiTileCopyCommandListSignalAllEventPacketForCompactEventTest, givenSignalPacketsImmediateEventWhenAppendResetEventThenAllPacketResetDispatchNotNeeded, IsAtLeastXeHpCore) {
-    testAppendResetEvent<gfxCoreFamily>(0);
+    testAppendResetEvent<FamilyType::gfxCoreFamily>(0);
 }
 
 using RayTracingMatcher = IsAtLeastXeHpCore;
@@ -1607,7 +1614,7 @@ HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenKernelUsingRayTracin
 
     kernel.setGroupSize(4, 1, 1);
     ze_group_count_t groupCount{8, 1, 1};
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -1618,11 +1625,9 @@ HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenKernelUsingRayTracin
     result = pCommandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
     EXPECT_NE(ZE_RESULT_SUCCESS, result);
 
-    neoDevice->rtMemoryBackedBuffer = buffer1;
+    rtMemoryBackedBuffer = buffer1;
     result = pCommandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-
-    rtMemoryBackedBuffer = buffer1;
 }
 
 HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenDcFlushMitigationWhenAppendLaunchKernelWithRayTracingIsCalledThenRequireDcFlush, RayTracingMatcher) {
@@ -1637,7 +1642,7 @@ HWTEST2_F(CommandListAppendLaunchRayTracingKernelTest, givenDcFlushMitigationWhe
 
     kernel.setGroupSize(4, 1, 1);
     ze_group_count_t groupCount{8, 1, 1};
-    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto pCommandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = pCommandList->initialize(device, NEO::EngineGroupType::compute, 0);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -1720,7 +1725,7 @@ void find3dBtdCommand(LinearStream &cmdStream, size_t offset, size_t size, uint6
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenRegularCmdListExecutedAndRegularExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -1746,7 +1751,7 @@ HWTEST2_F(RayTracingCmdListTest,
 
     size_t queueSizeBefore = cmdQueueStream.getUsed();
     ze_command_list_handle_t cmdListHandle = commandList->toHandle();
-    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     size_t queueSizeAfter = cmdQueueStream.getUsed();
 
@@ -1757,7 +1762,7 @@ HWTEST2_F(RayTracingCmdListTest,
     ultCsr->isMadeResident(rtAllocation, residentCount);
 
     queueSizeBefore = cmdQueueStream.getUsed();
-    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     queueSizeAfter = cmdQueueStream.getUsed();
 
@@ -1784,7 +1789,7 @@ HWTEST2_F(RayTracingCmdListTest,
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     ze_command_list_handle_t cmdListHandle = commandList->toHandle();
-    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_EQ(ultCsr->registeredDcFlushForDcFlushMitigation, device->getProductHelper().isDcFlushMitigated());
@@ -1793,7 +1798,7 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenRegularCmdListExecutedAndImmediateExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -1819,7 +1824,7 @@ HWTEST2_F(RayTracingCmdListTest,
 
     size_t queueSizeBefore = cmdQueueStream.getUsed();
     ze_command_list_handle_t cmdListHandle = commandList->toHandle();
-    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     size_t queueSizeAfter = cmdQueueStream.getUsed();
 
@@ -1851,7 +1856,7 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenImmediateCmdListExecutedAndImmediateExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -1913,7 +1918,7 @@ HWTEST2_F(RayTracingCmdListTest,
 HWTEST2_F(RayTracingCmdListTest,
           givenRayTracingKernelWhenImmediateCmdListExecutedAndRegularExecutedAgainThenDispatch3dBtdCommandOnceMakeResidentTwiceAndPipeControlWithStateCacheFlushAfterWalker,
           RayTracingMatcher) {
-    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled()) {
+    if (device->getNEODevice()->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) {
         GTEST_SKIP();
     }
 
@@ -1958,7 +1963,7 @@ HWTEST2_F(RayTracingCmdListTest,
 
     size_t queueSizeBefore = cmdQueueStream.getUsed();
     ze_command_list_handle_t cmdListHandle = commandList->toHandle();
-    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     size_t queueSizeAfter = cmdQueueStream.getUsed();
 
@@ -2235,7 +2240,7 @@ HWTEST2_F(ImmediateFlushTaskCsrSharedHeapCmdListTest,
 
 HWTEST2_F(ImmediateFlushTaskCsrSharedHeapCmdListTest,
           givenImmediateFlushOnCsrSharedHeapsWhenAppendingSecondKernelWithScratchThenExpectScratchStateAndAllocation,
-          IsAtLeastXeHpCore) {
+          IsHeapfulSupportedAndAtLeastXeHpCore) {
     using CFE_STATE = typename FamilyType::CFE_STATE;
     using RENDER_SURFACE_STATE = typename FamilyType::RENDER_SURFACE_STATE;
 
@@ -2396,7 +2401,7 @@ HWTEST2_F(ImmediateFlushTaskCsrSharedHeapCmdListTest,
     }
 
     ze_command_list_handle_t cmdListHandle = commandList->toHandle();
-    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr);
+    result = commandQueue->executeCommandLists(1, &cmdListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto &csrBaseAddressState = csrImmediate.getStreamProperties().stateBaseAddress;
@@ -2544,7 +2549,7 @@ HWTEST2_F(CommandListCreate, givenAppendSignalEventWhenSkipAddToResidencyTrueThe
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using POST_SYNC_OPERATION = typename PIPE_CONTROL::POST_SYNC_OPERATION;
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     auto &commandContainer = commandList->getCmdContainer();
@@ -2625,7 +2630,7 @@ HWTEST2_F(CommandListCreate,
           IsAtLeastXeHpCore) {
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     auto &commandContainer = commandList->getCmdContainer();
@@ -2697,7 +2702,7 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     commandList->dcFlushSupport = true;
@@ -2757,7 +2762,7 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     commandList->dcFlushSupport = true;
@@ -2824,7 +2829,7 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, ZE_COMMAND_LIST_FLAG_IN_ORDER);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -2886,11 +2891,11 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, ZE_COMMAND_LIST_FLAG_IN_ORDER);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
-    auto commandList2 = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList2 = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     result = commandList2->initialize(device, NEO::EngineGroupType::compute, ZE_COMMAND_LIST_FLAG_IN_ORDER);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -2989,7 +2994,7 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
     bool heapless = commandList->isHeaplessModeEnabled();
@@ -3035,7 +3040,7 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     kernel.crossThreadDataSize = 64;
     kernel.crossThreadData = std::make_unique<uint8_t[]>(kernel.crossThreadDataSize);
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 
@@ -3063,7 +3068,7 @@ HWTEST2_F(CommandListAppendLaunchKernel,
     auto mockModule = std::unique_ptr<Module>(new Mock<Module>(device, nullptr));
     kernel.module = mockModule.get();
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     auto result = commandList->initialize(device, NEO::EngineGroupType::compute, 0u);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
 

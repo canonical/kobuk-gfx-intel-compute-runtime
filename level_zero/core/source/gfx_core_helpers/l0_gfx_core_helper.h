@@ -42,15 +42,6 @@ enum class RTASDeviceFormatInternal {
     version2 = 2,
 };
 
-// Offset to read the first Stall Sampling report after IP Address.
-constexpr int ipStallSamplingOffset = 3;
-// Shift in bits required to read the stall sampling report data due to the IP address [0-28] bits to access the next report category data.
-constexpr int ipStallSamplingReportShift = 5;
-// Mask for Stall Sampling Report Category.
-constexpr int stallSamplingReportCategoryMask = 0xff;
-// Offset to access Stall Sampling Report Sub Slice and flags.
-constexpr int stallSamplingReportSubSliceAndFlagsOffset = 48;
-
 struct Event;
 struct Device;
 struct EventPool;
@@ -120,6 +111,7 @@ class L0GfxCoreHelper : public NEO::ApiGfxCoreHelper {
     virtual bool implicitSynchronizedDispatchForCooperativeKernelsAllowed() const = 0;
     virtual std::unique_ptr<NEO::TagAllocatorBase> getInOrderTimestampAllocator(const RootDeviceIndicesContainer &rootDeviceIndices, NEO::MemoryManager *memoryManager, size_t initialTagCount, size_t packetsCountPerElement, size_t tagAlignment,
                                                                                 NEO::DeviceBitfield deviceBitfield) const = 0;
+    virtual uint64_t getOaTimestampValidBits() const = 0;
 
   protected:
     L0GfxCoreHelper() = default;
@@ -174,6 +166,7 @@ class L0GfxCoreHelperHw : public L0GfxCoreHelper {
     bool implicitSynchronizedDispatchForCooperativeKernelsAllowed() const override;
     std::unique_ptr<NEO::TagAllocatorBase> getInOrderTimestampAllocator(const RootDeviceIndicesContainer &rootDeviceIndices, NEO::MemoryManager *memoryManager, size_t initialTagCount, size_t packetsCountPerElement, size_t tagAlignment,
                                                                         NEO::DeviceBitfield deviceBitfield) const override;
+    uint64_t getOaTimestampValidBits() const override;
 
   protected:
     L0GfxCoreHelperHw() = default;

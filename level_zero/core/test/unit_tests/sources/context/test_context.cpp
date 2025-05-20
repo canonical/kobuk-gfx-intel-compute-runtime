@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -787,7 +787,7 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
                                                                      returnValue, false));
     auto commandListHandle = commandList->toHandle();
     commandList->close();
-    res = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, true, nullptr);
+    res = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, true, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 1u);
@@ -832,14 +832,14 @@ HWTEST2_F(ContextMakeMemoryResidentAndMigrationTests,
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 0u);
 
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
     commandList->unifiedMemoryControls.indirectSharedAllocationsAllowed = true;
     commandList->indirectAllocationsAllowed = true;
     commandList->close();
 
     auto commandListHandle = commandList->toHandle();
-    res = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, true, nullptr);
+    res = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, true, nullptr, nullptr);
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationsWithinUMAllocsManagerToGpuDomainCalled, 1u);
 
@@ -889,7 +889,7 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     auto commandListHandle = commandList->toHandle();
     commandList->close();
 
-    res = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr);
+    res = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 0u);
@@ -943,6 +943,70 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     int one = 1;
     result = commandList0->appendMemoryFill(dstBuffer, reinterpret_cast<void *>(&one), sizeof(one), 4090u,
                                             nullptr, 0, nullptr, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 1u);
+    EXPECT_EQ(mockPageFaultManager->migratedAddress, ptr);
+
+    mockMemoryInterface->evictResult = NEO::MemoryOperationsStatus::success;
+    res = context->evictMemory(device, ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    context->freeMem(ptr);
+    context->freeMem(dstBuffer);
+}
+
+HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
+         GivenImmediateCommandListWhenExecutingRegularCommandListsHavingSharedAllocationWithMigrationOnImmediateThenMemoryFromMakeResidentIsMovedToGpuOnce) {
+    DriverHandleImp *driverHandleImp = static_cast<DriverHandleImp *>(hostDriverHandle.get());
+    size_t previousSize = driverHandleImp->sharedMakeResidentAllocations.size();
+
+    mockMemoryInterface->makeResidentResult = NEO::MemoryOperationsStatus::success;
+
+    ze_result_t res = context->makeMemoryResident(device, ptr, size);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    size_t currentSize = driverHandleImp->sharedMakeResidentAllocations.size();
+    EXPECT_EQ(previousSize + 1, currentSize);
+
+    const ze_command_queue_desc_t desc = {};
+    MockCsrHw2<FamilyType> csr(*neoDevice->getExecutionEnvironment(), 0, neoDevice->getDeviceBitfield());
+    csr.initializeTagAllocation();
+    csr.setupContext(*neoDevice->getDefaultEngine().osContext);
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+
+    DebugManagerStateRestore restorer;
+    NEO::debugManager.flags.EnableFlushTaskSubmission.set(true);
+
+    std::unique_ptr<L0::CommandList> commandListImmediate(CommandList::createImmediate(productFamily,
+                                                                                       device,
+                                                                                       &desc,
+                                                                                       false,
+                                                                                       NEO::EngineGroupType::compute,
+                                                                                       result));
+    ASSERT_NE(nullptr, commandListImmediate);
+
+    void *dstBuffer = nullptr;
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+    ze_host_mem_alloc_desc_t hostDesc = {};
+    result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, 16384u, 4090u, &dstBuffer);
+    ASSERT_EQ(ZE_RESULT_SUCCESS, result);
+
+    std::unique_ptr<L0::CommandList> commandListRegular(CommandList::create(productFamily,
+                                                                            device,
+                                                                            NEO::EngineGroupType::compute,
+                                                                            0u,
+                                                                            result, false));
+
+    int one = 1;
+    result = commandListRegular->appendMemoryFill(dstBuffer, reinterpret_cast<void *>(&one), sizeof(one), 4090u,
+                                                  nullptr, 0, nullptr, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+    commandListRegular->close();
+
+    auto cmdListHandle = commandListRegular->toHandle();
+    result = commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 1u);
@@ -1559,7 +1623,7 @@ class ReserveMemoryManagerMock : public NEO::MemoryManager {
     std::unique_ptr<NEO::GraphicsAllocation> mockAllocation;
 };
 
-TEST_F(ContextTest, whenCallingVirtualMemReserveWithPStartInSvmRangeWithSuccessfulAllocationThenSuccessReturned) {
+HWTEST2_F(ContextTest, whenCallingVirtualMemReserveWithPStartInSvmRangeWithSuccessfulAllocationThenSuccessReturned, IsNotMTL) {
     ze_context_handle_t hContext{};
     ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
 
@@ -1763,7 +1827,7 @@ TEST_F(ContextTest, whenUsingOffsetsIntoReservedVirtualMemoryWithMultiplePhysica
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
-TEST_F(ContextTest, whenCallingVirtualMemoryReservationWhenOutOfMemoryThenOutOfMemoryReturned) {
+HWTEST2_F(ContextTest, whenCallingVirtualMemoryReservationWhenOutOfMemoryThenOutOfMemoryReturned, IsNotMTL) {
     ze_context_handle_t hContext;
     ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
 
@@ -1955,7 +2019,7 @@ class MockCpuInfoOverrideVirtualAddressSize {
     uint32_t virtualAddressSizeSave = 0;
 };
 
-TEST_F(ContextTest, Given32BitCpuAddressWidthWhenCallingVirtualMemoryReservationCorrectAllocationMethodIsSelected) {
+HWTEST2_F(ContextTest, Given32BitCpuAddressWidthWhenCallingVirtualMemoryReservationCorrectAllocationMethodIsSelected, IsNotMTL) {
     MockCpuInfoOverrideVirtualAddressSize overrideCpuInfo(32);
 
     ze_context_handle_t hContext;
@@ -2000,7 +2064,7 @@ TEST_F(ContextTest, Given32BitCpuAddressWidthWhenCallingVirtualMemoryReservation
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
-TEST_F(ContextTest, Given48BitCpuAddressWidthWhenCallingVirtualMemoryReservationCorrectAllocationMethodIsSelected) {
+HWTEST2_F(ContextTest, Given48BitCpuAddressWidthWhenCallingVirtualMemoryReservationCorrectAllocationMethodIsSelected, IsNotMTL) {
     MockCpuInfoOverrideVirtualAddressSize overrideCpuInfo(48);
 
     ze_context_handle_t hContext;
@@ -2044,7 +2108,7 @@ TEST_F(ContextTest, Given48BitCpuAddressWidthWhenCallingVirtualMemoryReservation
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
-TEST_F(ContextTest, Given57BitCpuAddressWidthWhenCallingVirtualMemoryReservationCorrectAllocationMethodIsSelected) {
+HWTEST2_F(ContextTest, Given57BitCpuAddressWidthWhenCallingVirtualMemoryReservationCorrectAllocationMethodIsSelected, IsNotMTL) {
     MockCpuInfoOverrideVirtualAddressSize overrideCpuInfo(57);
 
     ze_context_handle_t hContext;
@@ -2431,6 +2495,53 @@ HWTEST2_F(ContextTest, givenBindlessImageWhenMakeImageResidentAndEvictThenImageI
                                    Image::fromHandle(image)->getImplicitArgsAllocation());
         EXPECT_EQ(mockMemoryOperationsInterface->gfxAllocationsForMakeResident.end(), allocIter);
     }
+
+    Image::fromHandle(image)->destroy();
+
+    res = contextImp->destroy();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+}
+
+HWTEST2_F(ContextTest, givenMakeImageResidentThenMakeImageResidentIsCalledWithForcePagingFenceTrue, MatchAny) {
+    if (!device->getNEODevice()->getRootDeviceEnvironment().getReleaseHelper() ||
+        !device->getNEODevice()->getDeviceInfo().imageSupport) {
+        GTEST_SKIP();
+    }
+
+    ze_context_handle_t hContext;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+    ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    class MockMemoryOperationsForcePagingFenceCheck : public NEO::MockMemoryOperations {
+      public:
+        MockMemoryOperationsForcePagingFenceCheck() {}
+
+        MemoryOperationsStatus makeResident(NEO::Device *neoDevice, ArrayRef<NEO::GraphicsAllocation *> gfxAllocations, bool isDummyExecNeeded, bool forcePagingFence) override {
+            makeResidentCalledCount++;
+            forcePagingFencePassed = forcePagingFence;
+            return MemoryOperationsStatus::success;
+        }
+        bool forcePagingFencePassed = false;
+    };
+
+    auto mockMemoryOperationsInterface = new MockMemoryOperationsForcePagingFenceCheck();
+    mockMemoryOperationsInterface->captureGfxAllocationsForMakeResident = true;
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->memoryOperationsInterface.reset(mockMemoryOperationsInterface);
+
+    ContextImp *contextImp = static_cast<ContextImp *>(L0::Context::fromHandle(hContext));
+
+    ze_image_handle_t image = {};
+    ze_image_desc_t imageDesc = {};
+    imageDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+
+    res = contextImp->createImage(device, &imageDesc, &image);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_NE(nullptr, image);
+
+    contextImp->makeImageResident(device, image);
+    EXPECT_EQ(1, mockMemoryOperationsInterface->makeResidentCalledCount);
+    EXPECT_TRUE(mockMemoryOperationsInterface->forcePagingFencePassed);
 
     Image::fromHandle(image)->destroy();
 

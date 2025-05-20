@@ -644,6 +644,8 @@ ze_result_t KernelImp::setArgRedescribedImage(uint32_t argIndex, ze_image_handle
 ze_result_t KernelImp::setArgBufferWithAlloc(uint32_t argIndex, uintptr_t argVal, NEO::GraphicsAllocation *allocation, NEO::SvmAllocationData *peerAllocData) {
     const auto &arg = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescPointer>();
     const auto val = argVal;
+    const int64_t bufferSize = static_cast<int64_t>(allocation->getUnderlyingBufferSize() - (ptrDiff(argVal, allocation->getGpuAddress())));
+    NEO::patchNonPointer<int64_t, int64_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg.bufferSize, bufferSize);
 
     NEO::patchPointer(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), arg, val);
     if (NEO::isValidOffset(arg.bindful) || NEO::isValidOffset(arg.bindless)) {
@@ -719,6 +721,7 @@ ze_result_t KernelImp::setArgBuffer(uint32_t argIndex, size_t argSize, const voi
     const auto &allArgs = kernelImmData->getDescriptor().payloadMappings.explicitArgs;
     const auto &currArg = allArgs[argIndex];
     if (currArg.getTraits().getAddressQualifier() == NEO::KernelArgMetadata::AddrLocal) {
+        NEO::patchNonPointer<int64_t, int64_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), currArg.as<NEO::ArgDescPointer>().bufferSize, static_cast<int64_t>(argSize));
         slmArgSizes[argIndex] = static_cast<uint32_t>(argSize);
         kernelArgInfos[argIndex] = KernelArgInfo{nullptr, 0, 0, false};
         UNRECOVERABLE_IF(NEO::isUndefinedOffset(currArg.as<NEO::ArgDescPointer>().slmOffset));
@@ -777,6 +780,7 @@ ze_result_t KernelImp::setArgBuffer(uint32_t argIndex, size_t argSize, const voi
             argumentsResidencyContainer[argIndex] = nullptr;
             const auto &argAsPtr = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescPointer>();
             auto patchLocation = ptrOffset(getCrossThreadData(), argAsPtr.stateless);
+            NEO::patchNonPointer<int64_t, int64_t>(ArrayRef<uint8_t>(crossThreadData.get(), crossThreadDataSize), argAsPtr.bufferSize, 0);
             patchWithRequiredSize(const_cast<uint8_t *>(patchLocation), argAsPtr.pointerSize, reinterpret_cast<uintptr_t>(requestedAddress));
             kernelArgInfos[argIndex] = KernelArgInfo{requestedAddress, 0, 0, false};
             return ZE_RESULT_SUCCESS;
@@ -953,7 +957,7 @@ ze_result_t KernelImp::getProperties(ze_kernel_properties_t *pKernelProperties) 
         } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_KERNEL_MAX_GROUP_SIZE_EXT_PROPERTIES) {
             ze_kernel_max_group_size_properties_ext_t *properties = reinterpret_cast<ze_kernel_max_group_size_properties_ext_t *>(extendedProperties);
             properties->maxGroupSize = maxKernelWorkGroupSize;
-        } else if (extendedProperties->stype == ZEX_STRUCTURE_KERNEL_REGISTER_FILE_SIZE_EXP) { // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
+        } else if (static_cast<uint32_t>(extendedProperties->stype) == ZEX_STRUCTURE_KERNEL_REGISTER_FILE_SIZE_EXP) {
             zex_kernel_register_file_size_exp_t *properties = reinterpret_cast<zex_kernel_register_file_size_exp_t *>(extendedProperties);
             properties->registerFileSize = kernelDescriptor.kernelAttributes.numGrfRequired;
         }
@@ -1059,7 +1063,7 @@ ze_result_t KernelImp::initialize(const ze_kernel_desc_t *desc) {
     auto deviceBitfield = neoDevice->getDeviceBitfield();
     const auto &gfxHelper = rootDeviceEnvironment.getHelper<NEO::GfxCoreHelper>();
 
-    this->heaplessEnabled = rootDeviceEnvironment.getHelper<NEO::CompilerProductHelper>().isHeaplessModeEnabled();
+    this->heaplessEnabled = rootDeviceEnvironment.getHelper<NEO::CompilerProductHelper>().isHeaplessModeEnabled(hwInfo);
     this->localDispatchSupport = productHelper.getSupportedLocalDispatchSizes(hwInfo).size() > 0;
 
     bool platformImplicitScaling = gfxHelper.platformSupportsImplicitScaling(rootDeviceEnvironment);
@@ -1537,6 +1541,67 @@ uint8_t KernelImp::getRequiredSlmAlignment(uint32_t argIndex) const {
     UNRECOVERABLE_IF(allArgs[argIndex].getTraits().getAddressQualifier() != NEO::KernelArgMetadata::AddrLocal);
     const auto &nextArg = allArgs[argIndex].as<NEO::ArgDescPointer>();
     return nextArg.requiredSlmAlignment;
+}
+
+ze_result_t KernelImp::getArgumentSize(uint32_t argIndex, uint32_t *argSize) const {
+    if (argIndex >= kernelArgHandlers.size()) {
+        return ZE_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_INDEX;
+    }
+    if (argSize == nullptr) {
+        return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+    }
+    uint32_t outArgSize = 0u;
+    auto &argDescriptor = this->kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex];
+
+    switch (argDescriptor.type) {
+    case NEO::ArgDescriptor::argTPointer:
+        outArgSize = argDescriptor.as<NEO::ArgDescPointer>().pointerSize;
+        break;
+    case NEO::ArgDescriptor::argTImage:
+        outArgSize = sizeof(ze_image_handle_t);
+        break;
+    case NEO::ArgDescriptor::argTSampler:
+        outArgSize = argDescriptor.as<NEO::ArgDescSampler>().size;
+        break;
+    case NEO::ArgDescriptor::argTValue: {
+        auto numOfElements = argDescriptor.as<NEO::ArgDescValue>().elements.size();
+        if (numOfElements == 0) {
+            outArgSize = 0;
+            break;
+        }
+        auto &lastElement = argDescriptor.as<NEO::ArgDescValue>().elements[numOfElements - 1];
+        outArgSize = lastElement.sourceOffset + lastElement.size;
+    } break;
+    default:
+        break;
+    }
+
+    *argSize = outArgSize;
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t KernelImp::getArgumentType(uint32_t argIndex, uint32_t *pSize, char *pString) const {
+    this->module->populateZebinExtendedArgsMetadata();
+    this->module->generateDefaultExtendedArgsMetadata();
+
+    if (argIndex >= kernelArgHandlers.size()) {
+        return ZE_RESULT_ERROR_INVALID_KERNEL_ARGUMENT_INDEX;
+    }
+    if (pSize == nullptr) {
+        return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+    }
+    if (this->kernelImmData->getDescriptor().explicitArgsExtendedMetadata.empty()) {
+        // Failed to populate/generate extended args metadata.
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    }
+
+    const auto &argMetadata = this->kernelImmData->getDescriptor().explicitArgsExtendedMetadata[argIndex];
+    auto userSize = *pSize;
+    *pSize = static_cast<uint32_t>(argMetadata.type.length() + 1);
+    if (pString != nullptr && userSize >= argMetadata.type.length()) {
+        strncpy_s(pString, *pSize, argMetadata.type.c_str(), argMetadata.type.length());
+    }
+    return ZE_RESULT_SUCCESS;
 }
 
 } // namespace L0

@@ -50,7 +50,7 @@ TEST(ApiSpecificConfigL0Tests, WhenCheckingIfHostDeviceAllocationCacheIsEnabledT
 
 TEST(ApiSpecificConfigL0Tests, WhenCheckingIfUsmAllocPoolingIsEnabledThenReturnFalse) {
     EXPECT_FALSE(ApiSpecificConfig::isHostUsmPoolingEnabled());
-    EXPECT_TRUE(ApiSpecificConfig::isDeviceUsmPoolingEnabled());
+    EXPECT_FALSE(ApiSpecificConfig::isDeviceUsmPoolingEnabled());
 }
 
 TEST(ApiSpecificConfigL0Tests, GivenDebugFlagCombinationsGetCorrectSharedAllocPrefetchEnabled) {
@@ -114,7 +114,7 @@ TEST(ApiSpecificConfigL0Tests, WhenCheckingIfBindlessAddressingIsEnabledThenRetu
     EXPECT_TRUE(ApiSpecificConfig::getBindlessMode(mockDevice));
 
     mockAilConfigurationHelper.setDisableBindlessAddressing(true);
-    EXPECT_EQ(mockDevice.getCompilerProductHelper().isHeaplessModeEnabled(), ApiSpecificConfig::getBindlessMode(mockDevice));
+    EXPECT_EQ(mockDevice.getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo), ApiSpecificConfig::getBindlessMode(mockDevice));
 }
 
 } // namespace NEO

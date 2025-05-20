@@ -128,9 +128,9 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::ensureRingCompletion() {
 
 template <typename GfxFamily, typename Dispatcher>
 bool DrmDirectSubmission<GfxFamily, Dispatcher>::allocateOsResources() {
+    DirectSubmissionHw<GfxFamily, Dispatcher>::allocateOsResources();
     this->currentTagData.tagAddress = this->semaphoreGpuVa + offsetof(RingSemaphoreData, tagAllocation);
     this->currentTagData.tagValue = 0u;
-    this->tagAddress = reinterpret_cast<volatile TagAddressType *>(reinterpret_cast<uint8_t *>(this->semaphorePtr) + offsetof(RingSemaphoreData, tagAllocation));
     return true;
 }
 
@@ -243,6 +243,18 @@ void DrmDirectSubmission<GfxFamily, Dispatcher>::handleStopRingBuffer() {
 }
 
 template <typename GfxFamily, typename Dispatcher>
+void DrmDirectSubmission<GfxFamily, Dispatcher>::dispatchStopRingBufferSection() {
+    TagData currentTagData = {};
+    getTagAddressValue(currentTagData);
+    Dispatcher::dispatchMonitorFence(this->ringCommandStream, currentTagData.tagAddress, currentTagData.tagValue, this->rootDeviceEnvironment, this->partitionedMode, this->dcFlushRequired, this->notifyKmdDuringMonitorFence);
+}
+
+template <typename GfxFamily, typename Dispatcher>
+size_t DrmDirectSubmission<GfxFamily, Dispatcher>::dispatchStopRingBufferSectionSize() {
+    return Dispatcher::getSizeMonitorFence(this->rootDeviceEnvironment);
+}
+
+template <typename GfxFamily, typename Dispatcher>
 void DrmDirectSubmission<GfxFamily, Dispatcher>::handleSwitchRingBuffers(ResidencyContainer *allocationsForResidency) {
     if (this->disableMonitorFence) {
         this->currentTagData.tagValue++;
@@ -271,6 +283,10 @@ template <typename GfxFamily, typename Dispatcher>
 void DrmDirectSubmission<GfxFamily, Dispatcher>::getTagAddressValue(TagData &tagData) {
     tagData.tagAddress = this->currentTagData.tagAddress;
     tagData.tagValue = this->currentTagData.tagValue + 1;
+}
+template <typename GfxFamily, typename Dispatcher>
+void DrmDirectSubmission<GfxFamily, Dispatcher>::getTagAddressValueForRingSwitch(TagData &tagData) {
+    getTagAddressValue(tagData);
 }
 
 template <typename GfxFamily, typename Dispatcher>

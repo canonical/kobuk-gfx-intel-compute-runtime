@@ -5,6 +5,8 @@
  *
  */
 
+#include "shared/source/command_stream/command_stream_receiver.h"
+
 #include "opencl/test/unit_test/command_queue/enqueue_fixture.h"
 #include "opencl/test/unit_test/fixtures/hello_world_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
@@ -57,6 +59,7 @@ struct IOQTaskTestsMt : public HelloWorldTest<HelloWorldFixtureFactory> {
 };
 
 TEST_F(IOQTaskTestsMt, GivenBlockingAndBlockedOnUserEventWhenReadingBufferThenTaskCountAndTaskLevelAreIncremented) {
+    USE_REAL_FILE_SYSTEM();
     auto buffer = std::unique_ptr<Buffer>(BufferHelper<>::create());
 
     auto alignedReadPtr = alignedMalloc(BufferDefaults::sizeInBytes, MemoryConstants::cacheLineSize);

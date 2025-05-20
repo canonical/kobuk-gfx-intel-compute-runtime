@@ -126,6 +126,9 @@ ze_result_t DriverHandleImp::getProperties(ze_driver_properties_t *properties) {
     memcpy_s(properties->uuid.id, sizeof(uniqueId), &uniqueId, sizeof(uniqueId));
 
     auto pNext = reinterpret_cast<ze_base_properties_t *>(properties->pNext);
+    if (properties->stype != ZE_STRUCTURE_TYPE_DRIVER_PROPERTIES) {
+        pNext = nullptr;
+    }
     while (pNext) {
         if (pNext->stype == ZE_STRUCTURE_TYPE_DRIVER_DDI_HANDLES_EXT_PROPERTIES && NEO::debugManager.flags.EnableDdiHandlesExtension.get()) {
             ze_driver_ddi_handles_ext_properties_t *pDdiHandlesExtProperties = reinterpret_cast<ze_driver_ddi_handles_ext_properties_t *>(pNext);
@@ -297,7 +300,15 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
     }
     this->svmAllocsManager->initUsmAllocationsCaches(*this->devices[0]->getNEODevice());
     this->initHostUsmAllocPool();
-
+    for (auto &device : this->devices) {
+        this->initDeviceUsmAllocPool(*device->getNEODevice());
+        if (auto deviceUsmAllocPool = device->getNEODevice()->getUsmMemAllocPool()) {
+            deviceUsmAllocPool->ensureInitialized(this->svmAllocsManager);
+        }
+        if (auto deviceUsmAllocPoolsManager = device->getNEODevice()->getUsmMemAllocPoolsManager()) {
+            deviceUsmAllocPoolsManager->ensureInitialized(this->svmAllocsManager);
+        }
+    }
     this->numDevices = static_cast<uint32_t>(this->devices.size());
 
     uuidTimestamp = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
@@ -349,6 +360,23 @@ void DriverHandleImp::initHostUsmAllocPool() {
     }
 }
 
+void DriverHandleImp::initDeviceUsmAllocPool(NEO::Device &device) {
+    const uint64_t minServicedSize = 0u;
+    const uint64_t maxServicedSize = 1 * MemoryConstants::megaByte;
+    bool enabled = NEO::ApiSpecificConfig::isDeviceUsmPoolingEnabled() && device.getProductHelper().isDeviceUsmPoolAllocatorSupported();
+    uint64_t poolSize = 2 * MemoryConstants::megaByte;
+
+    if (NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() != -1) {
+        enabled = NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() > 0;
+        poolSize = NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() * MemoryConstants::megaByte;
+    }
+
+    if (enabled) {
+        device.resetUsmAllocationPool(new NEO::UsmMemAllocPool(rootDeviceIndices, deviceBitfields, &device, InternalMemoryType::deviceUnifiedMemory,
+                                                               poolSize, minServicedSize, maxServicedSize));
+    }
+}
+
 ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phDevices) {
 
     // If the user has requested FLAT or COMBINED device hierarchy model, then report all the sub devices as devices.
@@ -357,6 +385,12 @@ ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phD
     uint32_t numDevices = 0;
     if (exposeSubDevices) {
         for (auto &device : this->devices) {
+
+            if (device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->isExposeSingleDeviceMode()) {
+                numDevices += 1;
+                continue;
+            }
+
             auto deviceImpl = static_cast<DeviceImp *>(device);
             numDevices += (deviceImpl->numSubDevices > 0 ? deviceImpl->numSubDevices : 1u);
         }
@@ -374,8 +408,18 @@ ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phD
 
     uint32_t i = 0;
     for (auto device : devices) {
+
         auto deviceImpl = static_cast<DeviceImp *>(device);
         if (deviceImpl->numSubDevices > 0 && exposeSubDevices) {
+
+            if (device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->isExposeSingleDeviceMode()) {
+                phDevices[i++] = device;
+                if (i == *pCount) {
+                    return ZE_RESULT_SUCCESS;
+                }
+                continue;
+            }
+
             for (auto subdevice : deviceImpl->subDevices) {
                 phDevices[i++] = subdevice;
                 if (i == *pCount) {

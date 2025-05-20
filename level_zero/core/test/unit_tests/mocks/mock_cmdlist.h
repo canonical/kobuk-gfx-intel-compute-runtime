@@ -48,6 +48,7 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::appendWriteKernelTimestamp;
     using BaseClass::applyMemoryRangesBarrier;
     using BaseClass::clearCommandsToPatch;
+    using BaseClass::closedCmdList;
     using BaseClass::cmdListHeapAddressModel;
     using BaseClass::cmdListType;
     using BaseClass::cmdQImmediate;
@@ -189,6 +190,7 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::appendLaunchKernelWithParams;
     using BaseClass::appendMemoryCopyBlitRegion;
     using BaseClass::clearCommandsToPatch;
+    using BaseClass::closedCmdList;
     using BaseClass::cmdListHeapAddressModel;
     using BaseClass::cmdListType;
     using BaseClass::cmdQImmediate;
@@ -281,6 +283,7 @@ template <>
 struct WhiteBox<::L0::CommandListImp> : public ::L0::CommandListImp {
     using BaseClass = ::L0::CommandListImp;
     using BaseClass::BaseClass;
+    using BaseClass::closedCmdList;
     using BaseClass::cmdListHeapAddressModel;
     using BaseClass::cmdListType;
     using BaseClass::cmdQImmediate;
@@ -438,6 +441,12 @@ struct MockCommandList : public CommandList {
                       ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch));
 
     ADDMETHOD_NOBASE(appendMemAdvise, ze_result_t, ZE_RESULT_SUCCESS,
+                     (ze_device_handle_t hDevice,
+                      const void *ptr,
+                      size_t size,
+                      ze_memory_advice_t advice));
+
+    ADDMETHOD_NOBASE(executeMemAdvise, ze_result_t, ZE_RESULT_SUCCESS,
                      (ze_device_handle_t hDevice,
                       const void *ptr,
                       size_t size,
@@ -620,6 +629,13 @@ class MockCommandListCoreFamily : public CommandListCoreFamily<gfxCoreFamily> {
     using BaseClass::ownedPrivateAllocations;
     using BaseClass::taskCountUpdateFenceRequired;
 
+    ze_result_t executeMemAdvise(ze_device_handle_t hDevice,
+                                 const void *ptr, size_t size,
+                                 ze_memory_advice_t advice) override {
+        executeMemAdviseCallCount++;
+        return ZE_RESULT_SUCCESS;
+    }
+
     ADDMETHOD(appendMemoryCopyKernelWithGA, ze_result_t, false, ZE_RESULT_SUCCESS,
               (void *dstPtr, NEO::GraphicsAllocation *dstPtrAlloc,
                uint64_t dstOffset, void *srcPtr,
@@ -696,6 +712,7 @@ class MockCommandListCoreFamily : public CommandListCoreFamily<gfxCoreFamily> {
     uintptr_t dstAlignedPtr;
     size_t srcBlitCopyRegionOffset = 0;
     size_t dstBlitCopyRegionOffset = 0;
+    uint32_t executeMemAdviseCallCount = 0;
 };
 
 template <GFXCORE_FAMILY gfxCoreFamily>
@@ -729,10 +746,12 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
 
     ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, NEO::AppendOperations appendOperation,
                                                          bool copyOffloadSubmission, bool requireTaskCountUpdate,
-                                                         MutexLock *outerLock) override {
+                                                         MutexLock *outerLock,
+                                                         std::unique_lock<std::mutex> *outerLockForIndirect) override {
         ++executeCommandListImmediateWithFlushTaskCalledCount;
         if (callBaseExecute) {
-            return BaseClass::executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, appendOperation, copyOffloadSubmission, requireTaskCountUpdate, outerLock);
+            return BaseClass::executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, appendOperation, copyOffloadSubmission, requireTaskCountUpdate,
+                                                                       outerLock, outerLockForIndirect);
         }
         return executeCommandListImmediateWithFlushTaskReturnValue;
     }
@@ -823,6 +842,26 @@ class MockCommandListForAppendLaunchKernel : public WhiteBox<::L0::CommandListCo
 
         return ZE_RESULT_SUCCESS;
     }
+};
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+class MockCommandListForExecuteMemAdvise : public WhiteBox<::L0::CommandListCoreFamilyImmediate<gfxCoreFamily>> {
+  public:
+    using BaseClass = WhiteBox<::L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>;
+
+    using BaseClass::cmdQImmediate;
+    using BaseClass::indirectAllocationsAllowed;
+
+    using BaseClass::executeCommandListImmediateWithFlushTaskImpl;
+
+    ze_result_t executeMemAdvise(ze_device_handle_t hDevice,
+                                 const void *ptr, size_t size,
+                                 ze_memory_advice_t advice) override {
+        executeMemAdviseCallCount++;
+        return ZE_RESULT_SUCCESS;
+    }
+
+    uint32_t executeMemAdviseCallCount = 0;
 };
 
 } // namespace ult

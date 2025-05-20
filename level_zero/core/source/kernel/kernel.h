@@ -14,16 +14,12 @@
 #include "shared/source/unified_memory/unified_memory.h"
 
 #include "level_zero/core/source/helpers/api_handle_helper.h"
-#include <level_zero/ze_api.h>
-#include <level_zero/zet_api.h>
 
 #include <memory>
 #include <vector>
 
-struct _ze_kernel_handle_t {
-    const uint64_t objMagic = objMagicValue;
-    static const zel_handle_type_t handleType = ZEL_HANDLE_KERNEL;
-};
+struct _ze_kernel_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_KERNEL> {};
+static_assert(IsCompliantWithDdiHandlesExt<_ze_kernel_handle_t>);
 
 namespace NEO {
 class Device;
@@ -139,6 +135,8 @@ struct Kernel : _ze_kernel_handle_t, virtual NEO::DispatchKernelEncoderI, NEO::N
                                          uint32_t globalSizeZ, uint32_t *groupSizeX,
                                          uint32_t *groupSizeY, uint32_t *groupSizeZ) = 0;
     virtual ze_result_t getKernelName(size_t *pSize, char *pName) = 0;
+    virtual ze_result_t getArgumentSize(uint32_t argIndex, uint32_t *argSize) const = 0;
+    virtual ze_result_t getArgumentType(uint32_t argIndex, uint32_t *pSize, char *pString) const = 0;
 
     virtual uint32_t *getGlobalOffsets() = 0;
     virtual ze_result_t setGlobalOffsetExp(uint32_t offsetX, uint32_t offsetY, uint32_t offsetZ) = 0;

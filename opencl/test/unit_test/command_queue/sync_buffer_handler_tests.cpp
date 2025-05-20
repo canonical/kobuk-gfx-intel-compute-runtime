@@ -114,6 +114,20 @@ class SyncBufferHandlerTest : public SyncBufferEnqueueHandlerTest {
     MockCommandQueue *commandQueue;
 };
 
+HWTEST2_TEMPLATED_F(SyncBufferHandlerTest, GivenAllocateSyncBufferPatchAndConcurrentKernelWhenEnqueuingKernelThenSyncBufferIsUsed, HasDispatchAllSupport) {
+    patchAllocateSyncBuffer();
+
+    enqueueNDCount();
+    auto syncBufferHandler = getSyncBufferHandler();
+    EXPECT_EQ(workItemsCount, syncBufferHandler->usedBufferSize);
+
+    commandQueue->flush();
+
+    auto pCsr = commandQueue->getGpgpuEngine().commandStreamReceiver;
+    EXPECT_EQ(syncBufferHandler->graphicsAllocation->getTaskCount(pCsr->getOsContext().getContextId()),
+              static_cast<UltCommandStreamReceiver<FamilyType> *>(pCsr)->latestSentTaskCount);
+}
+
 HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenAllocateSyncBufferPatchAndConcurrentKernelWhenEnqueuingKernelThenSyncBufferOffsetIsProperlyAligned) {
     patchAllocateSyncBuffer();
 
@@ -128,6 +142,12 @@ HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenAllocateSyncBufferPatchAndConcurr
     EXPECT_EQ(2u * minimalSyncBufferSize, syncBufferHandler->usedBufferSize);
 }
 
+HWTEST2_TEMPLATED_F(SyncBufferHandlerTest, GivenConcurrentKernelWithoutAllocateSyncBufferPatchWhenEnqueuingConcurrentKernelThenSyncBufferIsNotCreated, HasDispatchAllSupport) {
+    auto retVal = enqueueNDCount();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_EQ(nullptr, getSyncBufferHandler());
+}
+
 HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenDefaultKernelUsingSyncBufferWhenEnqueuingKernelThenErrorIsReturnedAndSyncBufferIsNotCreated) {
     patchAllocateSyncBuffer();
     kernel->executionType = KernelExecutionType::defaultType;
@@ -135,6 +155,13 @@ HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenDefaultKernelUsingSyncBufferWhenE
     auto retVal = enqueueNDCount();
     EXPECT_EQ(CL_INVALID_KERNEL, retVal);
     EXPECT_EQ(nullptr, getSyncBufferHandler());
+}
+
+HWTEST2_TEMPLATED_F(SyncBufferHandlerTest, GivenConcurrentKernelWithAllocateSyncBufferPatchWhenEnqueuingConcurrentKernelThenSyncBufferIsCreated, HasDispatchAllSupport) {
+    patchAllocateSyncBuffer();
+    auto retVal = enqueueNDCount();
+    EXPECT_EQ(CL_SUCCESS, retVal);
+    EXPECT_NE(nullptr, getSyncBufferHandler());
 }
 
 HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenMaxWorkgroupCountWhenEnqueuingConcurrentKernelThenSuccessIsReturned) {
@@ -151,6 +178,16 @@ HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenTooHighWorkgroupCountWhenEnqueuin
 
     auto retVal = enqueueNDCount();
     EXPECT_EQ(CL_INVALID_VALUE, retVal);
+}
+
+HWTEST2_TEMPLATED_F(SyncBufferHandlerTest, GivenSyncBufferFullWhenEnqueuingKernelThenNewBufferIsAllocated, HasDispatchAllSupport) {
+    patchAllocateSyncBuffer();
+    enqueueNDCount();
+    auto syncBufferHandler = getSyncBufferHandler();
+
+    syncBufferHandler->usedBufferSize = syncBufferHandler->bufferSize;
+    enqueueNDCount();
+    EXPECT_EQ(workItemsCount, syncBufferHandler->usedBufferSize);
 }
 
 HWTEST_TEMPLATED_F(SyncBufferHandlerTest, GivenSshRequiredWhenPatchingSyncBufferThenSshIsProperlyPatched) {

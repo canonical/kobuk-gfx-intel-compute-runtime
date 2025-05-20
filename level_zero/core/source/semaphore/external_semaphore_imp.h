@@ -74,6 +74,10 @@ class ExternalSemaphoreController : NEO::NonCopyableAndNonMovableClass {
             event->destroy();
         }
 
+        for (auto event : processedProxyEvents) {
+            event->destroy();
+        }
+
         for (auto &eventPools : eventPoolsMap) {
             for (auto &eventPool : eventPools.second) {
                 eventPool->destroy();
@@ -81,7 +85,7 @@ class ExternalSemaphoreController : NEO::NonCopyableAndNonMovableClass {
         }
     }
 
-    ze_result_t allocateProxyEvent(ze_external_semaphore_ext_handle_t hExtSemaphore, ze_device_handle_t hDevice, ze_context_handle_t hContext, uint64_t fenceValue, ze_event_handle_t *phEvent, SemaphoreOperation operation);
+    ze_result_t allocateProxyEvent(ze_device_handle_t hDevice, ze_context_handle_t hContext, ze_event_handle_t *phEvent);
     void processProxyEvents();
 
     std::mutex semControllerMutex;
@@ -91,6 +95,7 @@ class ExternalSemaphoreController : NEO::NonCopyableAndNonMovableClass {
     std::unordered_map<ze_device_handle_t, size_t> eventsCreatedFromLatestPoolMap;
     const size_t maxEventCountInPool = 20u;
     std::vector<std::tuple<Event *, ExternalSemaphore *, uint64_t, SemaphoreOperation>> proxyEvents;
+    std::vector<Event *> processedProxyEvents;
     bool continueRunning = true;
 
   private:

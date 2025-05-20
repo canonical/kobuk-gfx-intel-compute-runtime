@@ -179,6 +179,15 @@ int Drm::getEnabledPooledEu(int &enabled) {
     return getParamIoctl(DrmParam::paramHasPooledEu, &enabled);
 }
 
+std::string Drm::getSysFsPciPathBaseName() {
+    auto fullPath = getSysFsPciPath();
+    size_t pos = fullPath.rfind("/");
+    if (std::string::npos == pos) {
+        return fullPath;
+    }
+    return fullPath.substr(pos + 1, std::string::npos);
+}
+
 std::string Drm::getSysFsPciPath() {
     std::string path = std::string(Os::sysFsPciPathPrefix) + hwDeviceId->getPciPath() + "/drm";
     std::string expectedFilePrefix = path + "/card";
@@ -472,6 +481,7 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
     rootDeviceEnvironment.initApiGfxCoreHelper();
     rootDeviceEnvironment.initCompilerProductHelper();
     rootDeviceEnvironment.initAilConfigurationHelper();
+    rootDeviceEnvironment.initWaitUtils();
     auto result = rootDeviceEnvironment.initAilConfiguration();
     if (false == result) {
         PRINT_DEBUG_STRING(debugManager.flags.PrintDebugMessages.get(), stderr, "%s", "FATAL: AIL creation failed!\n");
@@ -500,6 +510,9 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
     if (!queryMemoryInfo()) {
         setPerContextVMRequired(true);
         printDebugString(debugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Failed to query memory info\n");
+    } else if (getMemoryInfo()->isSmallBarDetected()) {
+        IoFunctions::fprintf(stderr, "WARNING: Small BAR detected for device %s\n", getPciPath().c_str());
+        return -1;
     }
 
     if (!queryEngineInfo()) {
@@ -1416,7 +1429,7 @@ uint64_t Drm::getPatIndex(Gmm *gmm, AllocationType allocationType, CacheRegion c
     }
 
     auto &productHelper = rootDeviceEnvironment.getProductHelper();
-    GMM_RESOURCE_USAGE_TYPE usageType = CacheSettingsHelper::getGmmUsageType(allocationType, false, productHelper);
+    GMM_RESOURCE_USAGE_TYPE usageType = CacheSettingsHelper::getGmmUsageType(allocationType, false, productHelper, getHardwareInfo());
     auto isUncachedType = CacheSettingsHelper::isUncachedType(usageType);
 
     if (isUncachedType && debugManager.flags.OverridePatIndexForUncachedTypes.get() != -1) {

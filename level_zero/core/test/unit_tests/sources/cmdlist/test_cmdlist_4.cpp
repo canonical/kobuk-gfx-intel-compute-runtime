@@ -32,11 +32,14 @@
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 #include "level_zero/core/test/unit_tests/sources/helper/ze_object_utils.h"
 
+using namespace NEO;
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
+
 namespace L0 {
 namespace ult {
 using CommandListCreateTests = Test<CommandListCreateFixture>;
 HWTEST2_F(CommandListCreateTests, givenCopyOnlyCommandListWhenAppendWriteGlobalTimestampCalledThenMiFlushDWWithTimestampEncoded, MatchAny) {
-    using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
+    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
     using MI_FLUSH_DW = typename GfxFamily::MI_FLUSH_DW;
 
     ze_result_t returnValue;
@@ -214,8 +217,8 @@ HWTEST2_F(CommandListCreateTests, givenUseCsrImmediateSubmissionEnabledForCopyIm
     desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_0;
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
-    auto imageHWSrc = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
-    auto imageHWDst = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHWSrc = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
+    auto imageHWDst = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     imageHWSrc->initialize(device, &desc);
     imageHWDst->initialize(device, &desc);
 
@@ -259,8 +262,8 @@ HWTEST2_F(CommandListCreateTests, givenUseCsrImmediateSubmissionDisabledForCopyI
     desc.format.y = ZE_IMAGE_FORMAT_SWIZZLE_0;
     desc.format.z = ZE_IMAGE_FORMAT_SWIZZLE_1;
     desc.format.w = ZE_IMAGE_FORMAT_SWIZZLE_X;
-    auto imageHWSrc = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
-    auto imageHWDst = std::make_unique<WhiteBox<::L0::ImageCoreFamily<gfxCoreFamily>>>();
+    auto imageHWSrc = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
+    auto imageHWDst = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
     imageHWSrc->initialize(device, &desc);
     imageHWDst->initialize(device, &desc);
 
@@ -887,7 +890,7 @@ HWTEST2_F(CommandListCreateTests, whenCommandListIsCreatedThenFlagsAreCorrectlyS
     for (auto flag : flags) {
         std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::compute, flag, returnValue, false));
         EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
-        auto pCommandListCoreFamily = static_cast<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>> *>(commandList.get());
+        auto pCommandListCoreFamily = static_cast<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>> *>(commandList.get());
         EXPECT_EQ(flag, pCommandListCoreFamily->flags);
     }
 }
@@ -896,7 +899,7 @@ using HostPointerManagerCommandListTest = Test<HostPointerManagerFixure>;
 HWTEST2_F(HostPointerManagerCommandListTest,
           givenImportedHostPointerWhenAppendMemoryFillUsingHostPointerThenAppendFillUsingHostPointerAllocation,
           MatchAny) {
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
     auto ret = hostDriverHandle->importExternalPointer(heapPointer, MemoryConstants::pageSize);
@@ -913,7 +916,7 @@ HWTEST2_F(HostPointerManagerCommandListTest,
 HWTEST2_F(HostPointerManagerCommandListTest,
           givenImportedHostPointerAndCopyEngineWhenAppendMemoryFillUsingHostPointerThenAppendFillUsingHostPointerAllocation,
           MatchAny) {
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
 
     auto ret = hostDriverHandle->importExternalPointer(heapPointer, MemoryConstants::pageSize);
@@ -930,7 +933,7 @@ HWTEST2_F(HostPointerManagerCommandListTest,
 HWTEST2_F(HostPointerManagerCommandListTest,
           givenHostPointerImportedWhenGettingAlignedAllocationThenRetrieveProperOffsetAndAddress,
           MatchAny) {
-    auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<gfxCoreFamily>>();
+    auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<FamilyType::gfxCoreFamily>>();
     commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
     size_t mainOffset = 100;
@@ -970,7 +973,7 @@ HWTEST2_F(HostPointerManagerCommandListTest,
 HWTEST2_F(HostPointerManagerCommandListTest,
           givenHostPointerImportedWhenGettingPointerFromAnotherPageThenRetrieveBaseAddressAndProperOffset,
           MatchAny) {
-    auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<gfxCoreFamily>>();
+    auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<FamilyType::gfxCoreFamily>>();
     commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
     size_t pointerSize = MemoryConstants::pageSize;
@@ -998,7 +1001,7 @@ HWTEST2_F(HostPointerManagerCommandListTest, givenCommandListWhenMemoryFillWithS
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
     ze_result_t result = ZE_RESULT_SUCCESS;
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
     auto &commandContainer = commandList->getCmdContainer();
 
@@ -1035,7 +1038,7 @@ HWTEST2_F(HostPointerManagerCommandListTest, givenCommandListWhenMemoryFillWithS
 
     auto pc = genCmdCast<PIPE_CONTROL *>(*cmdList.rbegin());
 
-    if (!device->getProductHelper().isL3FlushAfterPostSyncRequired(device->getCompilerProductHelper().isHeaplessModeEnabled()) && NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
+    if (!device->getProductHelper().isL3FlushAfterPostSyncRequired(device->getCompilerProductHelper().isHeaplessModeEnabled(*defaultHwInfo)) && NEO::MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getNEODevice()->getRootDeviceEnvironment())) {
         EXPECT_NE(nullptr, pc);
         EXPECT_TRUE(pc->getDcFlushEnable());
     } else {
@@ -1045,7 +1048,7 @@ HWTEST2_F(HostPointerManagerCommandListTest, givenCommandListWhenMemoryFillWithS
 
 HWTEST2_F(HostPointerManagerCommandListTest, givenCommandListWhenMemoryFillWithSignalAndWaitEventsUsingCopyEngineThenSuccessIsReturned, MatchAny) {
     ze_result_t result = ZE_RESULT_SUCCESS;
-    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>>();
+    auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
 
     auto ret = hostDriverHandle->importExternalPointer(heapPointer, MemoryConstants::pageSize);
@@ -1358,7 +1361,7 @@ HWTEST2_F(ImmediateCommandListTest, givenImmediateCommandListWhenClosingCommandL
     ze_result_t returnValue;
     commandList.reset(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::compute, returnValue));
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
-    auto &commandListImmediate = static_cast<MockCommandListImmediate<gfxCoreFamily> &>(*commandList);
+    auto &commandListImmediate = static_cast<MockCommandListImmediate<FamilyType::gfxCoreFamily> &>(*commandList);
 
     returnValue = commandListImmediate.close();
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
@@ -1461,32 +1464,32 @@ using CommandListScratchPatchPrivateHeapsStateInitTest = Test<CommandListScratch
 using CommandListScratchPatchGlobalStatelessHeapsStateInitTest = Test<CommandListScratchPatchFixture<1, 1, true>>;
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchThenExpectCorrectAddressPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchThenExpectCorrectAddressPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchInline<FamilyType>(false);
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchTwiceThenCorrectAddressPatchedOnce, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchTwiceThenCorrectAddressPatchedOnce, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchSameNotPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithBiggerScratchSlot1ThenNewCorrectAddressPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithBiggerScratchSlot1ThenNewCorrectAddressPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchGrowingPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithChangedScratchControllerThenUpdatedCorrectAddressPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithChangedScratchControllerThenUpdatedCorrectAddressPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchChangedControllerPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithCommandViewFlagThenScratchIsNotStoredToPatch, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithCommandViewFlagThenScratchIsNotStoredToPatch, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchCommandViewNoPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithoutScratchAndExternalScratchFlagThenScratchIsPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithoutScratchAndExternalScratchFlagThenScratchIsPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testExternalScratchPatching<FamilyType>();
 }
 
@@ -1516,27 +1519,27 @@ HWTEST2_F(CommandListScratchPatchGlobalStatelessHeapsTest,
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsStateInitTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchThenExpectCorrectAddressPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchThenExpectCorrectAddressPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchInline<FamilyType>(false);
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsStateInitTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchTwiceThenCorrectAddressPatchedOnce, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithScratchTwiceThenCorrectAddressPatchedOnce, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchSameNotPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsStateInitTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithBiggerScratchSlot1ThenNewCorrectAddressPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingAndExecutingKernelWithBiggerScratchSlot1ThenNewCorrectAddressPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchGrowingPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsStateInitTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithCommandViewFlagThenScratchIsNotStoredToPatch, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithCommandViewFlagThenScratchIsNotStoredToPatch, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testScratchCommandViewNoPatching<FamilyType>();
 }
 
 HWTEST2_F(CommandListScratchPatchPrivateHeapsStateInitTest,
-          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithoutScratchAndExternalScratchFlagThenScratchIsPatched, IsAtLeastXeHpcCore) {
+          givenHeaplessWithScratchPatchEnabledOnRegularCmdListWhenAppendingKernelWithoutScratchAndExternalScratchFlagThenScratchIsPatched, IsHeapfulSupportedAndAtLeastXeHpcCore) {
     testExternalScratchPatching<FamilyType>();
 }
 
@@ -1591,6 +1594,19 @@ HWTEST2_F(ImmediateCommandListTest, givenImmediateCmdListWhenAppendingRegularThe
         auto expectedStream = commandListImmediate->getCmdContainer().getCommandStream();
         EXPECT_EQ(expectedStream, startStream);
     }
+}
+
+HWTEST2_F(ImmediateCommandListTest, givenImmediateCmdListWhenAppendingRegularCmdListThenDoNotConsumeQueueInternalLinearStream, MatchAny) {
+    auto immediateQueue = whiteboxCast(commandListImmediate->cmdQImmediate);
+
+    commandList->close();
+    auto cmdListHandle = commandList->toHandle();
+
+    auto usedBefore = immediateQueue->commandStream.getUsed();
+    commandListImmediate->appendCommandLists(1, &cmdListHandle, nullptr, 0, nullptr);
+    auto usedAfter = immediateQueue->commandStream.getUsed();
+
+    EXPECT_EQ(usedBefore, usedAfter);
 }
 
 HWTEST2_F(ImmediateCommandListTest,
@@ -1776,6 +1792,67 @@ HWTEST2_F(ImmediateCommandListTest, givenAsyncCmdlistWhenCmdlistIsDestroyedThenH
 
     clientCount = csr->getNumClients();
     EXPECT_EQ(0u, clientCount);
+}
+
+HWTEST_F(ImmediateCommandListTest,
+         givenImmediateCmdListWhenAppendingRegularCmdListWithPrintfKernelThenPrintfIsCalledAfterSynchronization) {
+    ze_result_t returnValue;
+
+    auto kernel = new Mock<KernelImp>{};
+    kernel->module = module.get();
+    kernel->descriptor.kernelAttributes.flags.usesPrintf = true;
+    kernel->createPrintfBuffer();
+    module->getPrintfKernelContainer().push_back(std::shared_ptr<Kernel>{kernel});
+
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+    returnValue = commandList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    returnValue = commandList->close();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    auto commandListHandle = commandList->toHandle();
+    EXPECT_EQ(0u, kernel->printPrintfOutputCalledTimes);
+    returnValue = commandListImmediate->appendCommandLists(1, &commandListHandle, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    returnValue = commandListImmediate->hostSynchronize(std::numeric_limits<uint64_t>::max());
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    EXPECT_EQ(1u, kernel->printPrintfOutputCalledTimes);
+}
+
+HWTEST_F(ImmediateCommandListTest,
+         givenImmediateCmdListWhenAppendingRegularCmdListThenInternalResidencyContainerProcessed) {
+    ze_result_t returnValue = ZE_RESULT_SUCCESS;
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.index = 0;
+    eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+
+    auto eventPool = std::unique_ptr<L0::EventPool>(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+    auto event = std::unique_ptr<L0::Event>(Event::create<typename FamilyType::TimestampPacketType>(eventPool.get(), &eventDesc, device));
+    ASSERT_NE(nullptr, event.get());
+
+    auto eventAllocation = event->getAllocation(device);
+    auto cmdBufferAllocation = commandListImmediate->getCmdContainer().getCommandStream()->getGraphicsAllocation();
+
+    auto &ultCsr = neoDevice->getUltCommandStreamReceiver<FamilyType>();
+    ultCsr.storeMakeResidentAllocations = true;
+
+    returnValue = commandList->close();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    auto commandListHandle = commandList->toHandle();
+    auto eventHandle = event->toHandle();
+    returnValue = commandListImmediate->appendCommandLists(1, &commandListHandle, eventHandle, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    EXPECT_TRUE(ultCsr.isMadeResident(eventAllocation));
+    EXPECT_TRUE(ultCsr.isMadeResident(cmdBufferAllocation));
 }
 
 } // namespace ult
