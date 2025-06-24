@@ -65,9 +65,12 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getMemoryProperties(zes_mem_prope
             case NEO::DeviceBlobConstants::MemoryType::lpddr5:
                 pProperties->type = ZES_MEM_TYPE_LPDDR5;
                 break;
-            default:
-                pProperties->type = ZES_MEM_TYPE_DDR;
+            case NEO::DeviceBlobConstants::MemoryType::gddr6:
+                pProperties->type = ZES_MEM_TYPE_GDDR6;
                 break;
+            default:
+                DEBUG_BREAK_IF(true);
+                return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
             }
 
             if (pProperties->type == ZES_MEM_TYPE_HBM) {
@@ -369,6 +372,16 @@ bool SysmanProductHelperHw<gfxProduct>::isAggregationOfSingleEnginesSupported() 
 
 template <PRODUCT_FAMILY gfxProduct>
 ze_result_t SysmanProductHelperHw<gfxProduct>::getGroupEngineBusynessFromSingleEngines(LinuxSysmanImp *pLinuxSysmanImp, zes_engine_stats_t *pStats, zes_engine_group_t &engineGroup) {
+    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool SysmanProductHelperHw<gfxProduct>::isVfMemoryUtilizationSupported() {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+ze_result_t SysmanProductHelperHw<gfxProduct>::getVfLocalMemoryQuota(SysFsAccessInterface *pSysfsAccess, uint64_t &lMemQuota, const uint32_t &vfId) {
     return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
 

@@ -365,7 +365,7 @@ TEST_F(MultiDeviceContextTests,
 }
 
 struct SVMAllocsManagerContextMock : public NEO::SVMAllocsManager {
-    SVMAllocsManagerContextMock(MemoryManager *memoryManager) : NEO::SVMAllocsManager(memoryManager, false) {}
+    SVMAllocsManagerContextMock(MemoryManager *memoryManager) : NEO::SVMAllocsManager(memoryManager) {}
     void *createHostUnifiedMemoryAllocation(size_t size, const UnifiedMemoryProperties &memoryProperties) override {
         EXPECT_EQ(expectedRootDeviceIndexes.size(), memoryProperties.rootDeviceIndices.size());
         EXPECT_NE(std::find(memoryProperties.rootDeviceIndices.begin(), memoryProperties.rootDeviceIndices.end(), expectedRootDeviceIndexes[0]),
@@ -531,6 +531,11 @@ TEST_F(ContextPowerSavingHintTest, givenCallToContextCreateWithoutPowerHintDescT
     EXPECT_EQ(0, driverHandle->powerHint);
     L0::Context *context = L0::Context::fromHandle(hContext);
     context->destroy();
+}
+
+TEST_F(ContextPowerSavingHintTest, givenOsContextPowerHintMaxAndZePowerSavingHintTypeMaxThenTheyAreEqualAndBothAre100) {
+    EXPECT_EQ(NEO::OsContext::getUmdPowerHintMax(), ZE_POWER_SAVING_HINT_TYPE_MAX);
+    EXPECT_EQ(NEO::OsContext::getUmdPowerHintMax(), 100u);
 }
 
 using ContextTest = Test<DeviceFixture>;
@@ -700,6 +705,76 @@ TEST_F(ContextMakeMemoryResidentTests,
     context->freeMem(ptr);
 }
 
+TEST_F(ContextMakeMemoryResidentTests, givenDeviceUnifiedMemoryAndLocalOnlyAllocationModeThenCallMakeMemoryResidentImmediately) {
+    const size_t size = 4096;
+    void *ptr = nullptr;
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+
+    auto *driverHandleImp{static_cast<DriverHandleImp *>(hostDriverHandle.get())};
+    driverHandleImp->memoryManager->usmDeviceAllocationMode = NEO::LocalMemAllocationMode::localOnly;
+    static_cast<MockMemoryManager *>(driverHandleImp->memoryManager)->returnFakeAllocation = true;
+
+    EXPECT_EQ(0U, mockMemoryInterface->makeResidentCalled);
+    mockMemoryInterface->makeResidentResult = NEO::MemoryOperationsStatus::success;
+    ze_result_t res1 = context->allocDeviceMem(device->toHandle(),
+                                               &deviceDesc,
+                                               size,
+                                               0,
+                                               &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res1);
+
+    auto allocData{driverHandleImp->svmAllocsManager->getSVMAlloc(ptr)};
+    EXPECT_NE(allocData, nullptr);
+    const bool lmemAllocationModeSupported{allocData->gpuAllocations.getDefaultGraphicsAllocation()->storageInfo.localOnlyRequired};
+    EXPECT_EQ(mockMemoryInterface->makeResidentCalled, (lmemAllocationModeSupported ? 1U : 0U));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, context->freeMem(ptr));
+
+    mockMemoryInterface->makeResidentResult = NEO::MemoryOperationsStatus::outOfMemory;
+    ze_result_t res2 = context->allocDeviceMem(device->toHandle(),
+                                               &deviceDesc,
+                                               size,
+                                               0,
+                                               &ptr);
+    EXPECT_EQ(res2, (lmemAllocationModeSupported ? ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY : ZE_RESULT_SUCCESS));
+    EXPECT_EQ(mockMemoryInterface->makeResidentCalled, (lmemAllocationModeSupported ? 2U : 0U));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, context->freeMem(ptr));
+}
+
+TEST_F(ContextMakeMemoryResidentTests, givenNonDeviceUnifiedMemoryWhenAllocDeviceMemCalledThenMakeMemoryResidentIsNotImmediatelyCalled) {
+    const size_t size = 4096;
+    void *ptr = nullptr;
+    ze_device_mem_alloc_desc_t deviceDesc = {};
+
+    auto *driverHandleImp{static_cast<DriverHandleImp *>(hostDriverHandle.get())};
+    driverHandleImp->memoryManager->usmDeviceAllocationMode = NEO::LocalMemAllocationMode::localOnly;
+    static_cast<MockMemoryManager *>(driverHandleImp->memoryManager)->returnFakeAllocation = true;
+
+    auto *origSvmAllocsManager{driverHandleImp->svmAllocsManager};
+    auto fakeAllocationAddr{reinterpret_cast<void *>(0x1234)};
+
+    MockGraphicsAllocation mockUnifiedAllocation{};
+    SvmAllocationData allocData(0U);
+    allocData.gpuAllocations.addAllocation(&mockUnifiedAllocation);
+    allocData.memoryType = InternalMemoryType::notSpecified;
+
+    MockSVMAllocsManager mockSvmAllocsManager{driverHandleImp->memoryManager};
+    mockSvmAllocsManager.createUnifiedMemoryAllocationCallBase = false;
+    mockSvmAllocsManager.createUnifiedMemoryAllocationReturnValue = fakeAllocationAddr;
+    mockSvmAllocsManager.insertSVMAlloc(fakeAllocationAddr, allocData);
+    driverHandleImp->svmAllocsManager = &mockSvmAllocsManager;
+
+    EXPECT_EQ(0U, mockMemoryInterface->makeResidentCalled);
+    mockMemoryInterface->makeResidentResult = NEO::MemoryOperationsStatus::success;
+    ze_result_t res1 = context->allocDeviceMem(device->toHandle(),
+                                               &deviceDesc,
+                                               size,
+                                               0,
+                                               &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res1);
+    EXPECT_EQ(mockMemoryInterface->makeResidentCalled, 0U);
+    driverHandleImp->svmAllocsManager = origSvmAllocsManager;
+}
+
 struct ContextMakeMemoryResidentAndMigrationTests : public ContextMakeMemoryResidentTests {
     struct MockResidentTestsPageFaultManager : public MockPageFaultManager {
         void moveAllocationToGpuDomain(void *ptr) override {
@@ -718,7 +793,7 @@ struct ContextMakeMemoryResidentAndMigrationTests : public ContextMakeMemoryResi
         ContextMakeMemoryResidentTests::SetUp();
         mockMemoryManager = std::make_unique<MockMemoryManager>();
         mockPageFaultManager = new MockResidentTestsPageFaultManager;
-        svmManager = std::make_unique<MockSVMAllocsManager>(mockMemoryManager.get(), false);
+        svmManager = std::make_unique<MockSVMAllocsManager>(mockMemoryManager.get());
 
         mockMemoryManager->pageFaultManager.reset(mockPageFaultManager);
         memoryManager = device->getDriverHandle()->getMemoryManager();
@@ -800,8 +875,7 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     commandQueue->destroy();
     context->freeMem(ptr);
 }
-HWTEST2_F(ContextMakeMemoryResidentAndMigrationTests,
-          whenExecutingKernelWithIndirectAccessThenSharedAllocationsAreMigrated, MatchAny) {
+HWTEST_F(ContextMakeMemoryResidentAndMigrationTests, whenExecutingKernelWithIndirectAccessThenSharedAllocationsAreMigrated) {
 
     DriverHandleImp *driverHandleImp = static_cast<DriverHandleImp *>(hostDriverHandle.get());
     size_t previousSize = driverHandleImp->sharedMakeResidentAllocations.size();
@@ -939,10 +1013,10 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     ze_host_mem_alloc_desc_t hostDesc = {};
     result = context->allocSharedMem(device->toHandle(), &deviceDesc, &hostDesc, 16384u, 4090u, &dstBuffer);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
+    CmdListMemoryCopyParams copyParams = {};
     int one = 1;
     result = commandList0->appendMemoryFill(dstBuffer, reinterpret_cast<void *>(&one), sizeof(one), 4090u,
-                                            nullptr, 0, nullptr, false);
+                                            nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 1u);
@@ -998,10 +1072,10 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
                                                                             NEO::EngineGroupType::compute,
                                                                             0u,
                                                                             result, false));
-
+    CmdListMemoryCopyParams copyParams = {};
     int one = 1;
     result = commandListRegular->appendMemoryFill(dstBuffer, reinterpret_cast<void *>(&one), sizeof(one), 4090u,
-                                                  nullptr, 0, nullptr, false);
+                                                  nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     commandListRegular->close();
 
@@ -1072,10 +1146,10 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     ze_host_mem_alloc_desc_t hostDesc = {};
     result = context->allocHostMem(&hostDesc, 4096u, 0u, &dstBuffer);
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
-
+    CmdListMemoryCopyParams copyParams = {};
     int one = 1;
     result = commandList0->appendMemoryFill(dstBuffer, reinterpret_cast<void *>(&one), sizeof(one), 4090u,
-                                            nullptr, 0, nullptr, false);
+                                            nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     EXPECT_EQ(mockPageFaultManager->moveAllocationToGpuDomainCalledTimes, 3u);
@@ -1297,6 +1371,64 @@ TEST_F(ContextTest, whenCallingMappingVirtualInterfacesOnPhysicalDeviceMemoryThe
 
     res = contextImp->unMapVirtualMem(ptr, pagesize);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = contextImp->destroyPhysicalMem(mem);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = contextImp->freeVirtualMem(ptr, pagesize);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = contextImp->destroy();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+}
+
+TEST_F(ContextTest, whenCallingMappingVirtualInterfacesOnPhysicalDeviceMemoryThenMakeResidentIsCalledWithForcePagingFenceTrue) {
+    ze_context_handle_t hContext;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+
+    ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->memoryOperationsInterface =
+        std::make_unique<NEO::MockMemoryOperations>();
+
+    NEO::MockMemoryOperations *mockMemoryInterface = static_cast<NEO::MockMemoryOperations *>(
+        device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->memoryOperationsInterface.get());
+
+    ContextImp *contextImp = static_cast<ContextImp *>(L0::Context::fromHandle(hContext));
+
+    void *pStart = 0x0;
+    size_t size = 4096u;
+    void *ptr = nullptr;
+    size_t pagesize = 0u;
+    res = contextImp->queryVirtualMemPageSize(device, size, &pagesize);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    res = contextImp->reserveVirtualMem(pStart, pagesize, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+    EXPECT_GT(static_cast<int>(driverHandle->getMemoryManager()->getVirtualMemoryReservationMap().size()), 0);
+
+    ze_physical_mem_desc_t descMem = {ZE_STRUCTURE_TYPE_PHYSICAL_MEM_DESC, nullptr, ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_DEVICE, pagesize};
+    ze_physical_mem_handle_t mem = {};
+    res = contextImp->createPhysicalMem(device, &descMem, &mem);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    size_t offset = 0;
+
+    std::vector<ze_memory_access_attribute_t> memoryAccessFlags = {
+        ZE_MEMORY_ACCESS_ATTRIBUTE_READWRITE, ZE_MEMORY_ACCESS_ATTRIBUTE_READONLY,
+        ZE_MEMORY_ACCESS_ATTRIBUTE_NONE};
+
+    for (auto accessFlags : memoryAccessFlags) {
+        EXPECT_FALSE(mockMemoryInterface->makeResidentForcePagingFenceValue);
+        res = contextImp->mapVirtualMem(ptr, pagesize, mem, offset, accessFlags);
+        EXPECT_TRUE(mockMemoryInterface->makeResidentForcePagingFenceValue);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+        res = contextImp->unMapVirtualMem(ptr, pagesize);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+        mockMemoryInterface->makeResidentForcePagingFenceValue = false;
+    }
 
     res = contextImp->destroyPhysicalMem(mem);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
@@ -2387,7 +2519,7 @@ HWTEST2_F(ContextTest, WhenCreatingImageThenSuccessIsReturned, IsAtMostProductDG
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
-HWTEST2_F(ContextTest, givenBindlessModeDisabledWhenMakeImageResidentAndEvictThenImageImplicitArgsAllocationIsNotMadeResidentAndEvicted, MatchAny) {
+HWTEST_F(ContextTest, givenBindlessModeDisabledWhenMakeImageResidentAndEvictThenImageImplicitArgsAllocationIsNotMadeResidentAndEvicted) {
     if (!device->getNEODevice()->getRootDeviceEnvironment().getReleaseHelper() ||
         !device->getNEODevice()->getDeviceInfo().imageSupport) {
         GTEST_SKIP();
@@ -2439,7 +2571,7 @@ HWTEST2_F(ContextTest, givenBindlessModeDisabledWhenMakeImageResidentAndEvictThe
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
-HWTEST2_F(ContextTest, givenBindlessImageWhenMakeImageResidentAndEvictThenImageImplicitArgsAllocationIsMadeResidentAndEvicted, MatchAny) {
+HWTEST_F(ContextTest, givenBindlessImageWhenMakeImageResidentAndEvictThenImageImplicitArgsAllocationIsMadeResidentAndEvicted) {
     if (!device->getNEODevice()->getRootDeviceEnvironment().getReleaseHelper() ||
         !device->getNEODevice()->getDeviceInfo().imageSupport) {
         GTEST_SKIP();
@@ -2502,7 +2634,7 @@ HWTEST2_F(ContextTest, givenBindlessImageWhenMakeImageResidentAndEvictThenImageI
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
-HWTEST2_F(ContextTest, givenMakeImageResidentThenMakeImageResidentIsCalledWithForcePagingFenceTrue, MatchAny) {
+HWTEST_F(ContextTest, givenMakeImageResidentThenMakeImageResidentIsCalledWithForcePagingFenceTrue) {
     if (!device->getNEODevice()->getRootDeviceEnvironment().getReleaseHelper() ||
         !device->getNEODevice()->getDeviceInfo().imageSupport) {
         GTEST_SKIP();

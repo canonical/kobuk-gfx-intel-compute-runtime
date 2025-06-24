@@ -11,6 +11,7 @@
 #include "shared/source/utilities/wait_util.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
+#include "shared/test/common/mocks/mock_sip.h"
 
 #include "aubstream/aubstream.h"
 
@@ -32,6 +33,8 @@ void BaseUltConfigListener::OnTestStart(const ::testing::TestInfo &) {
     injectFcnSnapshot = debugManager.injectFcn;
 
     referencedHwInfo = *defaultHwInfo;
+    stateSaveAreaHeaderSnapshot = MockSipData::mockSipKernel->getStateSaveAreaHeader();
+
     testStart = std::chrono::steady_clock::now();
 }
 
@@ -58,7 +61,7 @@ void BaseUltConfigListener::OnTestEnd(const ::testing::TestInfo &) {
 
     // Ensure that global state is restored
     UltHwConfig expectedState{};
-    static_assert(sizeof(UltHwConfig) == (17 * sizeof(bool) + sizeof(const char *) + sizeof(ExecutionEnvironment *) + sizeof(UltHwConfig::padding)), ""); // Ensure that there is no internal padding
+    static_assert(sizeof(UltHwConfig) == (16 * sizeof(bool) + sizeof(const char *) + sizeof(ExecutionEnvironment *)), ""); // Ensure that there is no internal padding
     EXPECT_EQ(0, memcmp(&expectedState, &ultHwConfig, sizeof(UltHwConfig)));
 
     EXPECT_EQ(0, memcmp(&referencedHwInfo.platform, &defaultHwInfo->platform, sizeof(PLATFORM)));
@@ -66,5 +69,8 @@ void BaseUltConfigListener::OnTestEnd(const ::testing::TestInfo &) {
     EXPECT_EQ(1, referencedHwInfo.workaroundTable.asHash() == defaultHwInfo->workaroundTable.asHash());
     EXPECT_EQ(1, referencedHwInfo.capabilityTable == defaultHwInfo->capabilityTable);
     MemoryManager::maxOsContextCount = maxOsContextCountBackup;
+
+    EXPECT_EQ(stateSaveAreaHeaderSnapshot.size(), MockSipData::mockSipKernel->getStateSaveAreaHeader().size());
+    EXPECT_EQ(0, memcmp(stateSaveAreaHeaderSnapshot.data(), MockSipData::mockSipKernel->getStateSaveAreaHeader().data(), stateSaveAreaHeaderSnapshot.size()));
 }
 } // namespace NEO

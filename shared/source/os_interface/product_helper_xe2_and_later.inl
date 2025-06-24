@@ -6,7 +6,6 @@
  */
 
 #include "shared/source/os_interface/product_helper_hw.h"
-
 namespace NEO {
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -47,6 +46,19 @@ void ProductHelperHw<gfxProduct>::setRenderCompressedFlags(HardwareInfo &hwInfo)
 template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::isCompressionForbidden(const HardwareInfo &hwInfo) const {
     return isCompressionForbiddenCommon(false);
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isResourceUncachedForCS(AllocationType allocationType) const {
+    return GraphicsAllocation::isAccessedFromCommandStreamer(allocationType);
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isNonCoherentTimestampsModeEnabled() const {
+    if (debugManager.flags.ForceNonCoherentModeForTimestamps.get() != -1) {
+        return debugManager.flags.ForceNonCoherentModeForTimestamps.get();
+    }
+    return true;
 }
 
 } // namespace NEO

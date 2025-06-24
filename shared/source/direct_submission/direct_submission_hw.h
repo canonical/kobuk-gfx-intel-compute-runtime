@@ -10,6 +10,7 @@
 #include "shared/source/command_stream/queue_throttle.h"
 #include "shared/source/helpers/completion_stamp.h"
 #include "shared/source/helpers/constants.h"
+#include "shared/source/utilities/cpuintrinsics.h"
 #include "shared/source/utilities/stackvec.h"
 
 #include <memory>
@@ -24,10 +25,7 @@ struct RingSemaphoreData {
     uint8_t reservedCacheline0[60];
     uint32_t tagAllocation;
     uint8_t reservedCacheline1[60];
-    uint32_t diagnosticModeCounter;
-    uint32_t reserved0Uint32;
-    uint64_t reserved1Uint64;
-    uint8_t reservedCacheline2[48];
+    uint8_t reservedCacheline2[64];
     uint64_t miFlushSpace;
     uint8_t reservedCacheline3[56];
     uint32_t pagingFenceCounter;
@@ -55,7 +53,6 @@ inline constexpr bool defaultDisableMonitorFence = true;
 } // namespace UllsDefaults
 
 struct BatchBuffer;
-class DirectSubmissionDiagnosticsCollector;
 class FlushStampTracker;
 class GraphicsAllocation;
 struct HardwareInfo;
@@ -106,6 +103,25 @@ class DirectSubmissionHw {
     uint32_t getRelaxedOrderingQueueSize() const { return currentRelaxedOrderingQueueSize; }
 
   protected:
+    struct SemaphoreFenceHelper {
+        SemaphoreFenceHelper(const auto &directSubmission) : directSubmission(directSubmission) {
+            if (directSubmission.sfenceMode >= DirectSubmissionSfenceMode::beforeSemaphoreOnly) {
+                if (!directSubmission.miMemFenceRequired && !directSubmission.pciBarrierPtr && !directSubmission.hwInfo->capabilityTable.isIntegratedDevice) {
+                    CpuIntrinsics::mfence();
+                } else {
+                    CpuIntrinsics::sfence();
+                }
+            }
+        }
+        ~SemaphoreFenceHelper() {
+            if (directSubmission.sfenceMode == DirectSubmissionSfenceMode::beforeAndAfterSemaphore) {
+                CpuIntrinsics::sfence();
+            }
+        }
+
+        const DirectSubmissionHw<GfxFamily, Dispatcher> &directSubmission;
+    };
+
     static constexpr size_t prefetchSize = 8 * MemoryConstants::cacheLineSize;
     static constexpr size_t prefetchNoops = prefetchSize / sizeof(uint32_t);
     bool allocateResources();
@@ -185,11 +201,6 @@ class DirectSubmissionHw {
     void dispatchSystemMemoryFenceAddress();
     size_t getSizeSystemMemoryFenceAddress();
 
-    void createDiagnostic();
-    void initDiagnostic(bool &submitOnInit);
-    MOCKABLE_VIRTUAL void performDiagnosticMode();
-    void dispatchDiagnosticModeSection();
-    size_t getDiagnosticModeSection();
     void setImmWritePostSyncOffset();
     virtual void dispatchStopRingBufferSection(){};
     virtual size_t dispatchStopRingBufferSectionSize() {
@@ -219,7 +230,6 @@ class DirectSubmissionHw {
     uint32_t maxRingBufferCount = std::numeric_limits<uint32_t>::max();
 
     LinearStream ringCommandStream;
-    std::unique_ptr<DirectSubmissionDiagnosticsCollector> diagnostic;
 
     uint64_t semaphoreGpuVa = 0u;
     uint64_t gpuVaForMiFlush = 0u;
@@ -241,13 +251,10 @@ class DirectSubmissionHw {
     GraphicsAllocation *relaxedOrderingSchedulerAllocation = nullptr;
     void *semaphorePtr = nullptr;
     volatile RingSemaphoreData *semaphoreData = nullptr;
-    volatile void *workloadModeOneStoreAddress = nullptr;
     uint32_t *pciBarrierPtr = nullptr;
     volatile TagAddressType *tagAddress;
 
     uint32_t currentQueueWorkCount = 1u;
-    uint32_t workloadMode = 0;
-    uint32_t workloadModeOneExpectedValue = 0u;
     uint32_t activeTiles = 1u;
     uint32_t immWritePostSyncOffset = 0u;
     uint32_t currentRelaxedOrderingQueueSize = 0;

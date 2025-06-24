@@ -56,7 +56,7 @@ bool IpSamplingMetricSourceImp::isAvailable() {
     return isEnabled;
 }
 
-void IpSamplingMetricSourceImp::cacheMetricGroup() {
+ze_result_t IpSamplingMetricSourceImp::cacheMetricGroup() {
 
     const auto deviceImp = static_cast<DeviceImp *>(&metricDeviceContext.getDevice());
     if (metricDeviceContext.isImplicitScalingCapable()) {
@@ -70,6 +70,9 @@ void IpSamplingMetricSourceImp::cacheMetricGroup() {
             uint32_t count = 1;
             zet_metric_group_handle_t hMetricGroup = {};
             const auto result = source.metricGroupGet(&count, &hMetricGroup);
+            if (result == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE) {
+                return result;
+            }
             // Getting MetricGroup from sub-device cannot fail, since RootDevice is successful
             UNRECOVERABLE_IF(result != ZE_RESULT_SUCCESS);
             subDeviceMetricGroup.push_back(static_cast<IpSamplingMetricGroupImp *>(MetricGroup::fromHandle(hMetricGroup)));
@@ -77,7 +80,16 @@ void IpSamplingMetricSourceImp::cacheMetricGroup() {
 
         IpSamplingMetricSourceImp &source = deviceImp->getMetricDeviceContext().getMetricSource<IpSamplingMetricSourceImp>();
         cachedMetricGroup = MultiDeviceIpSamplingMetricGroupImp::create(source, subDeviceMetricGroup);
-        return;
+        return ZE_RESULT_SUCCESS;
+    }
+
+    // Confirm whether sample collection is possible
+    uint32_t referenceValues = 100;
+    const ze_result_t sampleCheckResult = getMetricOsInterface()->startMeasurement(referenceValues, referenceValues);
+    if (sampleCheckResult != ZE_RESULT_SUCCESS) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+    } else {
+        getMetricOsInterface()->stopMeasurement();
     }
 
     std::vector<IpSamplingMetricImp> metrics = {};
@@ -114,6 +126,8 @@ void IpSamplingMetricSourceImp::cacheMetricGroup() {
 
     cachedMetricGroup = IpSamplingMetricGroupImp::create(*this, metrics);
     DEBUG_BREAK_IF(cachedMetricGroup == nullptr);
+
+    return ZE_RESULT_SUCCESS;
 }
 
 ze_result_t IpSamplingMetricSourceImp::metricGroupGet(uint32_t *pCount, zet_metric_group_handle_t *phMetricGroups) {
@@ -123,13 +137,19 @@ ze_result_t IpSamplingMetricSourceImp::metricGroupGet(uint32_t *pCount, zet_metr
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
+    if (cachedMetricGroup == nullptr) {
+        auto status = cacheMetricGroup();
+
+        if (status != ZE_RESULT_SUCCESS) {
+            *pCount = 0;
+            isEnabled = false;
+            return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        }
+    }
+
     if (*pCount == 0) {
         *pCount = 1;
         return ZE_RESULT_SUCCESS;
-    }
-
-    if (cachedMetricGroup == nullptr) {
-        cacheMetricGroup();
     }
 
     DEBUG_BREAK_IF(phMetricGroups == nullptr);
@@ -258,6 +278,10 @@ ze_result_t IpSamplingMetricSourceImp::calcOperationCreate(MetricDeviceContext &
     bool isMultiDevice = (metricDeviceContext.isImplicitScalingCapable()) ? true : false;
     status = IpSamplingMetricCalcOpImp::create(*this, pCalculateDesc, isMultiDevice, phCalculateOperation);
     return status;
+}
+
+bool IpSamplingMetricSourceImp::canDisable() {
+    return !activationTracker->isAnyMetricGroupActivated();
 }
 
 IpSamplingMetricGroupImp::IpSamplingMetricGroupImp(IpSamplingMetricSourceImp &metricSource,
@@ -410,12 +434,14 @@ ze_result_t IpSamplingMetricGroupImp::getCalculatedMetricCount(const uint8_t *pR
         return ZE_RESULT_ERROR_INVALID_SIZE;
     }
 
+    DeviceImp *deviceImp = static_cast<DeviceImp *>(&this->getMetricSource().getMetricDeviceContext().getDevice());
+    auto &l0GfxCoreHelper = deviceImp->getNEODevice()->getRootDeviceEnvironment().getHelper<L0GfxCoreHelper>();
     const uint32_t rawReportCount = static_cast<uint32_t>(rawDataSize) / rawReportSize;
 
     for (const uint8_t *pRawIpData = pRawData; pRawIpData < pRawData + (rawReportCount * rawReportSize); pRawIpData += rawReportSize) {
         uint64_t ip = 0ULL;
         memcpy_s(reinterpret_cast<uint8_t *>(&ip), sizeof(ip), pRawIpData, sizeof(ip));
-        ip &= 0x1fffffff;
+        ip &= l0GfxCoreHelper.getIpSamplingIpMask();
         stallReportIpCount.insert(ip);
     }
 

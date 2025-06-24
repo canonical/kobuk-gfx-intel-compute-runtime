@@ -32,14 +32,38 @@ You may obtain a copy of the License at: https://opensource.org/licenses/MIT
 
 ## Supported Platforms
 
-|Platform|OpenCL|Level Zero|
-|--------|:----:|:--------:|
-|Intel Core Processors with Gen8 graphics devices (formerly Broadwell)| 3.0 | - |
-|Intel Core Processors with Gen9 graphics devices (formerly Skylake, Kaby Lake, Coffee Lake)| 3.0 | Y |
-|Intel Atom Processors with Gen9 graphics devices (formerly Apollo Lake, Gemini Lake)| 3.0 | - |
-|Intel Core Processors with Gen11 graphics devices (formerly Ice Lake)| 3.0 | Y |
-|Intel Atom Processors with Gen11 graphics devices (formerly Elkhart Lake)| 3.0 | - |
-|Intel Core Processors with Gen12 graphics devices (formerly Tiger Lake, Rocket Lake, Alder Lake)| 3.0 | Y |
+|Platform|OpenCL|Level Zero|WSL
+|--------|:----:|:-----:|:-:|
+|DG1| 3.0 | 1.6 | Y |
+|Alchemist| 3.0 | 1.6 | Y |
+|Battlemage| 3.0 | 1.6 | Y |
+|Tiger Lake| 3.0 | 1.6 | Y |
+|Rocket Lake| 3.0 | 1.6 | Y |
+|Alder Lake| 3.0 | 1.6 | Y |
+|Raptor Lake| 3.0 | 1.6 | Y |
+|Meteor Lake| 3.0 | 1.6 | Y |
+|Arrow Lake| 3.0 | 1.6 | Y |
+|Lunar Lake| 3.0 | 1.6 | Y |
+|Panther Lake| 3.0 | 1.6 | Y |
+
+_No code changes may be introduced that would regress support for any currently supported hardware. All contributions must ensure continued compatibility and functionality across all supported hardware platforms. Failure to maintain hardware compatibility may result in the rejection or reversion of the contribution. Any deliberate modifications or removal of hardware support will be transparently communicated in the release notes._
+
+_Debug parameters, environmental variables, and internal data structures are considered as internal implementation detail and may be changed or removed at any time._
+
+## Support for legacy platforms
+
+Support for Gen8, Gen9 and Gen11 devices is delivered via packages with legacy1 suffix, more details [here](LEGACY_PLATFORMS.md)
+
+## Legacy Platforms
+
+|Platform|OpenCL|Level Zero|WSL|
+|--------|:----:|:--------:|:-:|
+|Intel Core Processors with Gen8 graphics devices (formerly Broadwell)| 3.0 | - | - |
+|Intel Core Processors with Gen9 graphics devices (formerly Skylake, Kaby Lake)| 3.0 | 1.5 | - |
+|Intel Core Processors with Gen9 graphics devices (formerly Coffee Lake)| 3.0 | 1.5 | Y |
+|Intel Atom Processors with Gen9 graphics devices (formerly Apollo Lake, Gemini Lake)| 3.0 | - | - |
+|Intel Core Processors with Gen11 graphics devices (formerly Ice Lake)| 3.0 | 1.5 | Y |
+|Intel Atom Processors with Gen11 graphics devices (formerly Elkhart Lake)| 3.0 | - | Y |
 
 ## Release cadence
 

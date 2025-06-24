@@ -138,7 +138,10 @@ bool Wddm::init() {
     rootDeviceEnvironment.initGmm();
     this->rootDeviceEnvironment.getGmmClientContext()->setHandleAllocator(this->hwDeviceId->getUmKmDataTranslator()->createGmmHandleAllocator());
 
-    if (WddmVersion::wddm23 == getWddmVersion()) {
+    auto wddmVersion = getWddmVersion();
+    if (WddmVersion::wddm32 == wddmVersion) {
+        wddmInterface = std::make_unique<WddmInterface32>(*this);
+    } else if (WddmVersion::wddm23 == wddmVersion) {
         wddmInterface = std::make_unique<WddmInterface23>(*this);
     } else {
         wddmInterface = std::make_unique<WddmInterface20>(*this);
@@ -840,7 +843,13 @@ bool Wddm::destroyAllocations(const D3DKMT_HANDLE *handles, uint32_t allocationC
     destroyAllocation.AllocationCount = allocationCount;
     destroyAllocation.Flags.AssumeNotInUse = debugManager.flags.SetAssumeNotInUse.get();
 
-    if (debugManager.flags.DestroyAllocationsViaGmm.get()) {
+    bool destroyViaGmm = true;
+
+    if (debugManager.flags.DestroyAllocationsViaGmm.get() != -1) {
+        destroyViaGmm = debugManager.flags.DestroyAllocationsViaGmm.get();
+    }
+
+    if (destroyViaGmm) {
         DeallocateGmm deallocateGmm{&destroyAllocation, getGdi()};
         status = static_cast<NTSTATUS>(this->rootDeviceEnvironment.getGmmClientContext()->deallocate2(&deallocateGmm));
     } else {
@@ -1386,6 +1395,9 @@ void Wddm::updatePagingFenceValue(uint64_t newPagingFenceValue) {
 
 WddmVersion Wddm::getWddmVersion() {
     if (featureTable->flags.ftrWddmHwQueues) {
+        if (isNativeFenceAvailable()) {
+            return WddmVersion::wddm32;
+        }
         return WddmVersion::wddm23;
     } else {
         return WddmVersion::wddm20;

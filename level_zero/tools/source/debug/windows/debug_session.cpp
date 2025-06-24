@@ -396,6 +396,7 @@ ze_result_t DebugSessionWindows::updateStoppedThreadsAndCheckTriggerEvents(const
 
         uint64_t memoryHandle = DebugSessionWindows::invalidHandle;
         {
+            std::unique_lock<std::mutex> lock(asyncThreadMutex);
             if (allContexts.empty()) {
                 PRINT_DEBUGGER_ERROR_LOG("No contexts found\n", "");
                 return ZE_RESULT_ERROR_UNINITIALIZED;

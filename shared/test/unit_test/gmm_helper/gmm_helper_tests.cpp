@@ -681,10 +681,6 @@ TEST(GmmTest, givenAllocationTypeWhenGettingUsageTypeThenReturnCorrectValue) {
     MockExecutionEnvironment mockExecutionEnvironment{};
     const auto &productHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<ProductHelper>();
 
-    if (productHelper.isDcFlushMitigated()) {
-        GTEST_SKIP();
-    }
-
     HardwareInfo hwInfo;
     hwInfo.capabilityTable.isIntegratedDevice = false;
 
@@ -711,8 +707,8 @@ TEST(GmmTest, givenAllocationTypeWhenGettingUsageTypeThenReturnCorrectValue) {
                 break;
             case AllocationType::gpuTimestampDeviceBuffer:
             case AllocationType::timestampPacketTagBuffer:
-                expectedUsage = (forceUncached || productHelper.isDcFlushAllowed()) ? uncachedGmmUsageType
-                                                                                    : GMM_RESOURCE_USAGE_OCL_BUFFER;
+                expectedUsage = (forceUncached || !productHelper.isNonCoherentTimestampsModeEnabled()) ? uncachedGmmUsageType
+                                                                                                       : GMM_RESOURCE_USAGE_OCL_BUFFER;
                 break;
             case AllocationType::bufferHostMemory:
             case AllocationType::externalHostPtr:
@@ -758,21 +754,34 @@ TEST(GmmTest, givenAllocationTypeWhenGettingUsageTypeThenReturnCorrectValue) {
                 break;
             case AllocationType::gpuTimestampDeviceBuffer:
             case AllocationType::timestampPacketTagBuffer:
-                expectedUsage = (forceUncached || productHelper.isDcFlushAllowed()) ? uncachedGmmUsageType
-                                                                                    : GMM_RESOURCE_USAGE_OCL_BUFFER;
+                expectedUsage = (forceUncached || !productHelper.isNonCoherentTimestampsModeEnabled()) ? uncachedGmmUsageType
+                                                                                                       : GMM_RESOURCE_USAGE_OCL_BUFFER;
                 break;
             case AllocationType::bufferHostMemory:
             case AllocationType::externalHostPtr:
             case AllocationType::fillPattern:
             case AllocationType::internalHostMemory:
             case AllocationType::mapAllocation:
-            case AllocationType::ringBuffer:
-            case AllocationType::semaphoreBuffer:
             case AllocationType::svmCpu:
             case AllocationType::svmZeroCopy:
-            case AllocationType::tagBuffer:
                 expectedUsage = forceUncached ? uncachedGmmUsageType : GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
                 break;
+            case AllocationType::semaphoreBuffer:
+            case AllocationType::ringBuffer:
+            case AllocationType::commandBuffer:
+                if (forceUncached) {
+                    expectedUsage = uncachedGmmUsageType;
+                    break;
+                }
+
+                if (productHelper.isResourceUncachedForCS(allocationType)) {
+                    expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC;
+                    break;
+                } else if (allocationType == AllocationType::semaphoreBuffer) {
+                    expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
+                    break;
+                }
+                [[fallthrough]];
             default:
                 expectedUsage = forceUncached ? uncachedGmmUsageType : GMM_RESOURCE_USAGE_OCL_BUFFER;
                 break;
@@ -794,68 +803,33 @@ TEST(GmmTest, givenAllocationTypeAndMitigatedDcFlushWhenGettingUsageTypeThenRetu
 
     for (uint32_t i = 0; i < static_cast<uint32_t>(AllocationType::count); i++) {
         auto allocationType = static_cast<AllocationType>(i);
-        auto uncachedGmmUsageType = productHelper.isNewCoherencyModelSupported() ? GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC : GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED;
         auto usage = CacheSettingsHelper::getGmmUsageType(allocationType, false, productHelper, &hwInfo);
         auto expectedUsage = GMM_RESOURCE_USAGE_UNKNOWN;
 
-        if (productHelper.isDcFlushMitigated()) {
-            switch (allocationType) {
-            case AllocationType::bufferHostMemory:
-            case AllocationType::externalHostPtr:
-            case AllocationType::gpuTimestampDeviceBuffer:
-            case AllocationType::internalHostMemory:
-            case AllocationType::mapAllocation:
-            case AllocationType::printfSurface:
-            case AllocationType::svmCpu:
-            case AllocationType::svmZeroCopy:
-            case AllocationType::tagBuffer:
-            case AllocationType::timestampPacketTagBuffer:
-                expectedUsage = uncachedGmmUsageType;
-                break;
-
-            case AllocationType::linearStream:
-            case AllocationType::internalHeap:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER_CACHELINE_MISALIGNED;
-                break;
-            case AllocationType::constantSurface:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CONST;
-                break;
-            case AllocationType::image:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_IMAGE;
-                break;
-            case AllocationType::fillPattern:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
-                break;
-            default:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
-                break;
-            }
-        } else {
-            switch (allocationType) {
-            case AllocationType::constantSurface:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CONST;
-                break;
-            case AllocationType::image:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_IMAGE;
-                break;
-            case AllocationType::internalHeap:
-            case AllocationType::linearStream:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER;
-                break;
-            case AllocationType::bufferHostMemory:
-            case AllocationType::externalHostPtr:
-            case AllocationType::fillPattern:
-            case AllocationType::internalHostMemory:
-            case AllocationType::mapAllocation:
-            case AllocationType::svmCpu:
-            case AllocationType::svmZeroCopy:
-            case AllocationType::tagBuffer:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
-                break;
-            default:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
-                break;
-            }
+        switch (allocationType) {
+        case AllocationType::constantSurface:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CONST;
+            break;
+        case AllocationType::image:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_IMAGE;
+            break;
+        case AllocationType::internalHeap:
+        case AllocationType::linearStream:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER;
+            break;
+        case AllocationType::bufferHostMemory:
+        case AllocationType::externalHostPtr:
+        case AllocationType::fillPattern:
+        case AllocationType::internalHostMemory:
+        case AllocationType::mapAllocation:
+        case AllocationType::svmCpu:
+        case AllocationType::svmZeroCopy:
+        case AllocationType::tagBuffer:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
+            break;
+        default:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
+            break;
         }
 
         EXPECT_EQ(expectedUsage, usage);
@@ -865,86 +839,68 @@ TEST(GmmTest, givenAllocationTypeAndMitigatedDcFlushWhenGettingUsageTypeThenRetu
 
     for (uint32_t i = 0; i < static_cast<uint32_t>(AllocationType::count); i++) {
         auto allocationType = static_cast<AllocationType>(i);
-        auto uncachedGmmUsageType = productHelper.isNewCoherencyModelSupported() ? GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC : GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED;
         auto usage = CacheSettingsHelper::getGmmUsageType(allocationType, false, productHelper, &hwInfo);
         auto expectedUsage = GMM_RESOURCE_USAGE_UNKNOWN;
 
-        if (productHelper.isDcFlushMitigated()) {
-            switch (allocationType) {
-            case AllocationType::bufferHostMemory:
-            case AllocationType::externalHostPtr:
-            case AllocationType::gpuTimestampDeviceBuffer:
-            case AllocationType::internalHostMemory:
-            case AllocationType::mapAllocation:
-            case AllocationType::printfSurface:
-            case AllocationType::svmCpu:
-            case AllocationType::svmZeroCopy:
-            case AllocationType::tagBuffer:
-            case AllocationType::timestampPacketTagBuffer:
-                expectedUsage = uncachedGmmUsageType;
+        switch (allocationType) {
+        case AllocationType::constantSurface:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CONST;
+            break;
+        case AllocationType::image:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_IMAGE;
+            break;
+        case AllocationType::internalHeap:
+        case AllocationType::linearStream:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER;
+            break;
+        case AllocationType::bufferHostMemory:
+        case AllocationType::externalHostPtr:
+        case AllocationType::fillPattern:
+        case AllocationType::internalHostMemory:
+        case AllocationType::mapAllocation:
+        case AllocationType::svmCpu:
+        case AllocationType::svmZeroCopy:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
+            break;
+        case AllocationType::semaphoreBuffer:
+        case AllocationType::ringBuffer:
+        case AllocationType::commandBuffer:
+            if (productHelper.isResourceUncachedForCS(allocationType)) {
+                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC;
                 break;
-
-            case AllocationType::linearStream:
-            case AllocationType::internalHeap:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER_CACHELINE_MISALIGNED;
-                break;
-            case AllocationType::constantSurface:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CONST;
-                break;
-            case AllocationType::image:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_IMAGE;
-                break;
-            case AllocationType::fillPattern:
-            case AllocationType::ringBuffer:
-            case AllocationType::semaphoreBuffer:
+            } else if (allocationType == AllocationType::semaphoreBuffer) {
                 expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
                 break;
-            default:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
-                break;
             }
-        } else {
-            switch (allocationType) {
-            case AllocationType::constantSurface:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER_CONST;
-                break;
-            case AllocationType::image:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_IMAGE;
-                break;
-            case AllocationType::internalHeap:
-            case AllocationType::linearStream:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_STATE_HEAP_BUFFER;
-                break;
-            case AllocationType::bufferHostMemory:
-            case AllocationType::externalHostPtr:
-            case AllocationType::fillPattern:
-            case AllocationType::internalHostMemory:
-            case AllocationType::mapAllocation:
-            case AllocationType::ringBuffer:
-            case AllocationType::semaphoreBuffer:
-            case AllocationType::svmCpu:
-            case AllocationType::svmZeroCopy:
-            case AllocationType::tagBuffer:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
-                break;
-            default:
-                expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
-                break;
-            }
+            [[fallthrough]];
+        default:
+            expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
+            break;
         }
 
         EXPECT_EQ(expectedUsage, usage);
     }
 }
 
-TEST(GmmTest, givenDebugFlagWhenTimestampAllocationsAreQueriedThenBufferPolicyIsReturned) {
+TEST(GmmTest, whenTimestampAllocationsAreQueriedThenCorrectBufferPolicyIsReturned) {
     DebugManagerStateRestore restorer;
-    debugManager.flags.ForceNonCoherentModeForTimestamps.set(1);
     MockExecutionEnvironment mockExecutionEnvironment{};
     const auto &productHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<ProductHelper>();
-    auto expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
+    auto uncachedType = productHelper.isNewCoherencyModelSupported() ? GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC : GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED;
+    auto expectedUsage = uncachedType;
+    if (productHelper.isNonCoherentTimestampsModeEnabled()) {
+        expectedUsage = GMM_RESOURCE_USAGE_OCL_BUFFER;
+    }
     EXPECT_EQ(expectedUsage, CacheSettingsHelper::getGmmUsageType(AllocationType::gpuTimestampDeviceBuffer, false, productHelper, defaultHwInfo.get()));
     EXPECT_EQ(expectedUsage, CacheSettingsHelper::getGmmUsageType(AllocationType::timestampPacketTagBuffer, false, productHelper, defaultHwInfo.get()));
+
+    debugManager.flags.ForceNonCoherentModeForTimestamps.set(0);
+    EXPECT_EQ(uncachedType, CacheSettingsHelper::getGmmUsageType(AllocationType::gpuTimestampDeviceBuffer, false, productHelper, defaultHwInfo.get()));
+    EXPECT_EQ(uncachedType, CacheSettingsHelper::getGmmUsageType(AllocationType::timestampPacketTagBuffer, false, productHelper, defaultHwInfo.get()));
+
+    debugManager.flags.ForceNonCoherentModeForTimestamps.set(1);
+    EXPECT_EQ(GMM_RESOURCE_USAGE_OCL_BUFFER, CacheSettingsHelper::getGmmUsageType(AllocationType::gpuTimestampDeviceBuffer, false, productHelper, defaultHwInfo.get()));
+    EXPECT_EQ(GMM_RESOURCE_USAGE_OCL_BUFFER, CacheSettingsHelper::getGmmUsageType(AllocationType::timestampPacketTagBuffer, false, productHelper, defaultHwInfo.get()));
 }
 
 TEST(GmmTest, givenForceAllResourcesUncachedFlagSetWhenGettingUsageTypeThenReturnUncached) {
@@ -1023,10 +979,6 @@ TEST(GmmTest, givenUncachedDebugFlagMaskSetWhenAskingForUsageTypeThenReturnUncac
 
     MockExecutionEnvironment mockExecutionEnvironment{};
     const auto &productHelper = mockExecutionEnvironment.rootDeviceEnvironments[0]->getHelper<ProductHelper>();
-
-    if (productHelper.isDcFlushMitigated()) {
-        GTEST_SKIP();
-    }
 
     constexpr int64_t bufferMask = 1 << (static_cast<int64_t>(AllocationType::buffer) - 1);
     constexpr int64_t imageMask = 1 << (static_cast<int64_t>(AllocationType::image) - 1);

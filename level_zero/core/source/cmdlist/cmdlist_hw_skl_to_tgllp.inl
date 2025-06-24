@@ -207,9 +207,10 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
             .inOrderIncrementValue = 0,
             .device = neoDevice,
             .inOrderExecInfo = nullptr,
+            .isCounterBasedEvent = false,
             .isTimestampEvent = false,
             .isHostScopeSignalEvent = false,
-            .isKernelUsingSystemAllocation = false,
+            .isUsingSystemAllocation = false,
             .dcFlushEnable = this->dcFlushSupport,
             .interruptEvent = false,
             .isFlushL3ForExternalAllocationRequired = false,
@@ -272,7 +273,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         commandContainer.addToResidencyContainer(resource);
     }
 
-    if (kernelImmutableData->getDescriptor().kernelAttributes.flags.usesPrintf) {
+    if (kernelImp->getPrintfBufferAllocation() != nullptr) {
         storePrintfKernel(kernel);
     }
 

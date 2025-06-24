@@ -57,16 +57,21 @@ struct EncodePostSyncArgs {
     uint64_t inOrderIncrementValue = 0;
     Device *device = nullptr;
     NEO::InOrderExecInfo *inOrderExecInfo = nullptr;
+    bool isCounterBasedEvent = false;
     bool isTimestampEvent = false;
+    NEO::TagNodeBase *tsNode = nullptr;
     bool isHostScopeSignalEvent = false;
-    bool isKernelUsingSystemAllocation = false;
+    bool isUsingSystemAllocation = false;
     bool dcFlushEnable = false;
     bool interruptEvent = false;
     bool isFlushL3ForExternalAllocationRequired = false;
     bool isFlushL3ForHostUsmRequired = false;
 
     bool requiresSystemMemoryFence() const {
-        return (isHostScopeSignalEvent && isKernelUsingSystemAllocation && this->device->getProductHelper().isGlobalFenceInPostSyncRequired(this->device->getHardwareInfo()));
+        return (isHostScopeSignalEvent && isUsingSystemAllocation && this->device->getProductHelper().isGlobalFenceInPostSyncRequired(this->device->getHardwareInfo()));
+    }
+    bool isRegularEvent() const {
+        return (eventAddress != 0) && (inOrderExecInfo == nullptr);
     }
 };
 
@@ -83,6 +88,9 @@ struct EncodePostSync {
 
     template <typename CommandType>
     static void setupPostSyncForInOrderExec(CommandType &cmd, const EncodePostSyncArgs &args);
+
+    template <typename CommandType>
+    static void setupPostSyncForTimestamp(CommandType &cmd, const EncodePostSyncArgs &args);
 
     static uint32_t getPostSyncMocs(const RootDeviceEnvironment &rootDeviceEnvironment, const bool dcFlush);
 
@@ -263,8 +271,8 @@ struct EncodeDispatchKernel : public EncodeDispatchKernelBase<GfxFamily> {
 
     template <typename WalkerType, typename InterfaceDescriptorType>
     static void encodeThreadGroupDispatch(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo,
-                                          const uint32_t *threadGroupDimensions, const uint32_t threadGroupCount, const uint32_t grfCount, const uint32_t threadsPerThreadGroup,
-                                          WalkerType &walkerCmd);
+                                          const uint32_t *threadGroupDimensions, const uint32_t threadGroupCount, const uint32_t requiredThreadGroupDispatchSize,
+                                          const uint32_t grfCount, const uint32_t threadsPerThreadGroup, WalkerType &walkerCmd);
 
     template <typename WalkerType>
     static void setWalkerRegionSettings(WalkerType &walkerCmd, const NEO::Device &device, uint32_t partitionCount, uint32_t workgroupSize, uint32_t threadGroupCount, uint32_t maxWgCountPerTile, bool requiredDispatchWalkOrder);

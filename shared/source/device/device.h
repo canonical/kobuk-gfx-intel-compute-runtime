@@ -70,7 +70,7 @@ struct SecondaryContexts : NEO::NonCopyableAndNonMovableClass {
     }
     SecondaryContexts &operator=(SecondaryContexts &&other) noexcept = delete;
 
-    EngineControl *getEngine(const EngineUsage usage);
+    EngineControl *getEngine(const EngineUsage usage, int priority);
 
     EnginesT engines;                                 // vector of secondary EngineControls
     std::atomic<uint8_t> regularCounter = 0;          // Counter used to assign next regular EngineControl
@@ -121,7 +121,6 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
     size_t getEngineGroupIndexFromEngineGroupType(EngineGroupType engineGroupType) const;
     EngineControl &getEngine(uint32_t index);
     EngineControl &getDefaultEngine();
-    EngineControl &getNextEngineForCommandQueue();
     EngineControl &getInternalEngine();
     EngineControl *getInternalCopyEngine();
     EngineControl *getHpCopyEngine();
@@ -219,7 +218,7 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
         return (getPreemptionMode() == PreemptionMode::MidThread || getDebugger() != nullptr) && getCompilerInterface();
     }
 
-    MOCKABLE_VIRTUAL EngineControl *getSecondaryEngineCsr(EngineTypeUsage engineTypeUsage, bool allocateInterrupt);
+    MOCKABLE_VIRTUAL EngineControl *getSecondaryEngineCsr(EngineTypeUsage engineTypeUsage, int priority, bool allocateInterrupt);
     bool isSecondaryContextEngineType(aub_stream::EngineType type) {
         return EngineHelpers::isCcs(type) || EngineHelpers::isBcs(type);
     }
@@ -319,7 +318,6 @@ class Device : public ReferenceTrackedObject<Device>, NEO::NonCopyableAndNonMova
     std::atomic_uint32_t regularCommandQueuesCreatedWithinDeviceCount{0};
     std::bitset<8> availableEnginesForCommandQueueusRoundRobin = 0;
     uint32_t queuesPerEngineCount = 1;
-    void initializeEngineRoundRobinControls();
     bool hasGenericSubDevices = false;
     bool rootCsrCreated = false;
     const uint32_t rootDeviceIndex;

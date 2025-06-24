@@ -43,6 +43,7 @@
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/page_fault_manager/cpu_page_fault_manager.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/logger_neo_only.h"
 
 namespace NEO {
@@ -706,11 +707,12 @@ bool MemoryManager::getAllocationData(AllocationData &allocationData, const Allo
     case AllocationType::svmGpu:
     case AllocationType::image:
         if (false == allocationData.flags.uncacheable && useLocalPreferredForCacheableBuffers) {
-            if (!allocationData.flags.preferCompressed) {
+            if ((usmDeviceAllocationMode == LocalMemAllocationMode::hwDefault) && !allocationData.flags.preferCompressed) {
                 allocationData.storageInfo.localOnlyRequired = false;
             }
             allocationData.storageInfo.systemMemoryPlacement = false;
         }
+        break;
     default:
         break;
     }
@@ -1080,7 +1082,7 @@ bool MemoryManager::isHostPointerTrackingEnabled(uint32_t rootDeviceIndex) {
     if (debugManager.flags.EnableHostPtrTracking.get() != -1) {
         return !!debugManager.flags.EnableHostPtrTracking.get();
     }
-    return (peekExecutionEnvironment().rootDeviceEnvironments[rootDeviceIndex]->getHardwareInfo()->capabilityTable.hostPtrTrackingEnabled | is32bit);
+    return is32bit;
 }
 
 bool MemoryManager::useNonSvmHostPtrAlloc(AllocationType allocationType, uint32_t rootDeviceIndex) {
@@ -1318,4 +1320,12 @@ void MemoryManager::removeCustomHeapAllocatorConfig(AllocationType allocationTyp
     customHeapAllocators.erase({allocationType, isFrontWindowPool});
 }
 
+bool MemoryManager::getLocalOnlyRequired(AllocationType allocationType, const ProductHelper &productHelper, const ReleaseHelper *releaseHelper, bool preferCompressed) const {
+    const bool enabledForRelease{!releaseHelper || releaseHelper->isLocalOnlyAllowed()};
+
+    if (allocationType == AllocationType::buffer || allocationType == AllocationType::svmGpu) {
+        return productHelper.getStorageInfoLocalOnlyFlag(usmDeviceAllocationMode, enabledForRelease);
+    }
+    return (preferCompressed ? enabledForRelease : false);
+}
 } // namespace NEO

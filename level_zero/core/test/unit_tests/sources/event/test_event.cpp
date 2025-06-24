@@ -282,8 +282,6 @@ HWTEST_F(EventPoolCreate, givenTimestampEventsThenEventSizeSufficientForAllKerne
         maxPacketCount = l0GfxCoreHelper.getEventBaseMaxPacketCount(device->getNEODevice()->getRootDeviceEnvironment());
     }
 
-    maxPacketCount = std::max(maxPacketCount, 2u);
-
     uint32_t packetsSize = maxPacketCount *
                            static_cast<uint32_t>(NEO::TimestampPackets<typename FamilyType::TimestampPacketType, FamilyType::timestampPacketCount>::getSinglePacketSize());
     uint32_t kernelTimestampsSize = static_cast<uint32_t>(alignUp(packetsSize, gfxCoreHelper.getTimestampPacketAllocatorAlignment()));
@@ -2802,6 +2800,59 @@ TEST_F(TimestampEventUsedPacketSignalCreate, givenFlagPrintTimestampPacketConten
     EXPECT_EQ(0, output.compare(expected.str().c_str()));
 }
 
+TEST_F(TimestampEventUsedPacketSignalCreate, givenEventWithBlitAdditionalPropertiesWhenCallingCalulateProfilingDataThenCorrectDataSet) {
+    typename MockTimestampPackets32::Packet packetData[3];
+    uint32_t deviceCount = 1;
+    ze_device_handle_t rootDeviceHandle;
+
+    ze_result_t result = zeDeviceGet(driverHandle.get(), &deviceCount, &rootDeviceHandle);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    MockTagAllocator<DeviceAllocNodeType<true>> deviceTagAllocator(0, neoDevice->getMemoryManager());
+    MockTagAllocator<NEO::TimestampPackets<uint32_t, 2>> blitTagAllocator(0, neoDevice->getMemoryManager());
+    auto event = std::unique_ptr<EventImp<uint32_t>>(static_cast<EventImp<uint32_t> *>(L0::Event::create<uint32_t>(eventPool.get(), &eventDesc, L0::Device::fromHandle(rootDeviceHandle))));
+    ASSERT_NE(nullptr, event);
+
+    auto inOrderExecInfo = std::make_shared<NEO::InOrderExecInfo>(deviceTagAllocator.getTag(), nullptr, *neoDevice, 1, false, false);
+
+    event->enableCounterBasedMode(true, ZE_EVENT_POOL_COUNTER_BASED_EXP_FLAG_IMMEDIATE);
+    event->updateInOrderExecState(inOrderExecInfo, 1, 0);
+
+    event->resetAdditionalTimestampNode(blitTagAllocator.getTag(), 1);
+
+    event->setPacketsInUse(2u);
+
+    packetData[0].contextStart = 1u;
+    packetData[0].contextEnd = 2u;
+    packetData[0].globalStart = 3u;
+    packetData[0].globalEnd = 4u;
+
+    packetData[1].contextStart = 5u;
+    packetData[1].contextEnd = 6u;
+    packetData[1].globalStart = 7u;
+    packetData[1].globalEnd = 8u;
+
+    packetData[2].contextStart = 9u;
+    packetData[2].contextEnd = 10u;
+    packetData[2].globalStart = 11u;
+    packetData[2].globalEnd = 12u;
+
+    event->hostAddressFromPool = packetData;
+    uint32_t pCount = 3;
+
+    for (uint32_t packetId = 0; packetId < pCount; packetId++) {
+        event->kernelEventCompletionData[0].assignDataToAllTimestamps(packetId, event->hostAddressFromPool);
+        event->hostAddressFromPool = ptrOffset(event->hostAddressFromPool, NEO::TimestampPackets<uint32_t, NEO::TimestampPacketConstants::preferredPacketCount>::getSinglePacketSize());
+    }
+    result = event->calculateProfilingData();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    EXPECT_EQ(packetData[0].contextStart, event->contextStartTS);
+    EXPECT_EQ(packetData[2].contextEnd, event->contextEndTS);
+    EXPECT_EQ(packetData[0].globalStart, event->globalStartTS);
+    EXPECT_EQ(packetData[2].globalEnd, event->globalEndTS);
+}
+
 HWTEST2_F(TimestampEventCreateMultiKernel, givenFlagPrintTimestampPacketContentsWhenMultiKernelsAndMultiPacketsAndCallQueryKernelTimestampThenProperLogIsPrinted, IsAtLeastXeHpCore) {
     debugManager.flags.PrintTimestampPacketContents.set(1);
     typename MockTimestampPackets32::Packet packetData[4];
@@ -3071,6 +3122,7 @@ TEST_F(EventPoolCreateMultiDeviceFlatHierarchy, givenFlatHierarchyWhenCallZeGetD
     }
 
     static_cast<DeviceImp *>(driverHandle->devices[1])->numSubDevices = 0;
+    driverHandle->setupDevicesToExpose();
     uint32_t deviceCount2 = 0;
     result = zeDeviceGet(driverHandle.get(), &deviceCount2, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
@@ -3857,6 +3909,31 @@ HWTEST_F(EventTests, GivenEventUsedOnNonDefaultCsrWhenHostSynchronizeCalledThenA
     EXPECT_EQ(1u, downloadedAllocations);
 
     event->destroy();
+}
+
+HWTEST_F(EventTests, givenRegularEventWhenCallingResetAdditionalTimestampNodeMultipleTimesWithTagAllocatorThenTagAddedToAdditionalTimestampNodeVectorOnce) {
+
+    MockTagAllocator<DeviceAllocNodeType<true>> eventTagAllocator(0, neoDevice->getMemoryManager());
+    auto event = zeUniquePtr(whiteboxCast(getHelper<L0GfxCoreHelper>().createEvent(eventPool.get(), &eventDesc, device)));
+    ASSERT_NE(event, nullptr);
+
+    event->resetAdditionalTimestampNode(eventTagAllocator.getTag(), 1);
+
+    event->resetAdditionalTimestampNode(eventTagAllocator.getTag(), 1);
+    EXPECT_EQ(1u, event->additionalTimestampNode.size());
+}
+
+HWTEST_F(EventTests, givenRegularEventWhenCallingResetAdditionalTimestampNodeWithNullptrThenVectorCleared) {
+
+    MockTagAllocator<DeviceAllocNodeType<true>> eventTagAllocator(0, neoDevice->getMemoryManager());
+    auto event = zeUniquePtr(whiteboxCast(getHelper<L0GfxCoreHelper>().createEvent(eventPool.get(), &eventDesc, device)));
+    ASSERT_NE(event, nullptr);
+
+    event->resetAdditionalTimestampNode(eventTagAllocator.getTag(), 1);
+    EXPECT_EQ(1u, event->additionalTimestampNode.size());
+
+    event->resetAdditionalTimestampNode(nullptr, 0);
+    EXPECT_EQ(0u, event->additionalTimestampNode.size());
 }
 
 HWTEST_F(EventTests, givenInOrderEventWhenHostSynchronizeIsCalledThenAllocationIsDonwloadedOnlyAfterEventWasUsedOnGpu) {
@@ -4721,11 +4798,11 @@ struct EventDynamicPacketUseFixture : public DeviceFixture {
 };
 
 using EventDynamicPacketUseTest = Test<EventDynamicPacketUseFixture<0, 0>>;
-HWTEST2_F(EventDynamicPacketUseTest, givenDynamicPacketEstimationWhenGettingMaxPacketFromAllDevicesThenMaxPossibleSelected, MatchAny) {
+HWTEST_F(EventDynamicPacketUseTest, givenDynamicPacketEstimationWhenGettingMaxPacketFromAllDevicesThenMaxPossibleSelected) {
     testAllDevices();
 }
 
-HWTEST2_F(EventDynamicPacketUseTest, givenDynamicPacketEstimationWhenGettingMaxPacketFromSingleDeviceThenMaxFromThisDeviceSelected, MatchAny) {
+HWTEST_F(EventDynamicPacketUseTest, givenDynamicPacketEstimationWhenGettingMaxPacketFromSingleDeviceThenMaxFromThisDeviceSelected) {
     testSingleDevice();
 }
 
@@ -5058,6 +5135,21 @@ HWTEST2_F(EventTimestampTest, givenAppendMemoryCopyIsCalledWhenCpuCopyIsUsedAndC
 
     delete[] hostPtr;
     context->freeMem(devicePtr);
+}
+
+TEST_F(EventTests, givenNullDescriptorWhenCreatingCbEvent2ThenEventWithNoProfilingAndSignalScopeHostAndDeviceScopeWaitIsCreated) {
+    ze_event_handle_t handle = nullptr;
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zexCounterBasedEventCreate2(context, device, nullptr, &handle));
+
+    auto eventObj = Event::fromHandle(handle);
+    EXPECT_TRUE(eventObj->isCounterBasedExplicitlyEnabled());
+    EXPECT_FALSE(eventObj->isIpcImported());
+    EXPECT_FALSE(eventObj->isEventTimestampFlagSet());
+    EXPECT_TRUE(eventObj->isSignalScope(ZE_EVENT_SCOPE_FLAG_HOST));
+    EXPECT_TRUE(eventObj->isWaitScope(ZE_EVENT_SCOPE_FLAG_DEVICE));
+    EXPECT_EQ(static_cast<uint32_t>(ZEX_COUNTER_BASED_EVENT_FLAG_IMMEDIATE | ZEX_COUNTER_BASED_EVENT_FLAG_NON_IMMEDIATE), eventObj->getCounterBasedFlags());
+    zeEventDestroy(handle);
 }
 
 } // namespace ult

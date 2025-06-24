@@ -28,6 +28,7 @@
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/product_helper.h"
+#include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/api_intercept.h"
 #include "shared/source/utilities/staging_buffer_manager.h"
 #include "shared/source/utilities/tag_allocator.h"
@@ -176,7 +177,7 @@ CommandQueue::~CommandQueue() {
 }
 
 void tryAssignSecondaryEngine(Device &device, EngineControl *&engineControl, EngineTypeUsage engineTypeUsage) {
-    auto newEngine = device.getSecondaryEngineCsr(engineTypeUsage, false);
+    auto newEngine = device.getSecondaryEngineCsr(engineTypeUsage, 0, false);
     if (newEngine) {
         engineControl = newEngine;
     }
@@ -187,35 +188,17 @@ void CommandQueue::initializeGpgpu() const {
         static std::mutex mutex;
         std::lock_guard<std::mutex> lock(mutex);
         if (gpgpuEngine == nullptr) {
-            auto &productHelper = device->getProductHelper();
-            auto engineRoundRobinAvailable = productHelper.isAssignEngineRoundRobinSupported() &&
-                                             this->isAssignEngineRoundRobinEnabled();
-
-            if (debugManager.flags.EnableCmdQRoundRobindEngineAssign.get() != -1) {
-                engineRoundRobinAvailable = debugManager.flags.EnableCmdQRoundRobindEngineAssign.get();
-            }
-
-            auto assignEngineRoundRobin =
-                !this->isSpecialCommandQueue &&
-                !this->queueFamilySelected &&
-                !(getCmdQueueProperties<cl_queue_priority_khr>(propertiesVector.data(), CL_QUEUE_PRIORITY_KHR) & static_cast<cl_queue_priority_khr>(CL_QUEUE_PRIORITY_LOW_KHR)) &&
-                engineRoundRobinAvailable;
-
             auto defaultEngineType = device->getDefaultEngine().getEngineType();
 
             const GfxCoreHelper &gfxCoreHelper = getDevice().getGfxCoreHelper();
             bool secondaryContextsEnabled = gfxCoreHelper.areSecondaryContextsSupported();
 
-            if (assignEngineRoundRobin) {
-                this->gpgpuEngine = &device->getDevice().getNextEngineForCommandQueue();
-            } else {
-                if (secondaryContextsEnabled && EngineHelpers::isCcs(defaultEngineType)) {
-                    tryAssignSecondaryEngine(device->getDevice(), gpgpuEngine, {defaultEngineType, EngineUsage::regular});
-                }
+            if (secondaryContextsEnabled && EngineHelpers::isCcs(defaultEngineType)) {
+                tryAssignSecondaryEngine(device->getDevice(), gpgpuEngine, {defaultEngineType, EngineUsage::regular});
+            }
 
-                if (gpgpuEngine == nullptr) {
-                    this->gpgpuEngine = &device->getDefaultEngine();
-                }
+            if (gpgpuEngine == nullptr) {
+                this->gpgpuEngine = &device->getDefaultEngine();
             }
 
             this->initializeGpgpuInternals();
@@ -287,7 +270,6 @@ CommandStreamReceiver &CommandQueue::selectCsrForBuiltinOperation(const CsrSelec
     if (!blitEnqueueAllowed(args)) {
         return getGpgpuCommandStreamReceiver();
     }
-
     bool preferBcs = true;
     aub_stream::EngineType preferredBcsEngineType = aub_stream::EngineType::NUM_ENGINES;
     switch (args.direction) {
@@ -672,8 +654,7 @@ cl_int CommandQueue::enqueueReleaseSharedObjects(cl_uint numObjects, const cl_me
     }
 
     if (this->getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled()) {
-        if (this->getDevice().getProductHelper().isDcFlushMitigated() || isDisplayableReleased) {
-            this->getGpgpuCommandStreamReceiver().registerDcFlushForDcMitigation();
+        if (isDisplayableReleased) {
             this->getGpgpuCommandStreamReceiver().sendRenderStateCacheFlush();
             {
                 TakeOwnershipWrapper<CommandQueue> queueOwnership(*this);
@@ -1161,10 +1142,14 @@ bool CommandQueue::blitEnqueueAllowed(const CsrSelectionArgs &args) const {
 bool CommandQueue::blitEnqueueImageAllowed(const size_t *origin, const size_t *region, const Image &image) const {
     const auto &hwInfo = device->getHardwareInfo();
     auto &productHelper = device->getProductHelper();
+    auto releaseHelper = device->getDevice().getReleaseHelper();
     auto blitEnqueueImageAllowed = productHelper.isBlitterForImagesSupported();
 
     if (debugManager.flags.EnableBlitterForEnqueueImageOperations.get() != -1) {
         blitEnqueueImageAllowed = debugManager.flags.EnableBlitterForEnqueueImageOperations.get();
+    }
+    if (releaseHelper) {
+        blitEnqueueImageAllowed &= !(Image::isDepthFormat(image.getImageFormat()) && !releaseHelper->isBlitImageAllowedForDepthFormat());
     }
 
     blitEnqueueImageAllowed &= !isMipMapped(image.getImageDesc());

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "shared/source/helpers/definitions/command_encoder_args.h"
+#include "shared/source/helpers/extendable_enum.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -79,6 +80,7 @@ struct CmdListKernelLaunchParams {
     bool omitAddingEventResidency = false;
     bool omitAddingWaitEventsResidency = false;
     bool makeKernelCommandView = false;
+    bool relaxedOrderingDispatch = false;
 };
 
 struct CmdListMemoryCopyParams {
@@ -86,4 +88,15 @@ struct CmdListMemoryCopyParams {
     bool forceDisableCopyOnlyInOrderSignaling = false;
     bool copyOffloadAllowed = false;
 };
+
+struct CopyOffloadMode : ExtendableEnum {
+  public:
+    constexpr CopyOffloadMode(uint32_t val) : ExtendableEnum(val) {}
+};
+
+namespace CopyOffloadModes {
+static constexpr CopyOffloadMode disabled = 0;
+static constexpr CopyOffloadMode dualStream = 1;
+} // namespace CopyOffloadModes
+
 } // namespace L0

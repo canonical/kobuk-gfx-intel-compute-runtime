@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -39,20 +39,14 @@ bool TestChecks::fullySupportsBlitter(const RootDeviceEnvironment &rootDeviceEnv
     return false;
 }
 
+bool TestChecks::allowsDcFlush(const Device *device) {
+    return device->getProductHelper().isDcFlushAllowed();
+}
+
 bool TestChecks::supportsImages(const HardwareInfo &hardwareInfo) {
     return hardwareInfo.capabilityTable.supportsImages;
 }
 
 bool TestChecks::supportsImages(const std::unique_ptr<HardwareInfo> &pHardwareInfo) {
     return supportsImages(*pHardwareInfo);
-}
-
-bool TestChecks::supportsSvm(const HardwareInfo *pHardwareInfo) {
-    return pHardwareInfo->capabilityTable.ftrSvm;
-}
-bool TestChecks::supportsSvm(const std::unique_ptr<HardwareInfo> &pHardwareInfo) {
-    return supportsSvm(pHardwareInfo.get());
-}
-bool TestChecks::supportsSvm(const Device *pDevice) {
-    return supportsSvm(&pDevice->getHardwareInfo());
 }

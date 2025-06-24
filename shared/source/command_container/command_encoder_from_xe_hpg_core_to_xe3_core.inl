@@ -44,10 +44,17 @@ bool EncodeDispatchKernel<Family>::singleTileExecImplicitScalingRequired(bool co
 
 template <typename Family>
 template <typename CommandType>
+inline auto &EncodePostSync<Family>::getPostSync(CommandType &cmd, size_t index) {
+    UNRECOVERABLE_IF(index != 0);
+    return cmd.getPostSync();
+}
+
+template <typename Family>
+template <typename CommandType>
 void EncodePostSync<Family>::setupPostSyncForInOrderExec(CommandType &cmd, const EncodePostSyncArgs &args) {
     using POSTSYNC_DATA = decltype(Family::template getPostSyncType<CommandType>());
 
-    auto &postSync = cmd.getPostSync();
+    auto &postSync = getPostSync(cmd, 0);
 
     uint64_t gpuVa = args.inOrderExecInfo->getBaseDeviceAddress() + args.inOrderExecInfo->getAllocationOffset();
     UNRECOVERABLE_IF(!(isAligned<immWriteDestinationAddressAlignment>(gpuVa)));
@@ -83,6 +90,9 @@ void InOrderPatchCommandHelpers::PatchCmd<Family>::patchComputeWalker(uint64_t a
     postSync.setImmediateData(baseCounterValue + appendCounterValue);
 }
 
+template <typename Family>
+void InOrderPatchCommandHelpers::PatchCmd<Family>::patchBlitterCommand(uint64_t appendCounterValue, InOrderPatchCommandHelpers::PatchCmdType patchCmdType) {
+}
 template <typename Family>
 template <typename CommandType>
 void EncodeDispatchKernel<Family>::encodeAdditionalWalkerFields(const RootDeviceEnvironment &rootDeviceEnvironment, CommandType &cmd, const EncodeWalkerArgs &walkerArgs) {}

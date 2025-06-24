@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -66,6 +66,15 @@ ze_result_t zeDriverGetExtensionFunctionAddress(
     return L0::BaseDriver::fromHandle(hDriver)->getExtensionFunctionAddress(name, ppFunctionAddress);
 }
 
+ze_context_handle_t zeDriverGetDefaultContext(
+    ze_driver_handle_t hDriver) {
+    return L0::DriverHandle::fromHandle(hDriver)->getDefaultContext();
+}
+
+ze_context_handle_t zerDriverGetDefaultContext() {
+    return L0::DriverHandle::fromHandle(L0::globalDriverHandles->front())->getDefaultContext();
+}
+
 } // namespace L0
 
 extern "C" {
@@ -113,7 +122,7 @@ ZE_APIEXPORT ze_result_t ZE_APICALL zeDriverGetIpcProperties(
         pIpcProperties);
 }
 
-ZE_APIEXPORT ze_result_t zeDriverGetLastErrorDescription(
+ZE_APIEXPORT ze_result_t ZE_APICALL zeDriverGetLastErrorDescription(
     ze_driver_handle_t hDriver,
     const char **ppString) {
     return L0::zeDriverGetLastErrorDescription(
@@ -139,5 +148,14 @@ ZE_APIEXPORT ze_result_t ZE_APICALL zeDriverGetExtensionFunctionAddress(
         hDriver,
         name,
         ppFunctionAddress);
+}
+
+ze_context_handle_t ZE_APICALL zeDriverGetDefaultContext(
+    ze_driver_handle_t hDriver) {
+    return L0::zeDriverGetDefaultContext(hDriver);
+}
+
+ze_context_handle_t ZE_APICALL zerDriverGetDefaultContext() {
+    return L0::zerDriverGetDefaultContext();
 }
 }

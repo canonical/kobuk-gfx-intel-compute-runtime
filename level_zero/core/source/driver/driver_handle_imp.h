@@ -104,7 +104,6 @@ struct DriverHandleImp : public DriverHandle {
     void initializeVertexes();
     ze_result_t fabricVertexGetExp(uint32_t *pCount, ze_fabric_vertex_handle_t *phDevices) override;
     void createHostPointerManager();
-    void sortNeoDevices(std::vector<std::unique_ptr<NEO::Device>> &neoDevices);
 
     bool isRemoteImageNeeded(Image *image, Device *device);
     bool isRemoteResourceNeeded(void *ptr,
@@ -132,6 +131,7 @@ struct DriverHandleImp : public DriverHandle {
     std::map<void *, NEO::GraphicsAllocation *> sharedMakeResidentAllocations;
 
     std::vector<Device *> devices;
+    std::vector<ze_device_handle_t> devicesToExpose;
     std::vector<FabricVertex *> fabricVertices;
     std::vector<FabricEdge *> fabricEdges;
     std::vector<FabricEdge *> fabricIndirectEdges;
@@ -147,6 +147,7 @@ struct DriverHandleImp : public DriverHandle {
     NEO::MemoryManager *memoryManager = nullptr;
     NEO::SVMAllocsManager *svmAllocsManager = nullptr;
     NEO::UsmMemAllocPool usmHostMemAllocPool;
+    ze_context_handle_t defaultContext = nullptr;
 
     std::unique_ptr<NEO::OsLibrary> rtasLibraryHandle;
     bool rtasLibraryUnavailable = false;
@@ -176,6 +177,11 @@ struct DriverHandleImp : public DriverHandle {
     int setErrorDescription(const std::string &str) override;
     ze_result_t getErrorDescription(const char **ppString) override;
     ze_result_t clearErrorDescription() override;
+
+    ze_context_handle_t getDefaultContext() const override {
+        return defaultContext;
+    }
+    void setupDevicesToExpose();
 
   protected:
     NEO::GraphicsAllocation *getPeerAllocation(Device *device,

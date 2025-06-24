@@ -45,7 +45,7 @@ const RuntimeCapabilityTable LNL::capabilityTable{
     aub_stream::ENGINE_CCS,                                    // defaultEngineType
     0,                                                         // maxRenderFrequency
     30,                                                        // clVersionSupport
-    CmdServicesMemTraceVersion::DeviceValues::Lnl,             // aubDeviceId
+    AubMemDump::CmdServicesMemTraceVersion::DeviceValues::Lnl, // aubDeviceId
     0,                                                         // extraQuantityThreadsPerEU
     128,                                                       // maxProgrammableSlmSize
     sizeof(LNL::GRF),                                          // grfSize
@@ -56,7 +56,6 @@ const RuntimeCapabilityTable LNL::capabilityTable{
     true,                                                      // ftrSupportsFP64
     false,                                                     // ftrSupportsFP64Emulation
     true,                                                      // ftrSupports64BitMath
-    true,                                                      // ftrSvm
     false,                                                     // ftrSupportsCoherency
     false,                                                     // ftrRenderCompressedBuffers
     false,                                                     // ftrRenderCompressedImages
@@ -67,7 +66,6 @@ const RuntimeCapabilityTable LNL::capabilityTable{
     true,                                                      // supportsOcl21Features
     true,                                                      // supportsOnDemandPageFaults
     true,                                                      // supportsIndependentForwardProgress
-    false,                                                     // hostPtrTrackingEnabled
     true,                                                      // isIntegratedDevice
     false,                                                     // supportsMediaBlock
     false,                                                     // p2pAccessSupported

@@ -16,6 +16,7 @@ using Family = NEO::Gen12LpFamily;
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/helpers/address_patch.h"
 #include "shared/source/helpers/blit_commands_helper_base.inl"
+#include "shared/source/helpers/blit_commands_helper_from_gen12lp_to_xe3.inl"
 #include "shared/source/helpers/populate_factory.h"
 #include "shared/source/helpers/state_base_address_tgllp_and_later.inl"
 
@@ -128,7 +129,7 @@ inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingNoPostSyn
 
 template <typename GfxFamily>
 inline size_t CommandStreamReceiverHw<GfxFamily>::getCmdSizeForStallingPostSyncCommands() const {
-    return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekRootDeviceEnvironment(), false);
+    return MemorySynchronizationCommands<GfxFamily>::getSizeForBarrierWithPostSyncOperation(peekRootDeviceEnvironment(), true);
 }
 
 template <typename GfxFamily>
@@ -311,8 +312,8 @@ void BlitCommandsHelper<Family>::appendBlitCommandsForImages(const BlitPropertie
 }
 
 template <>
-void BlitCommandsHelper<Family>::dispatchBlitMemoryByteFill(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
-    NEO::BlitCommandsHelper<Family>::dispatchBlitMemoryFill(blitProperties, linearStream, rootDeviceEnvironment);
+BlitCommandsResult BlitCommandsHelper<Family>::dispatchBlitMemoryByteFill(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
+    return NEO::BlitCommandsHelper<Family>::dispatchBlitMemoryFill(blitProperties, linearStream, rootDeviceEnvironment);
 }
 
 template <>
@@ -331,6 +332,8 @@ bool BlitCommandsHelper<Family>::preBlitCommandWARequired() {
 
 template class CommandStreamReceiverHw<Family>;
 template struct BlitCommandsHelper<Family>;
+
+template void BlitCommandsHelper<Family>::applyAdditionalBlitProperties<typename Family::XY_BLOCK_COPY_BLT>(const BlitProperties &blitProperties, typename Family::XY_BLOCK_COPY_BLT &blitCmd, const RootDeviceEnvironment &rootDeviceEnvironment, bool last);
 
 const Family::GPGPU_WALKER Family::cmdInitGpgpuWalker = Family::GPGPU_WALKER::sInit();
 const Family::INTERFACE_DESCRIPTOR_DATA Family::cmdInitInterfaceDescriptorData = Family::INTERFACE_DESCRIPTOR_DATA::sInit();

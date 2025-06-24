@@ -302,11 +302,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
         downloadAllocationCalled = true;
     }
 
-    bool checkDcFlushRequiredForDcMitigationAndReset() override {
-        this->registeredDcFlushForDcFlushMitigation = this->requiresDcFlush;
-        return BaseClass::checkDcFlushRequiredForDcMitigationAndReset();
-    }
-
     WaitStatus waitForCompletionWithTimeout(const WaitParams &params, TaskCountType taskCountToWait) override {
         std::lock_guard<std::mutex> guard(mutex);
         latestWaitForCompletionWithTimeoutTaskCount.store(taskCountToWait);
@@ -330,6 +325,11 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     }
 
     WaitStatus waitForTaskCountWithKmdNotifyFallback(TaskCountType taskCountToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, QueueThrottle throttle) override {
+        if (captureWaitForTaskCountWithKmdNotifyInputParams) {
+            static std::mutex waitForTaskCountWithKmdNotifyInputParamsMtx;
+            std::unique_lock<std::mutex> lock(waitForTaskCountWithKmdNotifyInputParamsMtx);
+            waitForTaskCountWithKmdNotifyInputParams.push_back({taskCountToWait, flushStampToWait, useQuickKmdSleep, throttle});
+        }
         if (waitForTaskCountWithKmdNotifyFallbackReturnValue.has_value()) {
             return *waitForTaskCountWithKmdNotifyFallbackReturnValue;
         }
@@ -521,7 +521,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
 
     SubmissionStatus sendRenderStateCacheFlush() override {
         this->renderStateCacheFlushed = true;
-        this->renderStateCacheDcFlushForced = this->requiresDcFlush;
         if (callBaseSendRenderStateCacheFlush) {
             return BaseClass::sendRenderStateCacheFlush();
         }
@@ -591,6 +590,15 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
 
     const IndirectHeap *recordedSsh = nullptr;
 
+    struct WaitForTaskCountWithKmdNotifyParams {
+        TaskCountType taskCountToWait;
+        FlushStamp flushStampToWait;
+        bool useQuickKmdSleep;
+        QueueThrottle throttle;
+    };
+
+    std::vector<WaitForTaskCountWithKmdNotifyParams> waitForTaskCountWithKmdNotifyInputParams;
+
     std::mutex mutex;
     std::atomic<uint32_t> recursiveLockCounter;
     std::atomic<uint32_t> waitForCompletionWithTimeoutTaskCountCalled{0};
@@ -623,7 +631,6 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     std::atomic<bool> latestDownloadAllocationsBlocking = false;
 
     bool renderStateCacheFlushed = false;
-    bool renderStateCacheDcFlushForced = false;
     bool cpuCopyForHostPtrSurfaceAllowed = false;
     bool createPageTableManagerCalled = false;
     bool recordFlushedBatchBuffer = false;
@@ -653,10 +660,10 @@ class UltCommandStreamReceiver : public CommandStreamReceiverHw<GfxFamily> {
     bool isKmdWaitOnTaskCountAllowedValue = false;
     bool stopDirectSubmissionCalled = false;
     bool stopDirectSubmissionCalledBlocking = false;
-    bool registeredDcFlushForDcFlushMitigation = false;
     bool isUserFenceWaitSupported = false;
     bool isAnyDirectSubmissionEnabledCallBase = true;
     bool isAnyDirectSubmissionEnabledResult = true;
+    std::atomic_bool captureWaitForTaskCountWithKmdNotifyInputParams = false;
 };
 
 } // namespace NEO

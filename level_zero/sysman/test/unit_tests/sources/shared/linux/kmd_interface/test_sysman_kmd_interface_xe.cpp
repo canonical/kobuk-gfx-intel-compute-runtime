@@ -143,7 +143,7 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCallingGetNativ
 TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCallingGetPowerDomainsThenValidPowerDomainsAreReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->getSysmanKmdInterface();
 
-    std::vector<zes_power_domain_t> validPowerDomains = {ZES_POWER_DOMAIN_PACKAGE};
+    std::vector<zes_power_domain_t> validPowerDomains = {ZES_POWER_DOMAIN_PACKAGE, ZES_POWER_DOMAIN_CARD, ZES_POWER_DOMAIN_MEMORY, ZES_POWER_DOMAIN_GPU};
     auto powerDomains = pSysmanKmdInterface->getPowerDomains();
 
     std::unordered_set<zes_power_domain_t> outputPowerDomainList(powerDomains.begin(), powerDomains.end());
@@ -171,15 +171,9 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenCheckingWhetherClientIn
     EXPECT_TRUE(pSysmanKmdInterface->clientInfoAvailableInFdInfo());
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCheckingSupportForVfEngineUtilizationThenFalseValueIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCheckingSupportForVfEngineUtilizationThenTrueValueIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-    EXPECT_FALSE(pSysmanKmdInterface->isVfEngineUtilizationSupported());
-}
-
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenGettingBusyAndTotalTicksConfigsThenErrorIsReturned) {
-    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-    std::pair<uint64_t, uint64_t> configPair;
-    EXPECT_EQ(pSysmanKmdInterface->getBusyAndTotalTicksConfigs(0, 0, 1, configPair), ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE);
+    EXPECT_TRUE(pSysmanKmdInterface->isVfEngineUtilizationSupported());
 }
 
 TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCallingGpuBindAndUnbindEntryThenProperStringIsReturned) {
@@ -188,12 +182,13 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCallingGpuBindA
     EXPECT_STREQ("/sys/bus/pci/drivers/xe/unbind", pSysmanKmdInterface->getGpuUnBindEntry().c_str());
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenGetEnergyCounterNodeFilePathIsCalledForDifferentPowerDomainsThenProperPathIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenGetEnergyCounterNodeFileIsCalledForDifferentPowerDomainsThenProperFileNameIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
     std::string expectedFilePath = "energy1_input";
+    EXPECT_EQ(expectedFilePath, pSysmanKmdInterface->getEnergyCounterNodeFile(ZES_POWER_DOMAIN_CARD));
+    expectedFilePath = "energy2_input";
     EXPECT_EQ(expectedFilePath, pSysmanKmdInterface->getEnergyCounterNodeFile(ZES_POWER_DOMAIN_PACKAGE));
     expectedFilePath = "";
-    EXPECT_EQ(expectedFilePath, pSysmanKmdInterface->getEnergyCounterNodeFile(ZES_POWER_DOMAIN_CARD));
     EXPECT_EQ(expectedFilePath, pSysmanKmdInterface->getEnergyCounterNodeFile(ZES_POWER_DOMAIN_UNKNOWN));
 }
 
@@ -271,6 +266,29 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndPmuInterfaceOpenFailsFor
     pPmuInterface->mockPerfEventOpenFailAtCount = 3;
     pPmuInterface->mockPmuFd = 10;
     EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGetPmuConfigsFailsWhenCallingGetBusyAndTotalTicksConfigsForVfThenErrorIsReturned) {
+
+    pPmuInterface->mockEventConfigReturnValue.push_back(-1);
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    std::pair<uint64_t, uint64_t> configPair;
+    EXPECT_EQ(pSysmanKmdInterface->getBusyAndTotalTicksConfigsForVf(pPmuInterface.get(), 0, 0, 1, 0, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGetPmuConfigsForVfFailsWhenCallingGetBusyAndTotalTicksConfigsForVfThenErrorIsReturned) {
+    pPmuInterface->mockVfConfigReturnValue.push_back(-1);
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    std::pair<uint64_t, uint64_t> configPair;
+    EXPECT_EQ(pSysmanKmdInterface->getBusyAndTotalTicksConfigsForVf(pPmuInterface.get(), 0, 0, 1, 0, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenCallingGetBusyAndTotalTicksConfigsForVfThenValidConfigsAndSuccessIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    std::pair<uint64_t, uint64_t> configPair;
+    EXPECT_EQ(pSysmanKmdInterface->getBusyAndTotalTicksConfigsForVf(pPmuInterface.get(), 0, 0, 1, 0, configPair), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(pPmuInterface->mockActiveTicksConfig, configPair.first);
+    EXPECT_EQ(pPmuInterface->mockTotalTicksConfig, configPair.second);
 }
 
 } // namespace ult

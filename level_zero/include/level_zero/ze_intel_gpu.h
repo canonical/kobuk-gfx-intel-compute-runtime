@@ -63,7 +63,7 @@ typedef struct _ze_intel_device_module_dp_exp_properties_t {
 } ze_intel_device_module_dp_exp_properties_t;
 
 #ifndef ZE_INTEL_COMMAND_LIST_MEMORY_SYNC
-/// @brief wait on memory extension name
+/// @brief Cmd List memory sync extension name
 #define ZE_INTEL_COMMAND_LIST_MEMORY_SYNC "ZE_intel_experimental_command_list_memory_sync"
 #endif // ZE_INTEL_COMMAND_LIST_MEMORY_SYNC
 
@@ -274,6 +274,135 @@ zeIntelKernelGetBinaryExp(
     size_t *pSize,              ///< [in, out] pointer to variable with size of GEN ISA binary
     char *pKernelBinary         ///< [in,out] pointer to storage area for GEN ISA binary function
 );
+
+/// @brief Get default context associated with driver
+///
+/// @details
+///     - The application may call this function from simultaneous threads.
+///     - The implementation of this function should be lock-free.
+///     - Default context contains all devices within driver instance
+/// @returns
+///     - Context handle associated with driver
+ze_context_handle_t ZE_APICALL zeDriverGetDefaultContext(ze_driver_handle_t hDriver); ///> [in] handle of the driver
+
+/// @brief Get default context associated with default driver
+///
+/// @details
+///     - The application may call this function from simultaneous threads.
+///     - The implementation of this function should be lock-free.
+///     - Default context contains all devices within default driver instance
+/// @returns
+///     - Context handle associated with default driver
+ze_context_handle_t ZE_APICALL zerDriverGetDefaultContext();
+
+/// @brief Get Device Identifier
+///
+/// @details
+///     - The application may call this function from simultaneous threads.
+///     - The implementation of this function should be lock-free.
+///     - Returned identifier is a 32-bit unsigned integer that is unique to the driver.
+///     - The identifier can be used then in zerIdentifierTranslateToDeviceHandle to get the device handle.
+/// @returns
+///     - 32-bit unsigned integer identifier
+uint32_t ZE_APICALL zerDeviceTranslateToIdentifier(ze_device_handle_t hDevice); ///< [in] handle of the device
+
+/// @brief Translate Device Identifier to Device Handle from default Driver
+///
+/// @details
+///    - The application may call this function from simultaneous threads.
+///    - The implementation of this function should be lock-free.
+///    - Returned device is associated to default driver handle.
+/// @returns
+///     - device handle associated with the identifier
+ze_device_handle_t ZE_APICALL zerIdentifierTranslateToDeviceHandle(uint32_t identifier); ///< [in] integer identifier of the device
+
+/// @brief Global device synchronization
+///
+/// @details
+///    - The application may call this function from simultaneous threads.
+///    - The implementation of this function should be lock-free.
+///    - Ensures that everything that was submitted to the device is completed.
+///    - Ensures that all submissions in all queues on device are completed.
+///    - It is not allowed to call this function while some command list are in graph capture mode.
+///    - Returns error if error is detected during execution on device.
+///    - Hangs indefinitely if GPU execution is blocked on non signaled event.
+///
+/// @returns
+///     - ::ZE_RESULT_SUCCESS
+///     - ::ZE_RESULT_ERROR_DEVICE_LOST
+ze_result_t ZE_APICALL zeDeviceSynchronize(ze_device_handle_t hDevice); ///> [in] handle of the device
+
+/// @brief Get priority levels
+///
+/// @details
+///    - The application may call this function from simultaneous threads.
+///    - The implementation of this function should be lock-free.
+///    - Returns priority levels supported by the device
+///    - lowestPriority reports the numerical value that corresponds to lowest queue priority
+///    - highesPriority reports the numerical value that corresponds to highest queue priority
+///    - Lower numbers indicate greater priorities
+///    - The range of meaningful queue properties is represented by [*highestPriority, *lowestPriority]
+///    - Priority passed upon queue creation would automatically clamp down or up to the nearest supported value
+///    - 0 means default priority
+///
+/// @returns
+///     - ::ZE_RESULT_SUCCESS
+///     - ::ZE_RESULT_ERROR_INVALID_NULL_POINTER
+ze_result_t ZE_APICALL zeDeviceGetPriorityLevels(
+    ze_device_handle_t hDevice,
+    int *lowestPriority,
+    int *highestPriority);
+
+///////////////////////////////////////////////////////////////////////////////
+/// @brief Descriptor used for setting priority on command queues and immediate command lists.
+/// This structure may be passed as pNext member of ::ze_command_queue_desc_t.
+typedef struct _ze_queue_priority_desc_t {
+    ze_structure_type_t stype; ///< [in] type of this structure
+    const void *pNext;         ///< [in][optional] must be null or a pointer to an extension-specific structure
+    int priority;              ///< [in] priority of the queue
+} ze_queue_priority_desc_t;
+
+/// @brief Append with arguments
+///
+/// @details
+///    - The application may call this function from simultaneous threads.
+///    - The implementation of this function should be lock-free.
+///    - Appends kernel to command list with arguments.
+///    - Kernel object state is updated with new arguments, as if separate zeKernelSetArgumentValue were called.
+///    - If argument is SLM (size), then SLM size in bytes for this resource is provided under pointer on specific index and its type is size_t.
+///    - If argument is an immediate type (i.e. structure, non pointer type), then values under pointer must contain full size of immediate type.
+///
+/// @returns
+///     - ::ZE_RESULT_SUCCESS
+///     - ::ZE_RESULT_ERROR_DEVICE_LOST
+///     - ::ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY
+///     - ::ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY
+///     - ::ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION
+///     - ::ZE_RESULT_ERROR_INVALID_NULL_HANDLE
+///         + `nullptr == hCommandList`
+///         + `nullptr == hKernel`
+///     - ::ZE_RESULT_ERROR_INVALID_NULL_POINTER
+///         + `nullptr == pArguments`
+///     - ::ZE_RESULT_ERROR_INVALID_SYNCHRONIZATION_OBJECT
+///     - ::ZE_RESULT_ERROR_INVALID_SIZE
+///         + `(nullptr == phWaitEvents) && (0 < numWaitEvents)`
+typedef struct _ze_group_size_t {
+    uint32_t groupSizeX; ///< [in] local work-group size in X dimension
+    uint32_t groupSizeY; ///< [in] local work-group size in Y dimension
+    uint32_t groupSizeZ; ///< [in] local work-group size in Z dimension
+
+} ze_group_size_t;
+
+ze_result_t ZE_APICALL zeCommandListAppendLaunchKernelWithArguments(
+    ze_command_list_handle_t hCommandList, ///< [in] handle of the command list
+    ze_kernel_handle_t hKernel,            ///< [in] handle of the kernel object
+    const ze_group_count_t groupCounts,    ///< [in] thread group counts
+    const ze_group_size_t groupSizes,      ///< [in] thread group sizes
+    void **pArguments,                     ///< [in] kernel arguments; pointer to list where each argument represents a pointer to the argument value on specific index
+    void *pNext,                           ///< [in][optional] extensions
+    ze_event_handle_t hSignalEvent,        ///< [in][optional] handle of the event to signal on completion
+    uint32_t numWaitEvents,                ///< [in][optional] number of events to wait on before launching
+    ze_event_handle_t *phWaitEvents);      ///< [in][optional][range(0, numWaitEvents)] handle of the events to wait on before launching
 
 #if defined(__cplusplus)
 } // extern "C"

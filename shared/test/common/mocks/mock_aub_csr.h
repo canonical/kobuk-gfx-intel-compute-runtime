@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -43,16 +43,6 @@ struct MockAubFileStreamMockMmioWrite : public AubMemDump::AubFileStream {
 };
 
 template <typename GfxFamily>
-struct MockAubCsrToTestDumpContext : public AUBCommandStreamReceiverHw<GfxFamily> {
-    using AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw;
-
-    void addContextToken(uint32_t dumpHandle) override {
-        handle = dumpHandle;
-    }
-    uint32_t handle = 0;
-};
-
-template <typename GfxFamily>
 struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiverHw<GfxFamily>::defaultSshSize;
     using AUBCommandStreamReceiverHw<GfxFamily>::taskCount;
@@ -62,6 +52,11 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     using AUBCommandStreamReceiverHw<GfxFamily>::writeMemory;
     using AUBCommandStreamReceiverHw<GfxFamily>::pollForCompletion;
     using AUBCommandStreamReceiverHw<GfxFamily>::AUBCommandStreamReceiverHw;
+
+    MockAubCsr(ExecutionEnvironment &executionEnvironment,
+               uint32_t rootDeviceIndex,
+               const DeviceBitfield deviceBitfield)
+        : AUBCommandStreamReceiverHw<GfxFamily>("", true, executionEnvironment, rootDeviceIndex, deviceBitfield) {}
 
     CompletionStamp flushTask(LinearStream &commandStream, size_t commandStreamStart,
                               const IndirectHeap *dsh, const IndirectHeap *ioh, const IndirectHeap *ssh,
@@ -172,7 +167,12 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     bool addAubCommentCalled = false;
     bool dumpAllocationCalled = false;
     bool skipTaskCountCheckForCompletionPoll = false;
+    bool lockStreamCalled = false;
 
+    std::unique_lock<std::mutex> lockStream() override {
+        lockStreamCalled = true;
+        return AUBCommandStreamReceiverHw<GfxFamily>::lockStream();
+    }
     void initFile(const std::string &fileName) override {
         fileIsOpen = true;
         openFileName = fileName;
@@ -189,8 +189,6 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     }
     bool fileIsOpen = false;
     std::string openFileName = "";
-
-    ADDMETHOD_NOBASE(addPatchInfoComments, bool, true, ());
 
     using CommandStreamReceiverHw<GfxFamily>::localMemoryEnabled;
 };

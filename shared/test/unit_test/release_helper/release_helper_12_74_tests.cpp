@@ -35,7 +35,8 @@ TEST_F(ReleaseHelper1274Tests, whenGettingCapabilitiesThenCorrectPropertiesAreRe
         EXPECT_TRUE(releaseHelper->isDirectSubmissionSupported());
         EXPECT_FALSE(releaseHelper->isAuxSurfaceModeOverrideRequired());
         EXPECT_FALSE(releaseHelper->isRcsExposureDisabled());
-        EXPECT_TRUE(releaseHelper->isBindlessAddressingDisabled());
+        EXPECT_FALSE(releaseHelper->isBindlessAddressingDisabled());
+        EXPECT_TRUE(releaseHelper->isGlobalBindlessAllocatorEnabled());
         EXPECT_EQ(8u, releaseHelper->getNumThreadsPerEu());
         EXPECT_EQ(0u, releaseHelper->getStackSizePerRay());
         EXPECT_TRUE(releaseHelper->isRayTracingSupported());
@@ -73,6 +74,10 @@ TEST_F(ReleaseHelper1274Tests, whenIsDummyBlitWaRequiredCalledThenFalseReturned)
     whenIsDummyBlitWaRequiredCalledThenFalseReturned();
 }
 
+TEST_F(ReleaseHelper1274Tests, whenGettingNumThreadsPerEuThenCorrectValueIsReturnedBasedOnOverrideNumThreadsPerEuDebugKey) {
+    whenGettingNumThreadsPerEuThenCorrectValueIsReturnedBasedOnOverrideNumThreadsPerEuDebugKey();
+}
+
 TEST_F(ReleaseHelper1274Tests, whenGettingPreferredSlmSizeThenAllEntriesHaveCorrectValues) {
     for (auto &revision : getRevisions()) {
         ipVersion.revision = revision;
@@ -99,5 +104,13 @@ TEST_F(ReleaseHelper1274Tests, whenGettingPreferredSlmSizeThenAllEntriesHaveCorr
 
         EXPECT_EQ(std::numeric_limits<uint32_t>::max(), preferredSlmValueArray[5].upperLimit);
         EXPECT_EQ(13u, preferredSlmValueArray[5].valueToProgram);
+    }
+}
+TEST_F(ReleaseHelper1274Tests, whenIsBlitImageAllowedForDepthFormatCalledThenFalseReturned) {
+    for (auto &revision : getRevisions()) {
+        ipVersion.revision = revision;
+        releaseHelper = ReleaseHelper::create(ipVersion);
+        ASSERT_NE(nullptr, releaseHelper);
+        EXPECT_FALSE(releaseHelper->isBlitImageAllowedForDepthFormat());
     }
 }

@@ -49,6 +49,7 @@
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/fabric/fabric.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
+#include "level_zero/core/source/helpers/default_descriptors.h"
 #include "level_zero/core/source/helpers/properties_parser.h"
 #include "level_zero/core/source/image/image.h"
 #include "level_zero/core/source/module/module.h"
@@ -65,10 +66,6 @@
 
 #include <algorithm>
 #include <array>
-
-namespace NEO {
-bool releaseFP64Override();
-} // namespace NEO
 
 namespace L0 {
 
@@ -222,6 +219,7 @@ ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
     uint32_t index = 0;
     uint32_t commandQueueGroupOrdinal = desc->commandQueueGroupOrdinal;
     NEO::SynchronizedDispatchMode syncDispatchMode = NEO::SynchronizedDispatchMode::disabled;
+    bool copyOffloadHint = false;
     adjustCommandQueueDesc(commandQueueGroupOrdinal, index);
 
     NEO::EngineGroupType engineGroupType = getEngineGroupTypeForOrdinal(commandQueueGroupOrdinal);
@@ -242,6 +240,10 @@ ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
         auto newCreateFunc = getCmdListCreateFunc(pNext);
         if (newCreateFunc) {
             createCommandList = newCreateFunc;
+        }
+
+        if (static_cast<uint32_t>(pNext->stype) == ZEX_INTEL_STRUCTURE_TYPE_QUEUE_COPY_OPERATIONS_OFFLOAD_HINT_EXP_PROPERTIES) {
+            copyOffloadHint = reinterpret_cast<const zex_intel_queue_copy_operations_offload_hint_exp_desc_t *>(pNext)->copyOffloadEnabled;
         }
 
         pNext = reinterpret_cast<const ze_base_desc_t *>(pNext->pNext);
@@ -266,6 +268,15 @@ ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
         }
     }
 
+    auto &productHelper = getProductHelper();
+
+    const bool copyOffloadAllowed = cmdList->isInOrderExecutionEnabled() && !productHelper.isDcFlushAllowed() &&
+                                    (getL0GfxCoreHelper().getDefaultCopyOffloadMode(productHelper.useAdditionalBlitProperties()) != CopyOffloadModes::dualStream);
+
+    if (copyOffloadHint && copyOffloadAllowed) {
+        cmdList->enableCopyOperationOffload();
+    }
+
     if (returnValue != ZE_RESULT_SUCCESS) {
         cmdList->destroy();
         cmdList = nullptr;
@@ -288,11 +299,17 @@ ze_result_t DeviceImp::createInternalCommandList(const ze_command_list_desc_t *d
 
 ze_result_t DeviceImp::createCommandListImmediate(const ze_command_queue_desc_t *desc,
                                                   ze_command_list_handle_t *phCommandList) {
-    if (!this->isQueueGroupOrdinalValid(desc->ordinal)) {
+
+    ze_command_queue_desc_t commandQueueDesc = DefaultDescriptors::commandQueueDesc;
+
+    if (desc) {
+        commandQueueDesc = *desc;
+    }
+
+    if (!this->isQueueGroupOrdinalValid(commandQueueDesc.ordinal)) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
-    ze_command_queue_desc_t commandQueueDesc = *desc;
     adjustCommandQueueDesc(commandQueueDesc.ordinal, commandQueueDesc.index);
 
     NEO::EngineGroupType engineGroupType = getEngineGroupTypeForOrdinal(commandQueueDesc.ordinal);
@@ -301,7 +318,7 @@ ze_result_t DeviceImp::createCommandListImmediate(const ze_command_queue_desc_t 
     ze_result_t returnValue = ZE_RESULT_SUCCESS;
     *phCommandList = CommandList::createImmediate(productFamily, this, &commandQueueDesc, false, engineGroupType, returnValue);
     if (returnValue == ZE_RESULT_SUCCESS) {
-        CommandList::fromHandle(*phCommandList)->setOrdinal(desc->ordinal);
+        CommandList::fromHandle(*phCommandList)->setOrdinal(commandQueueDesc.ordinal);
     }
 
     return returnValue;
@@ -351,7 +368,7 @@ ze_result_t DeviceImp::createCommandQueue(const ze_command_queue_desc_t *desc,
 
     auto queueProperties = CommandQueue::extractQueueProperties(*desc);
 
-    auto ret = getCsrForOrdinalAndIndex(&csr, commandQueueDesc.ordinal, commandQueueDesc.index, commandQueueDesc.priority, queueProperties.interruptHint);
+    auto ret = getCsrForOrdinalAndIndex(&csr, commandQueueDesc.ordinal, commandQueueDesc.index, commandQueueDesc.priority, queueProperties.priorityLevel, queueProperties.interruptHint);
     if (ret != ZE_RESULT_SUCCESS) {
         return ret;
     }
@@ -431,6 +448,12 @@ uint32_t DeviceImp::getCopyQueueGroupsFromSubDevice(uint32_t numberOfSubDeviceCo
 }
 
 uint32_t DeviceImp::getCopyEngineOrdinal() const {
+    auto retVal = tryGetCopyEngineOrdinal();
+    UNRECOVERABLE_IF(!retVal.has_value());
+    return retVal.value();
+}
+
+std::optional<uint32_t> DeviceImp::tryGetCopyEngineOrdinal() const {
     auto &engineGroups = neoDevice->getRegularEngineGroups();
     uint32_t i = 0;
     for (; i < static_cast<uint32_t>(engineGroups.size()); i++) {
@@ -439,9 +462,10 @@ uint32_t DeviceImp::getCopyEngineOrdinal() const {
         }
     }
 
-    UNRECOVERABLE_IF(this->subDeviceCopyEngineGroups.size() == 0);
-
-    return i;
+    if (this->subDeviceCopyEngineGroups.size() != 0) {
+        return i;
+    }
+    return std::nullopt;
 }
 
 ze_result_t DeviceImp::getCommandQueueGroupProperties(uint32_t *pCount,
@@ -1061,7 +1085,10 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
                 ze_device_ip_version_ext_t *zeDeviceIpVersion = reinterpret_cast<ze_device_ip_version_ext_t *>(extendedProperties);
                 NEO::Device *activeDevice = getActiveDevice();
                 auto &compilerProductHelper = activeDevice->getCompilerProductHelper();
-                zeDeviceIpVersion->ipVersion = compilerProductHelper.getHwIpVersion(hardwareInfo);
+                zeDeviceIpVersion->ipVersion = hardwareInfo.ipVersionOverrideExposedToTheApplication.value;
+                if (0 == zeDeviceIpVersion->ipVersion) {
+                    zeDeviceIpVersion->ipVersion = compilerProductHelper.getHwIpVersion(hardwareInfo);
+                }
             } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_PROPERTIES) {
                 ze_event_query_kernel_timestamps_ext_properties_t *kernelTimestampExtProperties = reinterpret_cast<ze_event_query_kernel_timestamps_ext_properties_t *>(extendedProperties);
                 kernelTimestampExtProperties->flags = ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_FLAG_KERNEL | ZE_EVENT_QUERY_KERNEL_TIMESTAMPS_EXT_FLAG_SYNCHRONIZED;
@@ -1507,7 +1534,7 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool 
 
     std::vector<char> stateSaveAreaHeader;
 
-    if (neoDevice->getDebugger() || neoDevice->getPreemptionMode() == NEO::PreemptionMode::MidThread) {
+    if (neoDevice->getDebugger()) {
         if (neoDevice->getCompilerInterface()) {
             if (rootDeviceEnvironment.executionEnvironment.getDebuggingMode() == NEO::DebuggingMode::offline) {
                 if (NEO::SipKernel::getSipKernel(*neoDevice, nullptr).getCtxOffset() == 0) {
@@ -1605,6 +1632,11 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool 
     device->populateSubDeviceCopyEngineGroups();
     auto &productHelper = device->getProductHelper();
     device->calculationForDisablingEuFusionWithDpasNeeded = productHelper.isCalculationForDisablingEuFusionWithDpasNeeded(hwInfo);
+
+    auto numPriorities = static_cast<int>(device->getNEODevice()->getGfxCoreHelper().getQueuePriorityLevels());
+
+    device->queuePriorityHigh = -(numPriorities + 1) / 2 + 1;
+    device->queuePriorityLow = (numPriorities) / 2;
 
     return device;
 }
@@ -1795,7 +1827,7 @@ bool DeviceImp::isQueueGroupOrdinalValid(uint32_t ordinal) {
     return true;
 }
 
-ze_result_t DeviceImp::getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index, ze_command_queue_priority_t priority, bool allocateInterrupt) {
+ze_result_t DeviceImp::getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr, uint32_t ordinal, uint32_t index, ze_command_queue_priority_t priority, int priorityLevel, bool allocateInterrupt) {
     auto &engineGroups = getActiveDevice()->getRegularEngineGroups();
     uint32_t numEngineGroups = static_cast<uint32_t>(engineGroups.size());
 
@@ -1845,6 +1877,15 @@ ze_result_t DeviceImp::getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr
     auto engineGroupType = getEngineGroupTypeForOrdinal(ordinal);
     bool copyOnly = NEO::EngineHelper::isCopyOnlyEngineType(engineGroupType);
 
+    if (priorityLevel < 0) {
+        priority = ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_HIGH;
+    } else if (priorityLevel == this->queuePriorityLow) {
+        DEBUG_BREAK_IF(this->queuePriorityLow == 0);
+        priority = ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_LOW;
+    } else if (priorityLevel > 0) {
+        priority = ZE_COMMAND_QUEUE_PRIORITY_NORMAL;
+    }
+
     if (priority == ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_HIGH) {
         contextPriority = NEO::EngineUsage::highPriority;
     } else if (isSuitableForLowPriority(priority, copyOnly)) {
@@ -1889,18 +1930,18 @@ ze_result_t DeviceImp::getCsrForOrdinalAndIndex(NEO::CommandStreamReceiver **csr
     auto &osContext = (*csr)->getOsContext();
 
     if (secondaryContextsEnabled) {
-        selectedDevice->tryAssignSecondaryContext(osContext.getEngineType(), contextPriority, csr, allocateInterrupt);
+        selectedDevice->tryAssignSecondaryContext(osContext.getEngineType(), contextPriority, priorityLevel, csr, allocateInterrupt);
     }
 
     return ZE_RESULT_SUCCESS;
 }
 
-bool DeviceImp::tryAssignSecondaryContext(aub_stream::EngineType engineType, NEO::EngineUsage engineUsage, NEO::CommandStreamReceiver **csr, bool allocateInterrupt) {
+bool DeviceImp::tryAssignSecondaryContext(aub_stream::EngineType engineType, NEO::EngineUsage engineUsage, int priorityLevel, NEO::CommandStreamReceiver **csr, bool allocateInterrupt) {
     if (neoDevice->isSecondaryContextEngineType(engineType)) {
         NEO::EngineTypeUsage engineTypeUsage;
         engineTypeUsage.first = engineType;
         engineTypeUsage.second = engineUsage;
-        auto engine = neoDevice->getSecondaryEngineCsr(engineTypeUsage, allocateInterrupt);
+        auto engine = neoDevice->getSecondaryEngineCsr(engineTypeUsage, priorityLevel, allocateInterrupt);
         if (engine) {
             *csr = engine->commandStreamReceiver;
             return true;
@@ -2129,6 +2170,31 @@ uint32_t DeviceImp::getEventMaxKernelCount() const {
     auto &l0GfxCoreHelper = this->neoDevice->getRootDeviceEnvironment().getHelper<L0GfxCoreHelper>();
 
     return l0GfxCoreHelper.getEventMaxKernelCount(hardwareInfo);
+}
+
+ze_result_t DeviceImp::synchronize() {
+    for (auto &engine : neoDevice->getAllEngines()) {
+        auto waitStatus = engine.commandStreamReceiver->waitForTaskCountWithKmdNotifyFallback(
+            engine.commandStreamReceiver->peekTaskCount(),
+            engine.commandStreamReceiver->obtainCurrentFlushStamp(),
+            false,
+            NEO::QueueThrottle::MEDIUM);
+        if (waitStatus == NEO::WaitStatus::gpuHang) {
+            return ZE_RESULT_ERROR_DEVICE_LOST;
+        }
+    }
+    for (auto &secondaryCsr : neoDevice->getSecondaryCsrs()) {
+        auto waitStatus = secondaryCsr->waitForTaskCountWithKmdNotifyFallback(
+            secondaryCsr->peekTaskCount(),
+            secondaryCsr->obtainCurrentFlushStamp(),
+            false,
+            NEO::QueueThrottle::MEDIUM);
+        if (waitStatus == NEO::WaitStatus::gpuHang) {
+            return ZE_RESULT_ERROR_DEVICE_LOST;
+        }
+    }
+
+    return ZE_RESULT_SUCCESS;
 }
 
 } // namespace L0

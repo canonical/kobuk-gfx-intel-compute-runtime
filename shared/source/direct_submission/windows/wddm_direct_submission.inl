@@ -86,7 +86,7 @@ void WddmDirectSubmission<GfxFamily, Dispatcher>::ensureRingCompletion() {
 
 template <typename GfxFamily, typename Dispatcher>
 bool WddmDirectSubmission<GfxFamily, Dispatcher>::allocateOsResources() {
-    bool ret = wddm->getWddmInterface()->createMonitoredFenceForDirectSubmission(ringFence, *this->osContextWin);
+    bool ret = wddm->getWddmInterface()->createFenceForDirectSubmission(ringFence, *this->osContextWin);
     perfLogResidencyVariadicLog(wddm->getResidencyLogger(), "ULLS resource allocation finished with: %d\n", ret);
 
     this->ringBufferEndCompletionTagData.tagAddress = this->semaphoreGpuVa + offsetof(RingSemaphoreData, tagAllocation);
@@ -248,6 +248,8 @@ void WddmDirectSubmission<GfxFamily, Dispatcher>::updateMonitorFenceValueForResi
 template <typename GfxFamily, typename Dispatcher>
 inline void WddmDirectSubmission<GfxFamily, Dispatcher>::unblockPagingFenceSemaphore(uint64_t pagingFenceValue) {
     this->wddm->waitOnPagingFenceFromCpu(pagingFenceValue, true);
+
+    typename DirectSubmissionHw<GfxFamily, Dispatcher>::SemaphoreFenceHelper fence(*this);
     this->semaphoreData->pagingFenceCounter = static_cast<uint32_t>(*this->wddm->getPagingFenceAddress());
 }
 

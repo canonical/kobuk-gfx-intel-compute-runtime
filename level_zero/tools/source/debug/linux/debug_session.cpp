@@ -687,7 +687,7 @@ ze_result_t DebugSessionLinux::getElfOffset(const zet_debug_memory_space_desc_t 
 ze_result_t DebugSessionLinux::updateStoppedThreadsAndCheckTriggerEvents(const AttentionEventFields &attention, uint32_t tileIndex, std::vector<EuThread::ThreadId> &threadsWithAttention) {
     auto vmHandle = getVmHandleFromClientAndlrcHandle(attention.clientHandle, attention.lrcHandle);
     if (vmHandle == invalidHandle) {
-        return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+        return ZE_RESULT_ERROR_UNKNOWN;
     }
 
     auto hwInfo = connectedDevice->getHwInfo();

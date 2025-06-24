@@ -863,12 +863,9 @@ struct ReadBufferStagingBufferTest : public EnqueueReadBufferHw {
     }
 
     void TearDown() override {
-        if (defaultHwInfo->capabilityTable.ftrSvm == false) {
-            return;
-        }
         EnqueueReadBufferHw::TearDown();
     }
-    constexpr static size_t chunkSize = MemoryConstants::megaByte * 2;
+    constexpr static size_t chunkSize = MemoryConstants::pageSize;
 
     unsigned char ptr[MemoryConstants::cacheLineSize];
     MockBuffer buffer;

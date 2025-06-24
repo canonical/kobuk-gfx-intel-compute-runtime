@@ -21,7 +21,7 @@
 namespace NEO {
 namespace ImplicitArgsHelper {
 std::array<uint8_t, 3> getDimensionOrderForLocalIds(const uint8_t *workgroupDimensionsOrder, std::optional<std::pair<bool, uint32_t>> hwGenerationOfLocalIdsParams) {
-    auto localIdsGeneratedByRuntime = !hwGenerationOfLocalIdsParams.has_value() || hwGenerationOfLocalIdsParams.value().first;
+    auto localIdsGeneratedByRuntime = !(hwGenerationOfLocalIdsParams.has_value() && hwGenerationOfLocalIdsParams.value().first);
 
     if (localIdsGeneratedByRuntime) {
         UNRECOVERABLE_IF(!workgroupDimensionsOrder);
@@ -48,14 +48,7 @@ uint32_t getSizeForImplicitArgsStruct(const ImplicitArgs *pImplicitArgs, const K
     if (!pImplicitArgs) {
         return 0;
     }
-    auto implicitArgsSize = pImplicitArgs->getSize();
-
-    auto patchImplicitArgsBufferInCrossThread = NEO::isValidOffset<>(kernelDescriptor.payloadMappings.implicitArgs.implicitArgsBuffer);
-    if (patchImplicitArgsBufferInCrossThread) {
-        return alignUp(implicitArgsSize, MemoryConstants::cacheLineSize);
-    } else {
-        return implicitArgsSize;
-    }
+    return pImplicitArgs->getAlignedSize();
 }
 
 uint32_t getSizeForImplicitArgsPatching(const ImplicitArgs *pImplicitArgs, const KernelDescriptor &kernelDescriptor, bool isHwLocalIdGeneration, const RootDeviceEnvironment &rootDeviceEnvironment) {
@@ -112,7 +105,7 @@ void *patchImplicitArgs(void *ptrToPatch, const ImplicitArgs &implicitArgs, cons
             dimensionOrder,
             false, grfSize, grfCount, rootDeviceEnvironment);
 
-        auto sizeForLocalIdsProgramming = totalSizeToProgram - implicitArgs.getSize();
+        auto sizeForLocalIdsProgramming = totalSizeToProgram - implicitArgs.getAlignedSize();
         ptrToPatch = ptrOffset(ptrToPatch, sizeForLocalIdsProgramming);
     }
 

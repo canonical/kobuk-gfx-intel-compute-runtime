@@ -120,13 +120,15 @@ class MockCommandListExtensionHw : public WhiteBox<::L0::CommandListCoreFamily<g
                                      uint64_t dstOffset, uintptr_t srcPtr,
                                      NEO::GraphicsAllocation *srcPtrAlloc,
                                      uint64_t srcOffset,
-                                     uint64_t size) override {
+                                     uint64_t size, Event *signalEvent) override {
         appendMemoryCopyBlitCalledTimes++;
         if (failOnFirstCopy && appendMemoryCopyBlitCalledTimes == 1) {
             return ZE_RESULT_ERROR_UNKNOWN;
         }
         return ZE_RESULT_SUCCESS;
     }
+
+    void setAdditionalBlitProperties(NEO::BlitProperties &blitProperties, Event *signalEvent, bool useAdditionalTimestamp) override {}
 
     ze_result_t appendMemoryCopyBlitRegion(AlignedAllocationData *srcAllocationData,
                                            AlignedAllocationData *dstAllocationData,
@@ -136,7 +138,7 @@ class MockCommandListExtensionHw : public WhiteBox<::L0::CommandListCoreFamily<g
                                            size_t dstRowPitch, size_t dstSlicePitch,
                                            const Vec3<size_t> &srcSize, const Vec3<size_t> &dstSize,
                                            Event *signalEvent,
-                                           uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch) override {
+                                           uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch, bool doubleStreamCopyOffload) override {
         if (signalEvent) {
             useEvents = true;
         } else {
@@ -169,7 +171,7 @@ class MockCommandListExtensionHw : public WhiteBox<::L0::CommandListCoreFamily<g
     ze_result_t appendBlitFill(void *ptr, const void *pattern,
                                size_t patternSize, size_t size,
                                Event *signalEvent, uint32_t numWaitEvents,
-                               ze_event_handle_t *phWaitEvents, bool relaxedOrderingDispatch) override {
+                               ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) override {
         appendBlitFillCalledTimes++;
         if (signalEvent) {
             useEvents = true;
@@ -185,7 +187,8 @@ class MockCommandListExtensionHw : public WhiteBox<::L0::CommandListCoreFamily<g
                                     size_t dstRowPitch, size_t dstSlicePitch,
                                     size_t bytesPerPixel, const Vec3<size_t> &copySize,
                                     const Vec3<size_t> &srcSize, const Vec3<size_t> &dstSize,
-                                    Event *signalEvent) override {
+                                    Event *signalEvent, uint32_t numWaitEvents,
+                                    ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) override {
         appendCopyImageBlitCalledTimes++;
         appendImageRegionCopySize = copySize;
         appendImageRegionSrcOrigin = srcOffsets;
@@ -286,7 +289,7 @@ HWTEST_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithValidAddressAndData
     ASSERT_TRUE(validateProgramming<FamilyType>(cmdList, waitMemData, castToUint64(ptr), MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_NOT_EQUAL_SDD, false));
 }
 
-HWTEST2_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenReturnErrorIfNotSupported, MatchAny) {
+HWTEST_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenReturnErrorIfNotSupported) {
     ze_result_t result = ZE_RESULT_SUCCESS;
 
     waitMemData = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 123;
@@ -303,7 +306,7 @@ HWTEST2_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenR
     }
 }
 
-HWTEST2_F(CommandListAppendWaitOnMem, givenInvalidCmdListWhenWaitOnMemory64CalledThenReturnError, MatchAny) {
+HWTEST_F(CommandListAppendWaitOnMem, givenInvalidCmdListWhenWaitOnMemory64CalledThenReturnError) {
     ze_result_t result = ZE_RESULT_SUCCESS;
 
     waitMemData = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 123;
@@ -316,7 +319,7 @@ HWTEST2_F(CommandListAppendWaitOnMem, givenInvalidCmdListWhenWaitOnMemory64Calle
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, result);
 }
 
-HWTEST2_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenProgramLri, MatchAny) {
+HWTEST_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenProgramLri) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
     if (!FamilyType::isQwordInOrderCounter) {
@@ -339,7 +342,7 @@ HWTEST2_F(CommandListAppendWaitOnMem, given64bValueWhenWaitOnMemory64CalledThenP
     ASSERT_TRUE(validateProgramming<FamilyType>(cmdList, waitMemData, castToUint64(ptr), MI_SEMAPHORE_WAIT::COMPARE_OPERATION::COMPARE_OPERATION_SAD_NOT_EQUAL_SDD, true));
 }
 
-HWTEST2_F(CommandListAppendWaitOnMem, given64bValueAndOutEventWhenWaitOnMemory64CalledThenHandleEvent, MatchAny) {
+HWTEST_F(CommandListAppendWaitOnMem, given64bValueAndOutEventWhenWaitOnMemory64CalledThenHandleEvent) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
@@ -388,7 +391,7 @@ HWTEST2_F(CommandListAppendWaitOnMem, given64bValueAndOutEventWhenWaitOnMemory64
     ASSERT_NE(0u, itorPC.size());
 }
 
-HWTEST2_F(CommandListAppendWaitOnMem, givenCommandListWaitOnMemoryCalledWithNullPtrThenAppendWaitOnMemoryReturnsError, MatchAny) {
+HWTEST_F(CommandListAppendWaitOnMem, givenCommandListWaitOnMemoryCalledWithNullPtrThenAppendWaitOnMemoryReturnsError) {
     ze_result_t result = ZE_RESULT_SUCCESS;
     MockCommandListExtensionHw<FamilyType::gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::renderCompute, 0u);
@@ -688,7 +691,7 @@ HWTEST_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemOnBcsWithSignalEventAnd
     ASSERT_TRUE(postSyncFound);
 }
 
-HWTEST2_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithNoScopeAndSystemMemoryPtrThenAlignedPtrUsed, MatchAny) {
+HWTEST_F(CommandListAppendWaitOnMem, givenAppendWaitOnMemWithNoScopeAndSystemMemoryPtrThenAlignedPtrUsed) {
     auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<FamilyType::gfxCoreFamily>>();
     commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 
@@ -819,7 +822,7 @@ HWTEST_F(CommandListAppendWriteToMem, givenAppendWriteToMemWithNoScopeThenPipeCo
     ASSERT_TRUE(postSyncFound);
 }
 
-HWTEST2_F(CommandListAppendWriteToMem, givenCommandListWriteToMemCalledWithNullPtrThenAppendWriteToMemoryReturnsError, MatchAny) {
+HWTEST_F(CommandListAppendWriteToMem, givenCommandListWriteToMemCalledWithNullPtrThenAppendWriteToMemoryReturnsError) {
     ze_result_t result = ZE_RESULT_SUCCESS;
     MockCommandListExtensionHw<FamilyType::gfxCoreFamily> cmdList;
     cmdList.initialize(device, NEO::EngineGroupType::renderCompute, 0u);
@@ -890,7 +893,7 @@ HWTEST_F(CommandListAppendWriteToMem, givenAppendWriteToMemWithScopeThenPipeCont
     ASSERT_TRUE(postSyncFound);
 }
 
-HWTEST2_F(CommandListAppendWriteToMem, givenAppendWriteToMemWithScopeThenPipeControlEncodedCorrectlyAlignedPtrUsed, MatchAny) {
+HWTEST_F(CommandListAppendWriteToMem, givenAppendWriteToMemWithScopeThenPipeControlEncodedCorrectlyAlignedPtrUsed) {
     auto commandList = std::make_unique<::L0::ult::CommandListCoreFamily<FamilyType::gfxCoreFamily>>();
     commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
 

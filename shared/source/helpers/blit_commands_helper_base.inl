@@ -42,6 +42,22 @@ uint64_t BlitCommandsHelper<GfxFamily>::getMaxBlitHeight(const RootDeviceEnviron
 }
 
 template <typename GfxFamily>
+uint64_t BlitCommandsHelper<GfxFamily>::getMaxBlitSetWidth(const RootDeviceEnvironment &rootDeviceEnvironment) {
+    if (debugManager.flags.LimitBlitterMaxSetWidth.get() != -1) {
+        return static_cast<uint64_t>(debugManager.flags.LimitBlitterMaxSetWidth.get());
+    }
+    return BlitterConstants::maxBlitSetWidth;
+}
+
+template <typename GfxFamily>
+uint64_t BlitCommandsHelper<GfxFamily>::getMaxBlitSetHeight(const RootDeviceEnvironment &rootDeviceEnvironment) {
+    if (debugManager.flags.LimitBlitterMaxSetHeight.get() != -1) {
+        return static_cast<uint64_t>(debugManager.flags.LimitBlitterMaxSetHeight.get());
+    }
+    return BlitterConstants::maxBlitSetHeight;
+}
+
+template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::dispatchPreBlitCommand(LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
     if (BlitCommandsHelper<GfxFamily>::preBlitCommandWARequired()) {
         NEO::EncodeDummyBlitWaArgs waArgs{false, &rootDeviceEnvironment};
@@ -195,7 +211,7 @@ uint64_t BlitCommandsHelper<GfxFamily>::calculateBlitCommandSourceBaseAddress(co
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferPerRow(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
+BlitCommandsResult BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferPerRow(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
     uint64_t width = 1;
     uint64_t height = 1;
 
@@ -209,11 +225,17 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferPerRow(const Bl
 
     appendColorDepth(blitProperties, bltCmd);
 
+    const bool useAdditionalBlitProperties = rootDeviceEnvironment.getHelper<ProductHelper>().useAdditionalBlitProperties();
+
+    BlitCommandsResult result{};
+    bool firstCommand = true;
     for (uint64_t slice = 0; slice < blitProperties.copySize.z; slice++) {
         for (uint64_t row = 0; row < blitProperties.copySize.y; row++) {
             uint64_t offset = 0;
             uint64_t sizeToBlit = blitProperties.copySize.x;
+            bool lastIteration = (slice == blitProperties.copySize.z - 1) && (row == blitProperties.copySize.y - 1);
             while (sizeToBlit != 0) {
+                auto tmpCmd = bltCmd;
                 if (sizeToBlit > maxWidth) {
                     // dispatch 2D blit: maxBlitWidth x (1 .. maxBlitHeight)
                     width = maxWidth;
@@ -223,11 +245,13 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferPerRow(const Bl
                     width = sizeToBlit;
                     height = 1;
                 }
+                auto blitSize = width * height;
+                bool lastCommand = lastIteration && (sizeToBlit - blitSize == 0);
 
-                bltCmd.setDestinationX2CoordinateRight(static_cast<uint32_t>(width));
-                bltCmd.setDestinationY2CoordinateBottom(static_cast<uint32_t>(height));
-                bltCmd.setDestinationPitch(static_cast<uint32_t>(width));
-                bltCmd.setSourcePitch(static_cast<uint32_t>(width));
+                tmpCmd.setDestinationX2CoordinateRight(static_cast<uint32_t>(width));
+                tmpCmd.setDestinationY2CoordinateBottom(static_cast<uint32_t>(height));
+                tmpCmd.setDestinationPitch(static_cast<uint32_t>(width));
+                tmpCmd.setSourcePitch(static_cast<uint32_t>(width));
 
                 auto dstAddr = calculateBlitCommandDestinationBaseAddress(blitProperties, offset, row, slice);
                 auto srcAddr = calculateBlitCommandSourceBaseAddress(blitProperties, offset, row, slice);
@@ -235,29 +259,35 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferPerRow(const Bl
                 PRINT_DEBUG_STRING(debugManager.flags.PrintBlitDispatchDetails.get(), stdout,
                                    "\nBlit command. width: %u, height: %u, srcAddr: %#llx, dstAddr: %#llx ", width, height, srcAddr, dstAddr);
 
-                bltCmd.setDestinationBaseAddress(dstAddr);
-                bltCmd.setSourceBaseAddress(srcAddr);
+                tmpCmd.setDestinationBaseAddress(dstAddr);
+                tmpCmd.setSourceBaseAddress(srcAddr);
+                if (useAdditionalBlitProperties && (firstCommand || lastCommand)) {
+                    applyAdditionalBlitProperties(blitProperties, tmpCmd, rootDeviceEnvironment, lastCommand);
+                    firstCommand = false;
+                }
 
-                appendBlitCommandsForBuffer(blitProperties, bltCmd, rootDeviceEnvironment);
+                appendBlitCommandsForBuffer(blitProperties, tmpCmd, rootDeviceEnvironment);
 
                 auto bltStream = linearStream.getSpaceForCmd<typename GfxFamily::XY_COPY_BLT>();
-                *bltStream = bltCmd;
-
+                *bltStream = tmpCmd;
+                if (lastCommand) {
+                    result.lastBlitCommand = bltStream;
+                }
                 dispatchPostBlitCommand(linearStream, rootDeviceEnvironment);
 
-                auto blitSize = width * height;
                 sizeToBlit -= blitSize;
                 offset += blitSize;
             }
         }
     }
+    return result;
 }
 
 template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::appendBlitMemSetCommand(const BlitProperties &blitProperties, void *blitCmd) {}
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
+BlitCommandsResult BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
     using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
     auto blitCmd = GfxFamily::cmdInitXyColorBlt;
     const auto maxWidth = getMaxBlitWidth(rootDeviceEnvironment);
@@ -281,7 +311,10 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(const BlitProperties 
 
     blitCmd.setFillColor(blitProperties.fillPattern);
     blitCmd.setColorDepth(colorDepth);
+    const bool useAdditionalBlitProperties = rootDeviceEnvironment.getHelper<ProductHelper>().useAdditionalBlitProperties();
 
+    BlitCommandsResult result{};
+    bool firstCommand = true;
     uint64_t sizeToFill = blitProperties.copySize.x / patternSize;
     uint64_t offset = blitProperties.dstOffset.x;
     while (sizeToFill != 0) {
@@ -299,6 +332,8 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(const BlitProperties 
                 appendTilingEnable(tmpCmd);
             }
         }
+        auto blitSize = width * height;
+        auto lastCommand = (sizeToFill - blitSize == 0);
         tmpCmd.setDestinationX2CoordinateRight(static_cast<uint32_t>(width));
         tmpCmd.setDestinationY2CoordinateBottom(static_cast<uint32_t>(height));
         tmpCmd.setDestinationPitch(static_cast<uint32_t>(width * patternSize));
@@ -306,16 +341,23 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(const BlitProperties 
         appendBlitMemoryOptionsForFillBuffer(blitProperties.dstAllocation, tmpCmd, rootDeviceEnvironment);
         appendBlitFillCommand(blitProperties, tmpCmd);
 
+        if (useAdditionalBlitProperties && (firstCommand || lastCommand)) {
+            applyAdditionalBlitProperties(blitProperties, tmpCmd, rootDeviceEnvironment, lastCommand);
+            firstCommand = false;
+        }
         auto cmd = linearStream.getSpaceForCmd<XY_COLOR_BLT>();
         *cmd = tmpCmd;
-        auto blitSize = width * height;
+        if (lastCommand) {
+            result.lastBlitCommand = cmd;
+        }
         offset += (blitSize * patternSize);
         sizeToFill -= blitSize;
     }
+    return result;
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForImageRegion(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
+BlitCommandsResult BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForImageRegion(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
 
     auto srcSlicePitch = static_cast<uint32_t>(blitProperties.srcSlicePitch);
     auto dstSlicePitch = static_cast<uint32_t>(blitProperties.dstSlicePitch);
@@ -340,17 +382,28 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForImageRegion(const Bli
     appendSurfaceType(blitProperties, bltCmd);
 
     dispatchPreBlitCommand(linearStream, rootDeviceEnvironment);
+    const bool useAdditionalBlitProperties = rootDeviceEnvironment.getHelper<ProductHelper>().useAdditionalBlitProperties();
+
+    BlitCommandsResult result{};
     for (uint32_t i = 0; i < blitProperties.copySize.z; i++) {
-        appendSliceOffsets(blitProperties, bltCmd, i, rootDeviceEnvironment, srcSlicePitch, dstSlicePitch);
+        auto tmpCmd = bltCmd;
+        appendSliceOffsets(blitProperties, tmpCmd, i, rootDeviceEnvironment, srcSlicePitch, dstSlicePitch);
 
         if (debugManager.flags.PrintImageBlitBlockCopyCmdDetails.get()) {
-            printImageBlitBlockCopyCommand(bltCmd, i);
+            printImageBlitBlockCopyCommand(tmpCmd, i);
         }
-
+        bool lastCommand = (i == (blitProperties.copySize.z - 1));
+        if (useAdditionalBlitProperties && (i == 0 || lastCommand)) {
+            applyAdditionalBlitProperties(blitProperties, tmpCmd, rootDeviceEnvironment, lastCommand);
+        }
         auto cmd = linearStream.getSpaceForCmd<typename GfxFamily::XY_BLOCK_COPY_BLT>();
-        *cmd = bltCmd;
+        *cmd = tmpCmd;
+        if (lastCommand) {
+            result.lastBlitCommand = cmd;
+        }
         dispatchPostBlitCommand(linearStream, rootDeviceEnvironment);
     }
+    return result;
 }
 
 template <typename GfxFamily>
@@ -426,7 +479,7 @@ void BlitCommandsHelper<GfxFamily>::appendBlitCommandsMemCopy(const BlitProperti
 }
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferRegion(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
+BlitCommandsResult BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferRegion(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
 
     const auto maxWidthToCopy = getMaxBlitWidth(rootDeviceEnvironment);
     const auto maxHeightToCopy = getMaxBlitHeight(rootDeviceEnvironment, blitProperties.isSystemMemoryPoolUsed);
@@ -438,28 +491,44 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferRegion(const Bl
     bltCmd.setDestinationPitch(static_cast<uint32_t>(blitProperties.dstRowPitch));
     appendColorDepth(blitProperties, bltCmd);
 
+    const bool useAdditionalBlitProperties = rootDeviceEnvironment.getHelper<ProductHelper>().useAdditionalBlitProperties();
+
+    BlitCommandsResult result{};
+    bool firstCommand = true;
     for (size_t slice = 0u; slice < blitProperties.copySize.z; ++slice) {
         auto srcAddress = calculateBlitCommandSourceBaseAddressCopyRegion(blitProperties, slice);
         auto dstAddress = calculateBlitCommandDestinationBaseAddressCopyRegion(blitProperties, slice);
         auto heightToCopy = blitProperties.copySize.y;
 
         while (heightToCopy > 0) {
+
             auto height = static_cast<uint32_t>(std::min(heightToCopy, static_cast<size_t>(maxHeightToCopy)));
             auto widthToCopy = blitProperties.copySize.x;
 
+            bool lastIteration = (slice == blitProperties.copySize.z - 1) && ((heightToCopy - height) == 0);
+
             while (widthToCopy > 0) {
+                auto tmpCmd = bltCmd;
                 auto width = static_cast<uint32_t>(std::min(widthToCopy, static_cast<size_t>(maxWidthToCopy)));
 
-                bltCmd.setSourceBaseAddress(srcAddress);
-                bltCmd.setDestinationBaseAddress(dstAddress);
-                bltCmd.setDestinationX2CoordinateRight(width);
-                bltCmd.setDestinationY2CoordinateBottom(height);
+                bool lastCommand = lastIteration && ((widthToCopy - width) == 0);
 
-                appendBlitCommandsForBuffer(blitProperties, bltCmd, rootDeviceEnvironment);
+                tmpCmd.setSourceBaseAddress(srcAddress);
+                tmpCmd.setDestinationBaseAddress(dstAddress);
+                tmpCmd.setDestinationX2CoordinateRight(width);
+                tmpCmd.setDestinationY2CoordinateBottom(height);
 
+                appendBlitCommandsForBuffer(blitProperties, tmpCmd, rootDeviceEnvironment);
+
+                if (useAdditionalBlitProperties && (firstCommand || lastCommand)) {
+                    applyAdditionalBlitProperties(blitProperties, tmpCmd, rootDeviceEnvironment, lastCommand);
+                    firstCommand = false;
+                }
                 auto cmd = linearStream.getSpaceForCmd<typename GfxFamily::XY_COPY_BLT>();
-                *cmd = bltCmd;
-
+                *cmd = tmpCmd;
+                if (lastCommand) {
+                    result.lastBlitCommand = cmd;
+                }
                 dispatchPostBlitCommand(linearStream, rootDeviceEnvironment);
 
                 srcAddress += width;
@@ -474,6 +543,7 @@ void BlitCommandsHelper<GfxFamily>::dispatchBlitCommandsForBufferRegion(const Bl
             dstAddress += (blitProperties.dstRowPitch * (height - 1));
         }
     }
+    return result;
 }
 
 template <typename GfxFamily>
@@ -578,11 +648,11 @@ template <typename GfxFamily>
 void BlitCommandsHelper<GfxFamily>::appendBlitFillCommand(const BlitProperties &blitProperties, typename GfxFamily::XY_COLOR_BLT &blitCmd) {}
 
 template <typename GfxFamily>
-void BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryColorFill(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
+BlitCommandsResult BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryColorFill(const BlitProperties &blitProperties, LinearStream &linearStream, RootDeviceEnvironment &rootDeviceEnvironment) {
     if (blitProperties.fillPatternSize == 1) {
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryByteFill(blitProperties, linearStream, rootDeviceEnvironment);
+        return NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryByteFill(blitProperties, linearStream, rootDeviceEnvironment);
     } else {
-        NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(blitProperties, linearStream, rootDeviceEnvironment);
+        return NEO::BlitCommandsHelper<GfxFamily>::dispatchBlitMemoryFill(blitProperties, linearStream, rootDeviceEnvironment);
     }
 }
 

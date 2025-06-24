@@ -54,9 +54,6 @@ struct EnqueueSvmTest : public ClDeviceFixture,
     }
 
     void TearDown() override {
-        if (defaultHwInfo->capabilityTable.ftrSvm == false) {
-            return;
-        }
         context->getSVMAllocsManager()->freeSVMAlloc(ptrSVM);
         CommandQueueFixture::tearDown();
         ClDeviceFixture::tearDown();
@@ -1090,10 +1087,6 @@ HWTEST_F(EnqueueSvmTest, WhenMigratingMemoryThenSvmMigrateMemCommandTypeIsUsed) 
 }
 
 TEST(CreateSvmAllocTests, givenVariousSvmAllocationPropertiesWhenAllocatingSvmThenSvmIsCorrectlyAllocated) {
-    if (!defaultHwInfo->capabilityTable.ftrSvm) {
-        return;
-    }
-
     DebugManagerStateRestore dbgRestore;
     SVMAllocsManager::SvmAllocationProperties svmAllocationProperties;
 
@@ -1131,9 +1124,6 @@ struct EnqueueSvmTestLocalMemory : public ClDeviceFixture,
     }
 
     void TearDown() override {
-        if (defaultHwInfo->capabilityTable.ftrSvm == false) {
-            return;
-        }
         context->getSVMAllocsManager()->freeSVMAlloc(svmPtr);
         context.reset(nullptr);
         ClDeviceFixture::tearDown();
@@ -2417,16 +2407,13 @@ struct StagingBufferTest : public EnqueueSvmTest {
     }
 
     void TearDown() override {
-        if (defaultHwInfo->capabilityTable.ftrSvm == false) {
-            return;
-        }
         svmManager = this->context->getSVMAllocsManager();
         svmManager->freeSVMAlloc(dstPtr);
         delete[] srcPtr;
         EnqueueSvmTest::TearDown();
     }
 
-    static constexpr size_t stagingBufferSize = MemoryConstants::megaByte * 2;
+    static constexpr size_t stagingBufferSize = MemoryConstants::pageSize;
     static constexpr size_t copySize = stagingBufferSize * 4;
     static constexpr size_t expectedNumOfCopies = copySize / stagingBufferSize;
 

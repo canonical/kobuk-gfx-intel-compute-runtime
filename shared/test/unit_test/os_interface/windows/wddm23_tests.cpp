@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -114,7 +114,7 @@ TEST_F(Wddm23Tests, whencreateMonitoredFenceForDirectSubmissionThenObtainHwQueue
     osContext->getResidencyController().getMonitoredFence().currentFenceValue = 2u;
     osContext->getResidencyController().getMonitoredFence().lastSubmittedFence = 1u;
     MonitoredFence fence{};
-    wddm->getWddmInterface()->createMonitoredFenceForDirectSubmission(fence, *osContext);
+    wddm->getWddmInterface()->createFenceForDirectSubmission(fence, *osContext);
     EXPECT_EQ(osContext->getHwQueue().progressFenceHandle, fence.fenceHandle);
     EXPECT_NE(osContext->getResidencyController().getMonitoredFence().fenceHandle, osContext->getHwQueue().progressFenceHandle);
     EXPECT_EQ(osContext->getResidencyController().getMonitoredFence().currentFenceValue, 2u);

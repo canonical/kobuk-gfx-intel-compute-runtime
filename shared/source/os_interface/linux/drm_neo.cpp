@@ -50,16 +50,14 @@
 #include "shared/source/utilities/directory.h"
 #include "shared/source/utilities/io_functions.h"
 
+#include "xe_drm.h"
+
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
 #include <map>
 #include <sstream>
-
-#ifndef DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR
-#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 5)
-#endif
 
 namespace NEO {
 
@@ -267,8 +265,11 @@ bool Drm::checkResetStatus(OsContext &osContext) {
         const auto retVal{ioctlHelper->getResetStats(resetStats, &status, &fault)};
         UNRECOVERABLE_IF(retVal != 0);
         auto debuggingEnabled = rootDeviceEnvironment.executionEnvironment.isDebuggingEnabled();
-        if (!debuggingEnabled && checkToDisableScratchPage() && ioctlHelper->validPageFault(fault.flags)) {
+        if (checkToDisableScratchPage() && ioctlHelper->validPageFault(fault.flags)) {
             bool banned = ((status & ioctlHelper->getStatusForResetStats(true)) != 0);
+            if (!banned && debuggingEnabled) {
+                return false;
+            }
             IoFunctions::fprintf(stderr, "Segmentation fault from GPU at 0x%llx, ctx_id: %u (%s) type: %d (%s), level: %d (%s), access: %d (%s), banned: %d, aborting.\n",
                                  fault.addr,
                                  resetStats.contextId,
@@ -495,6 +496,7 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
 
     auto releaseHelper = rootDeviceEnvironment.getReleaseHelper();
     device->setupHardwareInfo(hwInfo, setupFeatureTableAndWorkaroundTable, releaseHelper);
+    this->adjustSharedSystemMemCapabilities();
 
     querySystemInfo();
 
@@ -605,6 +607,9 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
     }
 
     auto numThreadsPerEu = systemInfo ? systemInfo->getNumThreadsPerEu() : (releaseHelper ? releaseHelper->getNumThreadsPerEu() : 7u);
+    if (debugManager.flags.OverrideNumThreadsPerEu.get() != -1) {
+        numThreadsPerEu = debugManager.flags.OverrideNumThreadsPerEu.get();
+    }
 
     hwInfo->gtSystemInfo.ThreadCount = numThreadsPerEu * hwInfo->gtSystemInfo.EUCount;
 
@@ -1670,7 +1675,7 @@ int Drm::createDrmVirtualMemory(uint32_t &drmVmId) {
         if (isSharedSystemAllocEnabled()) {
             VmBindParams vmBind{};
             vmBind.vmId = static_cast<uint32_t>(ctl.vmId);
-            vmBind.flags = DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR;
+            vmBind.flags = DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR;
             vmBind.length = (0x1ull << ((NEO::CpuInfo::getInstance().getVirtualAddressSize()) - 1));
             vmBind.sharedSystemUsmEnabled = true;
             vmBind.sharedSystemUsmBind = true;
@@ -1858,6 +1863,12 @@ bool Drm::queryDeviceIdAndRevision() {
         return IoctlHelperXe::queryDeviceIdAndRevision(*this);
     }
     return IoctlHelperI915::queryDeviceIdAndRevision(*this);
+}
+
+void Drm::adjustSharedSystemMemCapabilities() {
+    if (!this->isSharedSystemAllocEnabled()) {
+        this->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.sharedSystemMemCapabilities = 0;
+    }
 }
 
 uint32_t Drm::getAggregatedProcessCount() const {

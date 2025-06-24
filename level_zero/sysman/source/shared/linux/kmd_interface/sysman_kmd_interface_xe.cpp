@@ -50,9 +50,10 @@ void SysmanKmdInterfaceXe::initSysfsNameToFileMap(SysmanProductHelper *pSysmanPr
     sysfsNameToFileMap[SysfsName::sysfsNameThrottleReasonThermal] = std::make_pair("freq0/throttle/reason_thermal", "");
     sysfsNameToFileMap[SysfsName::sysfsNamePackageSustainedPowerLimit] = std::make_pair("", "power1_max");
     sysfsNameToFileMap[SysfsName::sysfsNamePackageSustainedPowerLimitInterval] = std::make_pair("", "power1_max_interval");
-    sysfsNameToFileMap[SysfsName::sysfsNamePackageEnergyCounterNode] = std::make_pair("", "energy1_input");
+    sysfsNameToFileMap[SysfsName::sysfsNamePackageEnergyCounterNode] = std::make_pair("", "energy2_input");
     sysfsNameToFileMap[SysfsName::sysfsNamePackageDefaultPowerLimit] = std::make_pair("", "power1_rated_max");
     sysfsNameToFileMap[SysfsName::sysfsNamePackageCriticalPowerLimit] = std::make_pair("", pSysmanProductHelper->getPackageCriticalPowerLimitFile());
+    sysfsNameToFileMap[SysfsName::sysfsNameCardEnergyCounterNode] = std::make_pair("", "energy1_input");
     sysfsNameToFileMap[SysfsName::sysfsNameMemoryAddressRange] = std::make_pair("physical_vram_size_bytes", "");
     sysfsNameToFileMap[SysfsName::sysfsNameMaxMemoryFrequency] = std::make_pair("freq_vram_rp0", "");
     sysfsNameToFileMap[SysfsName::sysfsNameMinMemoryFrequency] = std::make_pair("freq_vram_rpn", "");
@@ -97,6 +98,8 @@ std::string SysmanKmdInterfaceXe::getEnergyCounterNodeFile(zes_power_domain_t po
     std::string filePath = {};
     if (powerDomain == ZES_POWER_DOMAIN_PACKAGE) {
         filePath = sysfsNameToFileMap[SysfsName::sysfsNamePackageEnergyCounterNode].second;
+    } else if (powerDomain == ZES_POWER_DOMAIN_CARD) {
+        filePath = sysfsNameToFileMap[SysfsName::sysfsNameCardEnergyCounterNode].second;
     }
     return filePath;
 }
@@ -171,6 +174,10 @@ std::string SysmanKmdInterfaceXe::getHwmonName(uint32_t subDeviceId, bool isSubd
     return "xe";
 }
 
+std::vector<zes_power_domain_t> SysmanKmdInterfaceXe::getPowerDomains() const {
+    return {ZES_POWER_DOMAIN_CARD, ZES_POWER_DOMAIN_PACKAGE, ZES_POWER_DOMAIN_MEMORY, ZES_POWER_DOMAIN_GPU};
+}
+
 std::optional<std::string> SysmanKmdInterfaceXe::getEngineClassString(uint16_t engineClass) {
     auto sysfEngineString = xeEngineClassToSysfsEngineMap.find(engineClass);
     if (sysfEngineString == xeEngineClassToSysfsEngineMap.end()) {
@@ -211,8 +218,31 @@ void SysmanKmdInterfaceXe::getDriverVersion(char (&driverVersion)[ZES_STRING_PRO
     return;
 }
 
-ze_result_t SysmanKmdInterfaceXe::getBusyAndTotalTicksConfigs(uint64_t fnNumber, uint64_t engineInstance, uint64_t engineClass, std::pair<uint64_t, uint64_t> &configPair) {
-    return ZE_RESULT_ERROR_DEPENDENCY_UNAVAILABLE;
+ze_result_t SysmanKmdInterfaceXe::getBusyAndTotalTicksConfigsForVf(PmuInterface *const &pPmuInterface,
+                                                                   uint64_t fnNumber,
+                                                                   uint64_t engineInstance,
+                                                                   uint64_t engineClass,
+                                                                   uint64_t gtId,
+                                                                   std::pair<uint64_t, uint64_t> &configPair) {
+
+    ze_result_t result = ZE_RESULT_SUCCESS;
+    const std::string sysmanDeviceDir = std::string(sysDevicesDir) + sysmanDeviceDirName;
+
+    auto ret = pPmuInterface->getPmuConfigs(sysmanDeviceDir, engineClass, engineInstance, gtId, configPair.first, configPair.second);
+    if (ret < 0) {
+        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get configs and returning error:0x%x\n", __FUNCTION__, result);
+        return result;
+    }
+
+    ret = pPmuInterface->getPmuConfigsForVf(sysmanDeviceDir, fnNumber, configPair.first, configPair.second);
+    if (ret < 0) {
+        result = ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to get configs for VF and returning error:0x%x\n", __FUNCTION__, result);
+        return result;
+    }
+
+    return result;
 }
 
 std::string SysmanKmdInterfaceXe::getGpuBindEntry() const {

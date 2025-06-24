@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -24,6 +24,7 @@ using AubCsrTest = ::testing::Test;
 
 HWTEST_F(AubCsrTest, givenLocalMemoryEnabledWhenGettingAddressSpaceForRingDataTypeThenTraceLocalIsReturned) {
     DebugManagerStateRestore restorer;
+    debugManager.flags.UseAubStream.set(false);
     debugManager.flags.EnableLocalMemory.set(1);
     auto hwInfo = *NEO::defaultHwInfo.get();
     hwInfo.featureTable.flags.ftrLocalMemory = true;
@@ -38,7 +39,6 @@ HWTEST_F(AubCsrTest, givenLocalMemoryEnabledWhenGettingAddressSpaceForRingDataTy
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->aubCenter.reset(new AubCenter());
 
     executionEnvironment->initializeMemoryManager();
-
     std::unique_ptr<MockAubCsr<FamilyType>> aubCsr(new MockAubCsr<FamilyType>("", false, *executionEnvironment, rootDeviceIndex, deviceBitfield));
 
     int types[] = {AubMemDump::DataTypeHintValues::TraceLogicalRingContextRcs,
@@ -69,9 +69,16 @@ HWTEST_F(AubCsrTest, givenAUBDumpForceAllToLocalMemoryWhenGettingAddressSpaceFor
 
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfoAndInitHelpers(&hwInfo);
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initGmm();
-    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->aubCenter.reset(new AubCenter());
+
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initAubCenter(false, "", CommandStreamReceiverType::aub);
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->aubCenter->getAubManager();
 
     executionEnvironment->initializeMemoryManager();
+
+    std::unique_ptr<CommandStreamReceiver> commandStreamReceiver = std::make_unique<AUBCommandStreamReceiverHw<FamilyType>>(
+        "", false, *executionEnvironment, rootDeviceIndex, deviceBitfield);
+    auto osContext = std::make_unique<MockOsContext>(0, EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_RCS, EngineUsage::regular}));
+    commandStreamReceiver->setupContext(*osContext);
 
     std::unique_ptr<MockAubCsr<FamilyType>> aubCsr(new MockAubCsr<FamilyType>("", false, *executionEnvironment, rootDeviceIndex, deviceBitfield));
 
@@ -101,7 +108,9 @@ HWTEST_F(AubCsrTest, WhenWriteWithAubManagerIsCalledThenAubManagerIsInvokedWithC
 
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->setHwInfoAndInitHelpers(&hwInfo);
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initGmm();
-    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->aubCenter.reset(new AubCenter());
+
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initAubCenter(false, "", CommandStreamReceiverType::aub);
+    executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->aubCenter->getAubManager();
 
     executionEnvironment->initializeMemoryManager();
     auto allocation = executionEnvironment->memoryManager->allocateGraphicsMemoryWithProperties(MockAllocationProperties{rootDeviceIndex, true, MemoryConstants::pageSize, AllocationType::commandBuffer});
@@ -572,7 +581,7 @@ HWTEST_F(AubCommandStreamReceiverTests, givenUsmAllocationWhenDumpAllocationIsCa
     auto mockHardwareContext = static_cast<MockHardwareContext *>(aubCsr.hardwareContextController->hardwareContexts[0].get());
 
     auto memoryManager = std::make_unique<MockMemoryManager>(false, true, *pDevice->executionEnvironment);
-    auto svmManager = std::make_unique<MockSVMAllocsManager>(memoryManager.get(), false);
+    auto svmManager = std::make_unique<MockSVMAllocsManager>(memoryManager.get());
 
     RootDeviceIndicesContainer rootDeviceIndices = {rootDeviceIndex};
     std::map<uint32_t, DeviceBitfield> deviceBitfields{{rootDeviceIndex, pDevice->getDeviceBitfield()}};

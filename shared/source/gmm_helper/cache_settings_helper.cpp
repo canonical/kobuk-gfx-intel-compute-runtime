@@ -13,9 +13,9 @@
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/memory_manager/allocation_type.h"
+#include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/release_helper/release_helper.h"
-
 namespace NEO {
 
 GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getGmmUsageType(AllocationType allocationType, bool forceUncached, const ProductHelper &productHelper, const HardwareInfo *hwInfo) {
@@ -48,10 +48,6 @@ bool CacheSettingsHelper::preferNoCpuAccess(GMM_RESOURCE_USAGE_TYPE_ENUM gmmReso
 }
 
 GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCachingEnabled(AllocationType allocationType, const ProductHelper &productHelper, const HardwareInfo *hwInfo) {
-    if (productHelper.overrideUsageForDcFlushMitigation(allocationType)) {
-        return getDefaultUsageTypeWithCachingDisabled(allocationType, productHelper);
-    }
-
     if (debugManager.flags.ForceGmmSystemMemoryBufferForAllocations.get()) {
         UNRECOVERABLE_IF(allocationType == AllocationType::unknown);
         if ((1llu << (static_cast<int64_t>(allocationType))) & debugManager.flags.ForceGmmSystemMemoryBufferForAllocations.get()) {
@@ -60,8 +56,12 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCaching
     }
 
     if (hwInfo->capabilityTable.isIntegratedDevice) {
-        if (AllocationType::ringBuffer == allocationType || AllocationType::semaphoreBuffer == allocationType) {
+        if (productHelper.isResourceUncachedForCS(allocationType)) {
+            return GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC;
+        } else if (AllocationType::semaphoreBuffer == allocationType) {
             return GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
+        } else if (AllocationType::tagBuffer == allocationType) {
+            return GMM_RESOURCE_USAGE_OCL_BUFFER;
         }
     }
 
@@ -101,13 +101,10 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCaching
         return GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER;
     case AllocationType::gpuTimestampDeviceBuffer:
     case AllocationType::timestampPacketTagBuffer:
-        if (debugManager.flags.ForceNonCoherentModeForTimestamps.get()) {
+        if (productHelper.isNonCoherentTimestampsModeEnabled()) {
             return GMM_RESOURCE_USAGE_OCL_BUFFER;
         }
-        if (productHelper.isDcFlushAllowed()) {
-            return getDefaultUsageTypeWithCachingDisabled(allocationType, productHelper);
-        }
-        return GMM_RESOURCE_USAGE_OCL_BUFFER;
+        return getDefaultUsageTypeWithCachingDisabled(allocationType, productHelper);
     default:
         return GMM_RESOURCE_USAGE_OCL_BUFFER;
     }
@@ -120,12 +117,6 @@ GMM_RESOURCE_USAGE_TYPE_ENUM CacheSettingsHelper::getDefaultUsageTypeWithCaching
     case AllocationType::internalHeap:
     case AllocationType::linearStream:
         return GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER_CACHELINE_MISALIGNED;
-    case AllocationType::timestampPacketTagBuffer:
-    case AllocationType::gpuTimestampDeviceBuffer:
-        if (debugManager.flags.ForceNonCoherentModeForTimestamps.get()) {
-            return GMM_RESOURCE_USAGE_OCL_BUFFER;
-        }
-        [[fallthrough]];
     default:
         return productHelper.isNewCoherencyModelSupported() ? GMM_RESOURCE_USAGE_OCL_BUFFER_CSR_UC : GMM_RESOURCE_USAGE_OCL_BUFFER_CACHELINE_MISALIGNED;
     }

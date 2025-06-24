@@ -45,7 +45,6 @@ class FlatBatchBufferHelper;
 class AllocationsList;
 class Device;
 class ExecutionEnvironment;
-class ExperimentalCommandBuffer;
 class GmmPageTableMngr;
 class GraphicsAllocation;
 class HostPtrSurface;
@@ -265,7 +264,6 @@ class CommandStreamReceiver : NEO::NonCopyableAndNonMovableClass {
     void *getIndirectHeapCurrentPtr(IndirectHeapType heapType) const;
 
     virtual enum CommandStreamReceiverType getType() const = 0;
-    void setExperimentalCmdBuffer(std::unique_ptr<ExperimentalCommandBuffer> &&cmdBuffer);
 
     bool initializeTagAllocation();
     MOCKABLE_VIRTUAL bool createWorkPartitionAllocation(const Device &device);
@@ -347,16 +345,6 @@ class CommandStreamReceiver : NEO::NonCopyableAndNonMovableClass {
     void registerInstructionCacheFlush() {
         auto mutex = obtainUniqueOwnership();
         requiresInstructionCacheFlush = true;
-    }
-
-    MOCKABLE_VIRTUAL bool checkDcFlushRequiredForDcMitigationAndReset() {
-        auto ret = this->requiresDcFlush;
-        this->requiresDcFlush = false;
-        return ret;
-    }
-
-    void registerDcFlushForDcMitigation() {
-        this->requiresDcFlush = true;
     }
 
     bool isLocalMemoryEnabled() const { return localMemoryEnabled; }

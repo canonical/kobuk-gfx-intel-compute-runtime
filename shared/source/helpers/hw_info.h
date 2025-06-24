@@ -42,7 +42,6 @@ struct RuntimeCapabilityTable {
     bool ftrSupportsFP64;
     bool ftrSupportsFP64Emulation;
     bool ftrSupports64BitMath;
-    bool ftrSvm;
     bool ftrSupportsCoherency;
     bool ftrRenderCompressedBuffers;
     bool ftrRenderCompressedImages;
@@ -53,7 +52,6 @@ struct RuntimeCapabilityTable {
     bool supportsOcl21Features;
     bool supportsOnDemandPageFaults;
     bool supportsIndependentForwardProgress;
-    bool hostPtrTrackingEnabled;
     bool isIntegratedDevice;
     bool supportsMediaBlock;
     bool p2pAccessSupported;
@@ -102,7 +100,6 @@ inline bool operator==(const RuntimeCapabilityTable &lhs, const RuntimeCapabilit
     result &= (lhs.ftrSupportsFP64 == rhs.ftrSupportsFP64);
     result &= (lhs.ftrSupportsFP64Emulation == rhs.ftrSupportsFP64Emulation);
     result &= (lhs.ftrSupports64BitMath == rhs.ftrSupports64BitMath);
-    result &= (lhs.ftrSvm == rhs.ftrSvm);
     result &= (lhs.ftrSupportsCoherency == rhs.ftrSupportsCoherency);
     result &= (lhs.ftrRenderCompressedBuffers == rhs.ftrRenderCompressedBuffers);
     result &= (lhs.ftrRenderCompressedImages == rhs.ftrRenderCompressedImages);
@@ -114,7 +111,6 @@ inline bool operator==(const RuntimeCapabilityTable &lhs, const RuntimeCapabilit
     result &= (lhs.supportsOcl21Features == rhs.supportsOcl21Features);
     result &= (lhs.supportsOnDemandPageFaults == rhs.supportsOnDemandPageFaults);
     result &= (lhs.supportsIndependentForwardProgress == rhs.supportsIndependentForwardProgress);
-    result &= (lhs.hostPtrTrackingEnabled == rhs.hostPtrTrackingEnabled);
     result &= (lhs.isIntegratedDevice == rhs.isIntegratedDevice);
     result &= (lhs.supportsMediaBlock == rhs.supportsMediaBlock);
     result &= (lhs.fusedEuEnabled == rhs.fusedEuEnabled);
@@ -135,6 +131,7 @@ struct HardwareInfo { // NOLINT(clang-analyzer-optin.performance.Padding)
     alignas(4) GT_SYSTEM_INFO gtSystemInfo{};
     alignas(8) RuntimeCapabilityTable capabilityTable{};
     alignas(8) HardwareIpVersion ipVersion{};
+    alignas(8) HardwareIpVersion ipVersionOverrideExposedToTheApplication{};
 };
 
 // Global table of hardware prefixes

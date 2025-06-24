@@ -24,7 +24,7 @@ extern "C" {
 #define ZET_INTEL_METRIC_PROGRAMMABLE_PARAM_TYPE_GENERIC_EXP (0x7ffffffe)
 
 #ifndef ZET_INTEL_METRIC_SOURCE_ID_EXP_NAME
-/// @brief Extension name for query to read the Intel Level Zero Driver Version String
+/// @brief Extension name for query to read the Intel Metric source ID
 #define ZET_INTEL_METRIC_SOURCE_ID_EXP_NAME "ZET_intel_metric_source_id"
 #endif // ZET_INTEL_METRIC_SOURCE_ID_EXP_NAME
 
@@ -47,7 +47,7 @@ typedef struct _zet_intel_metric_source_id_exp_t {
 } zet_intel_metric_source_id_exp_t;
 
 #ifndef ZET_INTEL_METRIC_APPEND_MARKER_EXP_NAME
-/// @brief Extension name for query to read the Intel Level Zero Driver Version String
+/// @brief Extension name for query to read the Intel Metric append marker
 #define ZET_INTEL_METRIC_APPEND_MARKER_EXP_NAME "ZET_intel_metric_append_marker"
 #endif // ZET_INTEL_APPEND_MARKER_EXP_NAME
 
@@ -59,7 +59,7 @@ typedef enum _zet_intel_metric_append_marker_exp_version_t {
     ZET_INTEL_METRIC_APPEND_MARKER_EXP_VERSION_FORCE_UINT32 = 0x7fffffff
 } zet_intel_metric_append_marker_exp_version_t;
 
-#define ZET_INTEL_METRIC_GROUP_TYPE_EXP_FLAG_MARKER (static_cast<zet_metric_group_type_exp_flag_t>(ZE_BIT(3))) // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
+#define ZET_INTEL_METRIC_GROUP_TYPE_EXP_FLAG_MARKER (static_cast<zet_metric_group_type_exp_flags_t>(ZE_BIT(3)))
 
 ///////////////////////////////////////////////////////////////////////////////
 /// @brief Appends a metric marker to the command list based on the metricGroup
@@ -191,7 +191,7 @@ ze_result_t ZE_APICALL zetIntelMetricTracerDecodeExp(
 );
 
 #ifndef ZET_INTEL_METRIC_CALCULATE_EXP_NAME
-/// @brief Extension name to query and read the Intel Level Zero Driver Version String
+/// @brief Extension name to query Intel Metric Calculate operations
 #define ZET_INTEL_METRIC_CALCULATE_EXP_NAME "ZET_intel_metric_calculate"
 #endif // ZET_INTEL_METRIC_CALCULATE_EXP_NAME
 ///////////////////////////////////////////////////////////////////////////////
@@ -204,7 +204,7 @@ typedef enum _zet_intel_metric_calculate_exp_version_t {
 } zet_intel_metric_calculate_exp_version_t;
 
 ///////////////////////////////////////////////////////////////////////////////
-/// @brief Query an  metric group calculate properties
+/// @brief Query an metric group calculate properties
 /// This structure can be passed in the 'pNext' of zet_metric_group_properties_t
 typedef struct _zet_intel_metric_group_calculate_properties_exp_t {
     zet_structure_type_ext_t stype; ///< [in] type of this structure
@@ -405,7 +405,7 @@ zetIntelMetricCalculateValuesExp(
                                                                            ///< metrics results.
 
 #ifndef ZET_INTEL_METRICS_RUNTIME_ENABLE_DISABLE_EXP_NAME
-/// @brief Extension name for query to read the Intel Level Zero Driver Version String
+/// @brief Extension name for enabling and disabling Intel Metrics collection
 #define ZET_INTEL_METRICS_RUNTIME_ENABLE_DISABLE_EXP_NAME "ZET_intel_metrics_runtime_enable_disable"
 #endif // ZET_INTEL_METRICS_RUNTIME_ENABLE_DISABLE_EXP_NAME
 

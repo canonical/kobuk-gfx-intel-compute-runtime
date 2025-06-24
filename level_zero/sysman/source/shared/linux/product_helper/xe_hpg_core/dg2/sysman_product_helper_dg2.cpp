@@ -228,6 +228,7 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getPowerEnergyCounter(zes_power_e
     // PMT will return energy counter in Q20 format(fixed point representation) where first 20 bits(from LSB) represent decimal part
     // and remaining integral part which is converted into joule by division with 1048576(2^20) and then converted into microjoules
     pEnergy->energy = (energyCounter / fixedPointToJoule) * convertJouleToMicroJoule;
+    pEnergy->timestamp = SysmanDevice::getSysmanTimestamp();
 
     return ZE_RESULT_SUCCESS;
 }
@@ -240,6 +241,25 @@ bool SysmanProductHelperHw<gfxProduct>::isEccConfigurationSupported() {
 template <>
 bool SysmanProductHelperHw<gfxProduct>::isUpstreamPortConnected() {
     return true;
+}
+
+template <>
+bool SysmanProductHelperHw<gfxProduct>::isVfMemoryUtilizationSupported() {
+    return true;
+}
+
+template <>
+ze_result_t SysmanProductHelperHw<gfxProduct>::getVfLocalMemoryQuota(SysFsAccessInterface *pSysfsAccess, uint64_t &lMemQuota, const uint32_t &vfId) {
+
+    const std::string pathForLmemQuota = "/gt/lmem_quota";
+    std::string pathForDeviceMemQuota = "iov/vf" + std::to_string(vfId) + pathForLmemQuota;
+
+    auto result = pSysfsAccess->read(pathForDeviceMemQuota, lMemQuota);
+    if (result != ZE_RESULT_SUCCESS) {
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Failed to read Local Memory Quota with error 0x%x \n", __FUNCTION__, result);
+        return result;
+    }
+    return ZE_RESULT_SUCCESS;
 }
 
 template class SysmanProductHelperHw<gfxProduct>;

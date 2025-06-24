@@ -13,6 +13,7 @@
 #include "shared/source/utilities/stackvec.h"
 #include "shared/source/utilities/tag_allocator.h"
 
+#include "level_zero/core/source/cmdlist/cmdlist_launch_params.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
@@ -79,7 +80,7 @@ std::unique_ptr<NEO::TagAllocatorBase> L0GfxCoreHelperHw<Family>::getInOrderTime
     using TimestampPacketType = typename Family::TimestampPacketType;
     using TimestampPacketsT = NEO::TimestampPackets<TimestampPacketType, 1>;
 
-    size_t size = sizeof(TimestampPacketsT) * std::max(packetsCountPerElement, size_t(2));
+    size_t size = sizeof(TimestampPacketsT) * packetsCountPerElement;
 
     return std::make_unique<NEO::TagAllocator<TimestampPacketsT>>(rootDeviceIndices, memoryManager, initialTagCount, tagAlignment, size, Event::State::STATE_CLEARED, false, true, deviceBitfield);
 }
@@ -92,6 +93,20 @@ bool L0GfxCoreHelperHw<Family>::isThreadControlStoppedSupported() const {
 template <typename Family>
 bool L0GfxCoreHelperHw<Family>::threadResumeRequiresUnlock() const {
     return false;
+}
+
+template <typename Family>
+CopyOffloadMode L0GfxCoreHelperHw<Family>::getDefaultCopyOffloadMode(bool additionalBlitPropertiesSupported) const {
+    if (NEO::debugManager.flags.OverrideCopyOffloadMode.get() != -1) {
+        return static_cast<CopyOffloadMode>(NEO::debugManager.flags.OverrideCopyOffloadMode.get());
+    }
+
+    return CopyOffloadModes::dualStream;
+}
+
+template <typename Family>
+bool L0GfxCoreHelperHw<Family>::isDefaultCmdListWithCopyOffloadSupported(bool additionalBlitPropertiesSupported) const {
+    return (NEO::debugManager.flags.ForceCopyOperationOffloadForComputeCmdList.get() == 2);
 }
 
 } // namespace L0

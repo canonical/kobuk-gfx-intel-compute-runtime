@@ -224,7 +224,12 @@ void GfxCoreHelperHw<Family>::setExtraAllocationData(AllocationData &allocationD
         }
 
         if (properties.allocationType == AllocationType::semaphoreBuffer) {
-            allocationData.flags.useSystemMemory = true;
+            if (rootDeviceEnvironment.getProductHelper().isGlobalFenceInDirectSubmissionRequired(hwInfo)) {
+                allocationData.flags.useSystemMemory = false;
+            } else {
+                allocationData.flags.useSystemMemory = true;
+            }
+            allocationData.flags.requiresCpuAccess = true;
         }
     }
 }

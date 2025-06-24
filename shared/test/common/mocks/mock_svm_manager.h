@@ -15,9 +15,9 @@
 namespace NEO {
 struct MockSVMAllocsManager : public SVMAllocsManager {
   public:
+    using SVMAllocsManager::insertSVMAlloc;
     using SVMAllocsManager::memoryManager;
     using SVMAllocsManager::mtxForIndirectAccess;
-    using SVMAllocsManager::multiOsContextSupport;
     using SVMAllocsManager::svmAllocs;
     using SVMAllocsManager::SVMAllocsManager;
     using SVMAllocsManager::svmDeferFreeAllocs;
@@ -33,9 +33,14 @@ struct MockSVMAllocsManager : public SVMAllocsManager {
 
     void *createUnifiedMemoryAllocation(size_t size, const UnifiedMemoryProperties &memoryProperties) override {
         requestedZeroedOutAllocation = memoryProperties.isInternalAllocation;
-        return SVMAllocsManager::createUnifiedMemoryAllocation(size, memoryProperties);
+        if (createUnifiedMemoryAllocationCallBase) {
+            return SVMAllocsManager::createUnifiedMemoryAllocation(size, memoryProperties);
+        }
+        return createUnifiedMemoryAllocationReturnValue;
     }
     bool requestedZeroedOutAllocation = false;
+    bool createUnifiedMemoryAllocationCallBase = true;
+    void *createUnifiedMemoryAllocationReturnValue = nullptr;
 };
 
 template <bool enableLocalMemory>
@@ -43,13 +48,9 @@ struct SVMMemoryAllocatorFixture {
     SVMMemoryAllocatorFixture() : executionEnvironment(defaultHwInfo.get()) {}
 
     void setUp() {
-        bool svmSupported = executionEnvironment.rootDeviceEnvironments[0]->getHardwareInfo()->capabilityTable.ftrSvm;
-        if (!svmSupported) {
-            GTEST_SKIP();
-        }
         executionEnvironment.initGmm();
         memoryManager = std::make_unique<MockMemoryManager>(false, enableLocalMemory, executionEnvironment);
-        svmManager = std::make_unique<MockSVMAllocsManager>(memoryManager.get(), false);
+        svmManager = std::make_unique<MockSVMAllocsManager>(memoryManager.get());
         if (enableLocalMemory) {
             memoryManager->pageFaultManager.reset(new MockPageFaultManager);
         }

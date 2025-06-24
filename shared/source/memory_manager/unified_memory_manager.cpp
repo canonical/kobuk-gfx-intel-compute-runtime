@@ -236,9 +236,6 @@ void SVMAllocsManager::SvmAllocationCache::logCacheOperation(const SvmAllocation
 }
 
 void SVMAllocsManager::SvmAllocationCache::trimOldAllocs(std::chrono::high_resolution_clock::time_point trimTimePoint, bool trimAll) {
-    if (this->allocations.empty()) {
-        return;
-    }
     std::lock_guard<std::mutex> lock(this->mtx);
     auto allocCleanCandidateIndex = allocations.size();
     while (0u != allocCleanCandidateIndex) {
@@ -363,8 +360,8 @@ void SVMAllocsManager::makeInternalAllocationsResident(CommandStreamReceiver &co
     }
 }
 
-SVMAllocsManager::SVMAllocsManager(MemoryManager *memoryManager, bool multiOsContextSupport)
-    : memoryManager(memoryManager), multiOsContextSupport(multiOsContextSupport) {
+SVMAllocsManager::SVMAllocsManager(MemoryManager *memoryManager)
+    : memoryManager(memoryManager) {
 }
 
 SVMAllocsManager::~SVMAllocsManager() = default;
@@ -413,7 +410,7 @@ void *SVMAllocsManager::createHostUnifiedMemoryAllocation(size_t size,
                                                  alignedSize,
                                                  allocationType,
                                                  false,
-                                                 (deviceBitfield.count() > 1) && multiOsContextSupport,
+                                                 (deviceBitfield.count() > 1),
                                                  deviceBitfield};
     unifiedMemoryProperties.alignment = alignUpNonZero<size_t>(memoryProperties.alignment, pageSizeForAlignment);
     unifiedMemoryProperties.flags.preferCompressed = compressionEnabled;
@@ -470,16 +467,7 @@ void *SVMAllocsManager::createUnifiedMemoryAllocation(size_t size,
     bool compressionEnabled = false;
     AllocationType allocationType = getGraphicsAllocationTypeAndCompressionPreference(memoryProperties, compressionEnabled);
 
-    bool multiStorageAllocation = (deviceBitfield.count() > 1) && multiOsContextSupport;
-    if ((deviceBitfield.count() > 1) && !multiOsContextSupport) {
-        for (uint32_t i = 0;; i++) {
-            if (deviceBitfield.test(i)) {
-                deviceBitfield.reset();
-                deviceBitfield.set(i);
-                break;
-            }
-        }
-    }
+    bool multiStorageAllocation = (deviceBitfield.count() > 1);
 
     AllocationProperties unifiedMemoryProperties{rootDeviceIndex,
                                                  !useExternalHostPtrForCpu, // allocateMemory
@@ -841,24 +829,13 @@ void *SVMAllocsManager::createUnifiedAllocationWithDeviceStorage(size_t size, co
     void *svmPtr = allocationCpu->getUnderlyingBuffer();
     UNRECOVERABLE_IF(useExternalHostPtrForCpu && (externalPtr != svmPtr));
 
-    bool multiStorageAllocation = (subDevices.count() > 1) && multiOsContextSupport;
-    if ((subDevices.count() > 1) && !multiOsContextSupport) {
-        for (uint32_t i = 0;; i++) {
-            if (subDevices.test(i)) {
-                subDevices.reset();
-                subDevices.set(i);
-                break;
-            }
-        }
-    }
-
     const size_t alignedGpuSize = alignUp<size_t>(size, MemoryConstants::pageSize64k);
     AllocationProperties gpuProperties{rootDeviceIndex,
                                        false,
                                        alignedGpuSize,
                                        AllocationType::svmGpu,
                                        false,
-                                       multiStorageAllocation,
+                                       subDevices.count() > 1,
                                        subDevices};
 
     gpuProperties.alignment = alignment;

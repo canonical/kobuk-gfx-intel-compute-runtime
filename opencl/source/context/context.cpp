@@ -296,20 +296,15 @@ bool Context::createImpl(const cl_context_properties *properties,
             memoryManager->getDeferredDeleter()->addClient();
         }
 
-        bool anySvmSupport = false;
         for (auto &device : devices) {
             device->incRefInternal();
-            anySvmSupport |= device->getHardwareInfo().capabilityTable.ftrSvm;
         }
 
         setupContextType();
-        if (anySvmSupport) {
-            this->svmAllocsManager = new SVMAllocsManager(this->memoryManager,
-                                                          this->areMultiStorageAllocationsPreferred());
-            this->svmAllocsManager->initUsmAllocationsCaches(device->getDevice());
-            auto requiresWritableStaging = device->getDefaultEngine().commandStreamReceiver->getType() != CommandStreamReceiverType::hardware;
-            this->stagingBufferManager = std::make_unique<StagingBufferManager>(svmAllocsManager, rootDeviceIndices, deviceBitfields, requiresWritableStaging);
-        }
+        this->svmAllocsManager = new SVMAllocsManager(this->memoryManager);
+        this->svmAllocsManager->initUsmAllocationsCaches(device->getDevice());
+        auto requiresWritableStaging = device->getDefaultEngine().commandStreamReceiver->getType() != CommandStreamReceiverType::hardware;
+        this->stagingBufferManager = std::make_unique<StagingBufferManager>(svmAllocsManager, rootDeviceIndices, deviceBitfields, requiresWritableStaging);
 
         smallBufferPoolAllocator.setParams(SmallBuffersParams::getPreferredBufferPoolParams(device->getProductHelper()));
     }
@@ -687,16 +682,6 @@ Buffer *Context::BufferPoolAllocator::allocateBufferFromPool(const MemoryPropert
 
     bufferFromPool = this->allocateFromPools(memoryProperties, flags, flagsIntel, requestedSize, hostPtr, errcodeRet);
     if (bufferFromPool != nullptr) {
-        for (const auto rootDeviceIndex : this->context->getRootDeviceIndices()) {
-            auto cmdQ = this->context->getSpecialQueue(rootDeviceIndex);
-            if (cmdQ->getDevice().getProductHelper().isDcFlushMitigated()) {
-                auto &csr = cmdQ->getGpgpuCommandStreamReceiver();
-                auto lock = csr.obtainUniqueOwnership();
-                csr.registerDcFlushForDcMitigation();
-                csr.flushTagUpdate();
-            }
-        }
-
         return bufferFromPool;
     }
 

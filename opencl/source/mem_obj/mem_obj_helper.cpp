@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -115,16 +115,7 @@ bool MemObjHelper::isSuitableForCompression(bool compressionSupported, const Mem
     for (auto &pClDevice : context.getDevices()) {
         auto rootDeviceIndex = pClDevice->getRootDeviceIndex();
         if (context.containsMultipleSubDevices(rootDeviceIndex)) {
-            if (debugManager.flags.EnableMultiTileCompression.get() <= 0) {
-                return false;
-            }
-
-            // for unrestrictive and default context, turn on compression only for read only surfaces with no host access.
-            bool isContextSpecialized = (context.peekContextType() == ContextType::CONTEXT_TYPE_SPECIALIZED);
-            bool isReadOnlyAndHostNoAccess = (properties.flags.readOnly && properties.flags.hostNoAccess);
-            if (!isContextSpecialized && !isReadOnlyAndHostNoAccess) {
-                return false;
-            }
+            return false;
         }
     }
     if (preferCompression) {

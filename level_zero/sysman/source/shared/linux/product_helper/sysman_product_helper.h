@@ -29,6 +29,7 @@ class LinuxSysmanImp;
 class PlatformMonitoringTech;
 class SysmanKmdInterface;
 class FirmwareUtil;
+class SysFsAccessInterface;
 
 enum class RasInterfaceType;
 enum class SysfsValueUnit;
@@ -103,6 +104,10 @@ class SysmanProductHelper {
     // Engine
     virtual bool isAggregationOfSingleEnginesSupported() = 0;
     virtual ze_result_t getGroupEngineBusynessFromSingleEngines(LinuxSysmanImp *pLinuxSysmanImp, zes_engine_stats_t *pStats, zes_engine_group_t &engineGroup) = 0;
+
+    // Vf Management
+    virtual bool isVfMemoryUtilizationSupported() = 0;
+    virtual ze_result_t getVfLocalMemoryQuota(SysFsAccessInterface *pSysfsAccess, uint64_t &lMemQuota, const uint32_t &vfId) = 0;
 
     virtual ~SysmanProductHelper() = default;
     virtual const std::map<std::string, std::map<std::string, uint64_t>> *getGuidToKeyOffsetMap() = 0;

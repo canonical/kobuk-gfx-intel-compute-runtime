@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/release_helper/release_helper.h"
@@ -91,6 +92,9 @@ bool ReleaseHelperHw<releaseType>::isGlobalBindlessAllocatorEnabled() const {
 
 template <ReleaseType releaseType>
 uint32_t ReleaseHelperHw<releaseType>::getNumThreadsPerEu() const {
+    if (debugManager.flags.OverrideNumThreadsPerEu.get() != -1) {
+        return debugManager.flags.OverrideNumThreadsPerEu.get();
+    }
     return 8u;
 }
 
@@ -170,6 +174,10 @@ bool ReleaseHelperHw<releaseType>::getFtrXe2Compression() const {
 template <ReleaseType releaseType>
 uint32_t ReleaseHelperHw<releaseType>::computeSlmValues(uint32_t slmSize, bool isHeapless) const {
     return 0u;
+}
+template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::isBlitImageAllowedForDepthFormat() const {
+    return true;
 }
 
 } // namespace NEO

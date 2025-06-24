@@ -290,6 +290,9 @@ struct Event : _ze_event_handle_t {
     bool isWaitScope() const {
         return !!waitScope;
     }
+    bool isWaitScope(ze_event_scope_flags_t flag) const {
+        return !!(waitScope & flag);
+    }
     void setMetricNotification(MetricCollectorEventNotify *metricNotification) {
         this->metricNotification = metricNotification;
     }
@@ -324,6 +327,7 @@ struct Event : _ze_event_handle_t {
     void setExternalInterruptId(uint32_t interruptId) { externalInterruptId = interruptId; }
 
     void resetInOrderTimestampNode(NEO::TagNodeBase *newNode, uint32_t partitionCount);
+    void resetAdditionalTimestampNode(NEO::TagNodeBase *newNode, uint32_t partitionCount);
 
     bool hasInOrderTimestampNode() const { return !inOrderTimestampNode.empty(); }
 
@@ -345,7 +349,7 @@ struct Event : _ze_event_handle_t {
 
     void unsetCmdQueue();
     void releaseTempInOrderTimestampNodes();
-    virtual void clearLatestInOrderTimestampData(uint32_t partitionCount) = 0;
+    virtual void clearTimestampTagData(uint32_t partitionCount, NEO::TagNodeBase *newNode) = 0;
 
     EventPool *eventPool = nullptr;
 
@@ -385,6 +389,7 @@ struct Event : _ze_event_handle_t {
     std::shared_ptr<NEO::InOrderExecInfo> inOrderExecInfo;
     CommandQueue *latestUsedCmdQueue = nullptr;
     std::vector<NEO::TagNodeBase *> inOrderTimestampNode;
+    std::vector<NEO::TagNodeBase *> additionalTimestampNode;
 
     uint32_t maxKernelCount = 0;
     uint32_t kernelCount = 1u;

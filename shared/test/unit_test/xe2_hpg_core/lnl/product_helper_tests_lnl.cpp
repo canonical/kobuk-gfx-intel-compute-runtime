@@ -108,48 +108,13 @@ LNLTEST_F(LnlProductHelper, givenProductHelperWhenCallIsCachingOnCpuAvailableThe
     EXPECT_FALSE(productHelper->isCachingOnCpuAvailable());
 }
 
-LNLTEST_F(LnlProductHelper, givenProductHelperWhenCheckOverrideAllocationCacheableThenTrueIsReturnedForCommandBuffer) {
+LNLTEST_F(LnlProductHelper, givenProductHelperWhenCheckoverrideAllocationCpuCacheableThenTrueIsReturnedForCommandBuffer) {
     AllocationData allocationData{};
     allocationData.type = AllocationType::commandBuffer;
-    EXPECT_TRUE(productHelper->overrideAllocationCacheable(allocationData));
+    EXPECT_TRUE(productHelper->overrideAllocationCpuCacheable(allocationData));
 
     allocationData.type = AllocationType::buffer;
-    EXPECT_FALSE(productHelper->overrideAllocationCacheable(allocationData));
-}
-
-LNLTEST_F(LnlProductHelper, givenExternalHostPtrWhenMitigateDcFlushThenOverrideCacheable) {
-    DebugManagerStateRestore restorer;
-    debugManager.flags.AllowDcFlush.set(1);
-
-    AllocationData allocationData{};
-    allocationData.type = AllocationType::externalHostPtr;
-    EXPECT_FALSE(productHelper->overrideAllocationCacheable(allocationData));
-
-    debugManager.flags.AllowDcFlush.set(0);
-
-    for (auto i = 0; i < static_cast<int>(AllocationType::count); ++i) {
-        auto allocationType = static_cast<AllocationType>(i);
-        allocationData.type = allocationType;
-        switch (allocationData.type) {
-        case AllocationType::commandBuffer:
-            EXPECT_TRUE(productHelper->overrideAllocationCacheable(allocationData));
-            break;
-        case AllocationType::externalHostPtr:
-        case AllocationType::bufferHostMemory:
-        case AllocationType::mapAllocation:
-        case AllocationType::svmCpu:
-        case AllocationType::svmZeroCopy:
-        case AllocationType::internalHostMemory:
-        case AllocationType::printfSurface:
-            EXPECT_TRUE(productHelper->overrideAllocationCacheable(allocationData));
-            EXPECT_TRUE(productHelper->overrideCacheableForDcFlushMitigation(allocationData.type));
-            break;
-        default:
-            EXPECT_FALSE(productHelper->overrideAllocationCacheable(allocationData));
-            EXPECT_FALSE(productHelper->overrideCacheableForDcFlushMitigation(allocationData.type));
-            break;
-        }
-    }
+    EXPECT_FALSE(productHelper->overrideAllocationCpuCacheable(allocationData));
 }
 
 LNLTEST_F(LnlProductHelper, givenProductHelperWhenCheckBlitEnqueuePreferredThenReturnCorrectValue) {

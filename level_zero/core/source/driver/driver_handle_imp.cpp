@@ -34,6 +34,7 @@
 #include "level_zero/core/source/driver/host_pointer_manager.h"
 #include "level_zero/core/source/fabric/fabric.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
+#include "level_zero/core/source/helpers/default_descriptors.h"
 #include "level_zero/core/source/image/image.h"
 #include "level_zero/core/source/semaphore/external_semaphore_imp.h"
 #include "level_zero/driver_experimental/zex_common.h"
@@ -213,6 +214,10 @@ ze_result_t DriverHandleImp::getExtensionProperties(uint32_t *pCount,
 }
 
 DriverHandleImp::~DriverHandleImp() {
+    if (this->defaultContext) {
+        L0::Context::fromHandle(this->defaultContext)->destroy();
+        this->defaultContext = nullptr;
+    }
     if (this->externalSemaphoreController) {
         this->externalSemaphoreController.reset();
     }
@@ -260,7 +265,6 @@ void DriverHandleImp::updateRootDeviceBitFields(std::unique_ptr<NEO::Device> &ne
 }
 
 ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>> neoDevices) {
-    bool multiOsContextDriver = false;
     this->pid = NEO::SysCalls::getCurrentProcessId();
 
     for (auto &neoDevice : neoDevices) {
@@ -284,7 +288,6 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
         auto device = Device::create(this, pNeoDevice, false, &returnValue);
         this->devices.push_back(device);
 
-        multiOsContextDriver |= device->isImplicitScalingCapable();
         if (returnValue != ZE_RESULT_SUCCESS) {
             return returnValue;
         }
@@ -294,7 +297,7 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
         return ZE_RESULT_ERROR_UNINITIALIZED;
     }
 
-    this->svmAllocsManager = new NEO::SVMAllocsManager(memoryManager, multiOsContextDriver);
+    this->svmAllocsManager = new NEO::SVMAllocsManager(memoryManager);
     if (this->svmAllocsManager == nullptr) {
         return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
@@ -302,9 +305,6 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
     this->initHostUsmAllocPool();
     for (auto &device : this->devices) {
         this->initDeviceUsmAllocPool(*device->getNEODevice());
-        if (auto deviceUsmAllocPool = device->getNEODevice()->getUsmMemAllocPool()) {
-            deviceUsmAllocPool->ensureInitialized(this->svmAllocsManager);
-        }
         if (auto deviceUsmAllocPoolsManager = device->getNEODevice()->getUsmMemAllocPoolsManager()) {
             deviceUsmAllocPoolsManager->ensureInitialized(this->svmAllocsManager);
         }
@@ -322,6 +322,13 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
             device->getBuiltinFunctionsLib()->ensureInitCompletion();
         }
     }
+
+    setupDevicesToExpose();
+    uint32_t deviceIdentifier = 0u;
+    for (auto &deviceToExpose : this->devicesToExpose) {
+        Device::fromHandle(deviceToExpose)->setIdentifier(deviceIdentifier++);
+    }
+    createContext(&DefaultDescriptors::contextDesc, static_cast<uint32_t>(this->devicesToExpose.size()), this->devicesToExpose.data(), &defaultContext);
 
     return ZE_RESULT_SUCCESS;
 }
@@ -372,12 +379,21 @@ void DriverHandleImp::initDeviceUsmAllocPool(NEO::Device &device) {
     }
 
     if (enabled) {
-        device.resetUsmAllocationPool(new NEO::UsmMemAllocPool(rootDeviceIndices, deviceBitfields, &device, InternalMemoryType::deviceUnifiedMemory,
-                                                               poolSize, minServicedSize, maxServicedSize));
+        device.resetUsmAllocationPool(new NEO::UsmMemAllocPool);
+        auto &hwInfo = device.getHardwareInfo();
+        auto &l0GfxCoreHelper = device.getRootDeviceEnvironment().getHelper<L0GfxCoreHelper>();
+        const bool compressionEnabledByDefault = l0GfxCoreHelper.usmCompressionSupported(hwInfo) && l0GfxCoreHelper.forceDefaultUsmCompressionSupport();
+        NEO::SVMAllocsManager::UnifiedMemoryProperties poolMemoryProperties(InternalMemoryType::deviceUnifiedMemory,
+                                                                            MemoryConstants::pageSize2M,
+                                                                            rootDeviceIndices,
+                                                                            deviceBitfields);
+        poolMemoryProperties.device = &device;
+        poolMemoryProperties.allocationFlags.flags.compressedHint = compressionEnabledByDefault;
+        device.getUsmMemAllocPool()->initialize(this->svmAllocsManager, poolMemoryProperties, poolSize, minServicedSize, maxServicedSize);
     }
 }
 
-ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phDevices) {
+void DriverHandleImp::setupDevicesToExpose() {
 
     // If the user has requested FLAT or COMBINED device hierarchy model, then report all the sub devices as devices.
     bool exposeSubDevices = (this->devices.size() && this->devices[0]->getNEODevice()->getExecutionEnvironment()->getDeviceHierarchyMode() != NEO::DeviceHierarchyMode::composite);
@@ -397,6 +413,30 @@ ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phD
     } else {
         numDevices = this->numDevices;
     }
+    this->devicesToExpose.clear();
+    this->devicesToExpose.reserve(numDevices);
+
+    for (auto device : devices) {
+
+        auto deviceImpl = static_cast<DeviceImp *>(device);
+        if (deviceImpl->numSubDevices > 0 && exposeSubDevices) {
+
+            if (device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->isExposeSingleDeviceMode()) {
+                this->devicesToExpose.push_back(device);
+                continue;
+            }
+
+            for (auto subdevice : deviceImpl->subDevices) {
+                this->devicesToExpose.push_back(subdevice);
+            }
+        } else {
+            this->devicesToExpose.push_back(device);
+        }
+    }
+}
+
+ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phDevices) {
+    uint32_t numDevices = static_cast<uint32_t>(this->devicesToExpose.size());
     if (*pCount == 0) {
         *pCount = numDevices;
         return ZE_RESULT_SUCCESS;
@@ -406,35 +446,11 @@ ze_result_t DriverHandleImp::getDevice(uint32_t *pCount, ze_device_handle_t *phD
         return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     }
 
-    uint32_t i = 0;
-    for (auto device : devices) {
+    auto numDevicesToReturn = std::min(numDevices, *pCount);
 
-        auto deviceImpl = static_cast<DeviceImp *>(device);
-        if (deviceImpl->numSubDevices > 0 && exposeSubDevices) {
+    memcpy_s(phDevices, numDevicesToReturn * sizeof(ze_device_handle_t), this->devicesToExpose.data(), numDevicesToReturn * sizeof(ze_device_handle_t));
 
-            if (device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[device->getRootDeviceIndex()]->isExposeSingleDeviceMode()) {
-                phDevices[i++] = device;
-                if (i == *pCount) {
-                    return ZE_RESULT_SUCCESS;
-                }
-                continue;
-            }
-
-            for (auto subdevice : deviceImpl->subDevices) {
-                phDevices[i++] = subdevice;
-                if (i == *pCount) {
-                    return ZE_RESULT_SUCCESS;
-                }
-            }
-        } else {
-            phDevices[i++] = device;
-            if (i == *pCount) {
-                return ZE_RESULT_SUCCESS;
-            }
-        }
-    }
-
-    *pCount = numDevices;
+    *pCount = numDevicesToReturn;
     return ZE_RESULT_SUCCESS;
 }
 

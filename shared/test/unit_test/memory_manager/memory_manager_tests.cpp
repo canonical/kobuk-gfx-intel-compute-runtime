@@ -1693,7 +1693,7 @@ TEST(OsAgnosticMemoryManager, GivenEnabled64kbPagesWhenHostMemoryAllocationIsCre
     galloc = memoryManager.allocateGraphicsMemoryWithProperties({mockRootDeviceIndex, MemoryConstants::pageSize64k, AllocationType::bufferHostMemory, mockDeviceBitfield});
     EXPECT_NE(nullptr, galloc);
     EXPECT_NE(nullptr, galloc->getUnderlyingBuffer());
-    size_t size = (executionEnvironment.rootDeviceEnvironments[0u]->getHardwareInfo()->capabilityTable.hostPtrTrackingEnabled) ? MemoryConstants::pageSize64k : MemoryConstants::pageSize;
+    size_t size = MemoryConstants::pageSize;
     EXPECT_EQ(0u, (uintptr_t)galloc->getUnderlyingBuffer() % size);
 
     EXPECT_NE(0u, galloc->getGpuAddress());
@@ -1742,26 +1742,6 @@ TEST_P(OsAgnosticMemoryManagerWithParams, givenReducedGpuAddressSpaceWhenAllocat
     EXPECT_NE(nullptr, allocation);
     EXPECT_EQ(0u, allocation->fragmentsStorage.fragmentCount);
     EXPECT_EQ(requiresL3Flush, allocation->isFlushL3Required());
-
-    memoryManager.freeGraphicsMemory(allocation);
-}
-
-TEST_P(OsAgnosticMemoryManagerWithParams, givenFullGpuAddressSpaceWhenAllocateGraphicsMemoryForHostPtrIsCalledThenAllocationWithFragmentsIsCreated) {
-    bool requiresL3Flush = GetParam();
-    MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
-    executionEnvironment.rootDeviceEnvironments[0]->setHwInfoAndInitHelpers(defaultHwInfo.get());
-    if ((!executionEnvironment.rootDeviceEnvironments[0]->isFullRangeSvm()) || !defaultHwInfo->capabilityTable.hostPtrTrackingEnabled) {
-        GTEST_SKIP();
-    }
-    OsAgnosticMemoryManager memoryManager(executionEnvironment);
-    auto hostPtr = reinterpret_cast<const void *>(0x5001);
-    AllocationProperties properties{0, false, 13, AllocationType::externalHostPtr, false, mockDeviceBitfield};
-    properties.flags.flushL3RequiredForRead = properties.flags.flushL3RequiredForWrite = requiresL3Flush;
-    auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(properties, hostPtr);
-    EXPECT_NE(nullptr, allocation);
-    EXPECT_EQ(1u, allocation->fragmentsStorage.fragmentCount);
-    EXPECT_EQ(requiresL3Flush, allocation->isFlushL3Required());
-    EXPECT_EQ(AllocationType::externalHostPtr, allocation->getAllocationType());
 
     memoryManager.freeGraphicsMemory(allocation);
 }
@@ -2009,10 +1989,9 @@ TEST(MemoryManager, givenBufferAndLimitedGPUWhenAllocatingGraphicsMemoryThenAllo
     memoryManager.freeGraphicsMemory(bufferAllocation);
 }
 
-TEST(MemoryManager, givenBufferHostMemoryAndHostPtrTrackingDisabledWhenAllocatingGraphicsMemoryThenAllocateGraphicsMemoryForNonSvmHostPtrIsCalled) {
+TEST(MemoryManager, givenBufferHostMemoryWhenAllocatingGraphicsMemoryThenAllocateGraphicsMemoryForNonSvmHostPtrIsCalled) {
     MockExecutionEnvironment executionEnvironment{};
     HardwareInfo hwInfoLocal = *defaultHwInfo;
-    hwInfoLocal.capabilityTable.hostPtrTrackingEnabled = false;
     executionEnvironment.rootDeviceEnvironments[0u]->setHwInfoAndInitHelpers(&hwInfoLocal);
     executionEnvironment.rootDeviceEnvironments[0u]->initGmm();
 
@@ -2032,10 +2011,9 @@ TEST(MemoryManager, givenBufferHostMemoryAndHostPtrTrackingDisabledWhenAllocatin
     memoryManager.freeGraphicsMemory(bufferAllocation);
 }
 
-TEST(MemoryManager, givenBufferHostMemoryAndHostPtrTrackingDisabledAndForce32bitAllocationsWhenAllocatingGraphicsMemoryThenAllocateGraphicsMemoryForNonSvmHostPtrIsNotCalled) {
+TEST(MemoryManager, givenBufferHostMemoryAndForce32bitAllocationsWhenAllocatingGraphicsMemoryThenAllocateGraphicsMemoryForNonSvmHostPtrIsNotCalled) {
     MockExecutionEnvironment executionEnvironment{};
     HardwareInfo hwInfoLocal = *defaultHwInfo;
-    hwInfoLocal.capabilityTable.hostPtrTrackingEnabled = false;
     executionEnvironment.rootDeviceEnvironments[0u]->setHwInfoAndInitHelpers(&hwInfoLocal);
     executionEnvironment.rootDeviceEnvironments[0u]->initGmm();
 
@@ -2791,7 +2769,7 @@ TEST(MemoryManagerTest, whenMemoryManagerReturnsNullptrThenAllocateGlobalsSurfac
     EXPECT_EQ(nullptr, allocation);
     EXPECT_EQ(deviceBitfield, memoryManager->recentlyPassedDeviceBitfield);
 
-    auto svmAllocsManager = std::make_unique<SVMAllocsManager>(memoryManager, false);
+    auto svmAllocsManager = std::make_unique<SVMAllocsManager>(memoryManager);
     memoryManager->recentlyPassedDeviceBitfield = {};
     allocation = allocateGlobalsSurface(svmAllocsManager.get(), device, 1024, 0u, false, &linkerInput, nullptr);
     EXPECT_EQ(nullptr, allocation);
@@ -2891,7 +2869,7 @@ HWTEST_F(MemoryAllocatorTest, givenMemoryManagerWhenEnableHostPtrTrackingFlagIsS
     if (is32bit) {
         EXPECT_TRUE(memoryManager->isHostPointerTrackingEnabled(0u));
     } else {
-        EXPECT_EQ(device->getHardwareInfo().capabilityTable.hostPtrTrackingEnabled, memoryManager->isHostPointerTrackingEnabled(0u));
+        EXPECT_FALSE(memoryManager->isHostPointerTrackingEnabled(0u));
     }
 }
 
@@ -2918,18 +2896,8 @@ HWTEST_F(MemoryAllocatorTest, givenMemoryManagerWhenHostPtrTrackingModeThenNonSv
     EXPECT_EQ(false, result);
 }
 
-HWTEST_F(MemoryAllocatorTest, givenMemoryManagerWhenHostPtrTrackingModeThenNonSvmBufferIsNotSet) {
+HWTEST_F(MemoryAllocatorTest, givenMemoryManagerThenNonSvmBufferIsSetForBufferHostMemory) {
     HardwareInfo hwInfoLocal = *defaultHwInfo;
-    hwInfoLocal.capabilityTable.hostPtrTrackingEnabled = true;
-    memoryManager->peekExecutionEnvironment().rootDeviceEnvironments[0u]->setHwInfoAndInitHelpers(&hwInfoLocal);
-    int buffer = 0;
-    EXPECT_FALSE(memoryManager->isNonSvmBuffer(&buffer, AllocationType::externalHostPtr, 0u));
-    EXPECT_FALSE(memoryManager->isNonSvmBuffer(&buffer, AllocationType::bufferHostMemory, 0u));
-}
-
-HWTEST_F(MemoryAllocatorTest, givenMemoryManagerWhenHostPtrTrackingDisabledAnd64bitsThenNonSvmBufferIsSetForBufferHostMemory) {
-    HardwareInfo hwInfoLocal = *defaultHwInfo;
-    hwInfoLocal.capabilityTable.hostPtrTrackingEnabled = false;
     memoryManager->peekExecutionEnvironment().rootDeviceEnvironments[0u]->setHwInfoAndInitHelpers(&hwInfoLocal);
     int buffer = 0;
     EXPECT_FALSE(memoryManager->isNonSvmBuffer(&buffer, AllocationType::externalHostPtr, 0u));
@@ -3197,6 +3165,30 @@ HWTEST_F(MemoryAllocatorTest, givenUseLocalPreferredForCacheableBuffersAndCompre
         EXPECT_EQ(true, allocData.storageInfo.systemMemoryPlacement);
         EXPECT_EQ(false, allocData.storageInfo.systemMemoryForced);
     }
+}
+
+HWTEST_F(MemoryAllocatorTest, givenNonDefaultLocalMemoryAllocationModeAndLocalPreferredForCacheableBuffersWhenGettingAllocDataForDeviceUsmThenLocalOnlyRequiredIsNotOverriden) {
+    DebugManagerStateRestore restorer;
+    debugManager.flags.UseLocalPreferredForCacheableBuffers.set(1);
+
+    AllocationProperties properties(mockRootDeviceIndex, 1, AllocationType::buffer, mockDeviceBitfield);
+    properties.flags.uncacheable = false;
+
+    MockMemoryManager mockMemoryManager;
+    auto releaseHelper = std::make_unique<MockReleaseHelper>();
+    mockMemoryManager.executionEnvironment.rootDeviceEnvironments[properties.rootDeviceIndex]->releaseHelper.reset(releaseHelper.get());
+
+    for (const auto debugKeyValue : std::to_array({1, 2})) {
+        mockMemoryManager.usmDeviceAllocationMode = toLocalMemAllocationMode(debugKeyValue);
+        releaseHelper->isLocalOnlyAllowedResult = (debugKeyValue == 1);
+        auto storageInfo{mockMemoryManager.createStorageInfoFromProperties(properties)};
+        bool expectedValue{storageInfo.localOnlyRequired};
+
+        AllocationData allocData;
+        mockMemoryManager.getAllocationData(allocData, properties, nullptr, storageInfo);
+        EXPECT_EQ(expectedValue, allocData.storageInfo.localOnlyRequired);
+    }
+    releaseHelper.release();
 }
 
 TEST(MemoryTransferHelperTest, WhenBlitterIsSelectedButBlitCopyFailsThenFallbackToCopyOnCPU) {

@@ -42,12 +42,10 @@
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/source/utilities/wait_util.h"
 
+#include "aub_services.h"
+
 #include <array>
 #include <iostream>
-
-namespace AubMemDump {
-#include "aub_services.h"
-}
 
 namespace NEO {
 
@@ -696,10 +694,6 @@ IndirectHeap &CommandStreamReceiver::getIndirectHeap(IndirectHeap::Type heapType
         internalAllocationStorage->storeAllocation(std::unique_ptr<GraphicsAllocation>(heapMemory), REUSABLE_ALLOCATION);
         heapMemory = nullptr;
         this->heapStorageRequiresRecyclingTag = true;
-
-        if (this->peekRootDeviceEnvironment().getProductHelper().isDcFlushMitigated()) {
-            this->registerDcFlushForDcMitigation();
-        }
     }
 
     if (!heapMemory) {

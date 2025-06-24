@@ -41,6 +41,7 @@ struct InOrderFixtureMockEvent : public EventImp<uint32_t> {
     using EventImp<uint32_t>::externalInterruptId;
     using EventImp<uint32_t>::latestUsedCmdQueue;
     using EventImp<uint32_t>::inOrderTimestampNode;
+    using EventImp<uint32_t>::additionalTimestampNode;
 
     void makeCounterBasedInitiallyDisabled(MultiGraphicsAllocation &poolAllocation) {
         resetInOrderTimestampNode(nullptr, 0);
@@ -193,7 +194,7 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         cmdList->enableInOrderExecution();
 
         if (copyOffloadEnabled) {
-            cmdList->enableCopyOperationOffload(device->getHwInfo().platform.eProductFamily, device, &desc);
+            cmdList->enableCopyOperationOffload();
             cmdList->copyOperationFenceSupported = device->getProductHelper().isDeviceToHostCopySignalingFenceRequired();
         }
 

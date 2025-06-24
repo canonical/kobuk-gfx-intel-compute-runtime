@@ -319,6 +319,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     bool inOrderExecSignalRequired = false;
     bool inOrderNonWalkerSignalling = false;
+    bool isCounterBasedEvent = false;
 
     uint64_t inOrderCounterValue = 0;
     uint64_t inOrderIncrementValue = 0;
@@ -348,6 +349,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
                     inOrderCounterValue = this->inOrderExecInfo->getCounterValue() + getInOrderIncrementValue();
                     inOrderExecInfo = this->inOrderExecInfo.get();
                     if (eventForInOrderExec && eventForInOrderExec->isCounterBased()) {
+                        isCounterBasedEvent = true;
                         if (eventForInOrderExec->getInOrderIncrementValue() > 0) {
                             inOrderIncrementGpuAddress = eventForInOrderExec->getInOrderExecInfo()->getBaseDeviceAddress();
                             inOrderIncrementValue = eventForInOrderExec->getInOrderIncrementValue();
@@ -358,8 +360,20 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
         }
     }
 
+    if (this->consumeTextureCacheFlushPending()) {
+        NEO::PipeControlArgs args;
+        args.textureCacheInvalidationEnable = true;
+        NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
+    }
+
     auto maxWgCountPerTile = kernel->getMaxWgCountPerTile(this->engineGroupType);
 
+    auto isFlushL3ForExternalAllocationRequired = isFlushL3AfterPostSync && isKernelUsingExternalAllocation;
+    auto isFlushL3ForHostUsmRequired = isFlushL3AfterPostSync && isKernelUsingSystemAllocation;
+    if (NEO::debugManager.flags.DisableFlushL3ForHostUsm.get() && isFlushL3ForHostUsmRequired) {
+        isFlushL3ForExternalAllocationRequired = true;
+        isFlushL3ForHostUsmRequired = false;
+    }
     NEO::EncodeKernelArgsExt dispatchKernelArgsExt = {};
 
     NEO::EncodeDispatchKernelArgs dispatchKernelArgs{
@@ -382,13 +396,14 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
             .inOrderIncrementValue = inOrderIncrementValue,
             .device = neoDevice,
             .inOrderExecInfo = inOrderExecInfo,
+            .isCounterBasedEvent = isCounterBasedEvent,
             .isTimestampEvent = isTimestampEvent,
             .isHostScopeSignalEvent = isHostSignalScopeEvent,
-            .isKernelUsingSystemAllocation = isKernelUsingSystemAllocation,
+            .isUsingSystemAllocation = isKernelUsingSystemAllocation,
             .dcFlushEnable = this->dcFlushSupport,
             .interruptEvent = interruptEvent,
-            .isFlushL3ForExternalAllocationRequired = isFlushL3AfterPostSync && isKernelUsingExternalAllocation,
-            .isFlushL3ForHostUsmRequired = isFlushL3AfterPostSync && isKernelUsingSystemAllocation,
+            .isFlushL3ForExternalAllocationRequired = isFlushL3ForExternalAllocationRequired,
+            .isFlushL3ForHostUsmRequired = isFlushL3ForHostUsmRequired,
         },
         .preemptionMode = kernelPreemptionMode,
         .requiredPartitionDim = launchParams.requiredPartitionDim,
@@ -415,14 +430,14 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     NEO::EncodeDispatchKernel<GfxFamily>::encodeCommon(commandContainer, dispatchKernelArgs);
     launchParams.outWalker = dispatchKernelArgs.outWalkerPtr;
 
-    if (this->heaplessModeEnabled && this->scratchAddressPatchingEnabled && kernelNeedsScratchSpace) {
+    auto &scratchPointerAddress = kernelDescriptor.payloadMappings.implicitArgs.scratchPointerAddress;
+    if (this->heaplessModeEnabled && this->scratchAddressPatchingEnabled && kernelNeedsScratchSpace && NEO::isDefined(scratchPointerAddress.pointerSize) && NEO::isValidOffset(scratchPointerAddress.offset)) {
         CommandToPatch scratchInlineData;
         scratchInlineData.pDestination = dispatchKernelArgs.outWalkerPtr;
         scratchInlineData.pCommand = nullptr;
         scratchInlineData.type = CommandToPatch::CommandType::ComputeWalkerInlineDataScratch;
-        scratchInlineData.offset = NEO::EncodeDispatchKernel<GfxFamily>::getInlineDataOffset(dispatchKernelArgs) +
-                                   kernelDescriptor.payloadMappings.implicitArgs.scratchPointerAddress.offset;
-        scratchInlineData.patchSize = kernelDescriptor.payloadMappings.implicitArgs.scratchPointerAddress.pointerSize;
+        scratchInlineData.offset = NEO::EncodeDispatchKernel<GfxFamily>::getInlineDataOffset(dispatchKernelArgs) + scratchPointerAddress.offset;
+        scratchInlineData.patchSize = scratchPointerAddress.pointerSize;
         auto ssh = commandContainer.getIndirectHeap(NEO::HeapType::surfaceState);
         if (ssh != nullptr) {
             scratchInlineData.baseAddress = ssh->getGpuBase();
@@ -434,6 +449,16 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     if (!this->isFlushTaskSubmissionEnabled) {
         this->containsStatelessUncachedResource = dispatchKernelArgs.requiresUncachedMocs;
+    }
+
+    bool textureFlushRequired = false;
+    if (this->device->getProductHelper().isPostImageWriteFlushRequired() &&
+        kernelInfo->kernelDescriptor.kernelAttributes.hasImageWriteArg) {
+        if (this->isImmediateType()) {
+            textureFlushRequired = true;
+        } else {
+            this->setTextureCacheFlushPending(true);
+        }
     }
 
     if (!launchParams.makeKernelCommandView) {
@@ -458,10 +483,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
             }
         }
     }
-
-    bool textureFlushRequired = this->device->getProductHelper().isPostImageWriteFlushRequired() &&
-                                this->isImmediateType() &&
-                                kernelInfo->kernelDescriptor.kernelAttributes.hasImageWriteArg;
 
     if (inOrderExecSignalRequired) {
         if (inOrderNonWalkerSignalling) {
@@ -535,7 +556,7 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
 
     // Store PrintfBuffer from a kernel
     {
-        if (kernelDescriptor.kernelAttributes.flags.usesPrintf) {
+        if (kernelImp->getPrintfBufferAllocation() != nullptr) {
             storePrintfKernel(kernel);
         }
     }
@@ -545,10 +566,6 @@ ze_result_t CommandListCoreFamily<gfxCoreFamily>::appendLaunchKernelWithParams(K
     }
 
     if (kernelImp->usesRayTracing()) {
-        if (this->device->getProductHelper().isDcFlushMitigated()) {
-            this->requiresDcFlushForDcMitigation = true;
-        }
-
         NEO::PipeControlArgs args{};
         args.stateCacheInvalidationEnable = true;
         NEO::MemorySynchronizationCommands<GfxFamily>::addSingleBarrier(*commandContainer.getCommandStream(), args);
@@ -605,6 +622,7 @@ NEO::PipeControlArgs CommandListCoreFamily<gfxCoreFamily>::createBarrierFlags() 
     NEO::PipeControlArgs args;
     args.hdcPipelineFlush = true;
     args.unTypedDataPortCacheFlush = true;
+    args.textureCacheInvalidationEnable = this->consumeTextureCacheFlushPending();
     return args;
 }
 

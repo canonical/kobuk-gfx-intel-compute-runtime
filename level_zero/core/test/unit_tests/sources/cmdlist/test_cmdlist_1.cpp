@@ -92,6 +92,43 @@ TEST_F(ContextCommandListCreate, givenInvalidDescWhenCreatingCommandListImmediat
     EXPECT_EQ(CommandList::fromHandle(hCommandList), nullptr);
 }
 
+struct DefautlDescriptorWithBlitterTest : Test<DeviceFixture> {
+
+    void SetUp() override {
+        NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
+        hwInfo.capabilityTable.blitterOperationsSupported = true;
+        hwInfo.featureTable.ftrBcsInfo.set(0);
+        DeviceFixture::setUpImpl(&hwInfo);
+    }
+};
+
+struct DefautlDescriptorWithoutBlitterTest : Test<DeviceFixture> {
+
+    void SetUp() override {
+        NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
+        hwInfo.capabilityTable.blitterOperationsSupported = false;
+        DeviceFixture::setUpImpl(&hwInfo);
+    }
+};
+
+TEST_F(DefautlDescriptorWithoutBlitterTest, givenDeviceWithoutBlitterSupportWhenCreatingCommandListImmediateWithoutDescriptorThenInOrderAsyncCmdListWithoutCopyOffloadIsCreated) {
+    ze_command_list_handle_t hCommandList = {};
+    ze_result_t result = context->createCommandListImmediate(device, nullptr, &hCommandList);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto commandList = CommandList::whiteboxCast(L0::CommandList::fromHandle(hCommandList));
+    uint32_t ordinal = std::numeric_limits<uint32_t>::max();
+    EXPECT_EQ(commandList->getOrdinal(&ordinal), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(ordinal, 0u);
+    uint32_t index = std::numeric_limits<uint32_t>::max();
+    EXPECT_EQ(commandList->getImmediateIndex(&index), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(index, 0u);
+    EXPECT_TRUE(commandList->isInOrderExecutionEnabled());
+    EXPECT_FALSE(commandList->isSyncModeQueue);
+    EXPECT_FALSE(commandList->isCopyOffloadEnabled());
+    commandList->destroy();
+}
+
 TEST_F(CommandListCreateTests, whenCommandListIsCreatedWithInvalidProductFamilyThenFailureIsReturned) {
     ze_result_t returnValue;
     std::unique_ptr<L0::CommandList> commandList(CommandList::create(PRODUCT_FAMILY::IGFX_MAX_PRODUCT, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
@@ -282,7 +319,7 @@ TEST_F(CommandListCreateTests, givenValidSystemAlloctedPtrAndSharedSystemAllocat
     auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
     VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
 
-    sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+    sharedSystemMemCapabilities = (UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess);
 
     auto res = commandList->appendMemAdvise(device, ptr, size, ZE_MEMORY_ADVICE_SET_PREFERRED_LOCATION);
     EXPECT_EQ(1u, commandList->getMemAdviseOperations().size());
@@ -317,7 +354,7 @@ TEST_P(SupportedMemAdviceSystemAllocatorTests, givenValidSystemAlloctedPtrWhenEx
     auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
     VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
 
-    sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+    sharedSystemMemCapabilities = (UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess);
 
     auto res = commandList->executeMemAdvise(device, ptr, size, GetParam());
     EXPECT_EQ(1u, memoryManager->setSharedSystemMemAdviseCalledCount);
@@ -359,7 +396,7 @@ TEST_P(UnSupportedMemAdviceSystemAllocatorTests, givenValidSystemAlloctedPtrWhen
     auto &hwInfo = *device->getNEODevice()->getRootDeviceEnvironment().getMutableHardwareInfo();
     VariableBackup<uint64_t> sharedSystemMemCapabilities{&hwInfo.capabilityTable.sharedSystemMemCapabilities};
 
-    sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+    sharedSystemMemCapabilities = (UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess);
 
     auto res = commandList->executeMemAdvise(device, ptr, size, GetParam());
     EXPECT_EQ(0u, memoryManager->setSharedSystemMemAdviseCalledCount);
@@ -1350,10 +1387,10 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
     };
     // non-pipelined state
     bool shouldProgramNPStates = !heaplessStateInitEnabled;
-    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false), false, shouldProgramNPStates);
+    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams), false, shouldProgramNPStates);
 
     // non-pipelined state already programmed
-    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false), false, false);
+    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams), false, false);
 
     verifyFlags(commandList->appendLaunchKernelIndirect(kernel.toHandle(), groupCount, nullptr, 0, nullptr, false), false, false);
 
@@ -1364,7 +1401,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
 
     verifyFlags(commandList->appendMemoryCopyRegion(dstPtr, &region, 0, 0, srcPtr, &region, 0, 0, nullptr, 0, nullptr, copyParams), false, false);
 
-    verifyFlags(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, nullptr, 0, nullptr, false), false, false);
+    verifyFlags(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, nullptr, 0, nullptr, copyParams), false, false);
 
     verifyFlags(commandList->appendEventReset(event), true, true);
 
@@ -1388,15 +1425,17 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
         image->initialize(device, &zeDesc);
         auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
 
-        verifyFlags(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, nullptr, 0, nullptr, false), false, false);
+        CmdListMemoryCopyParams copyParams = {};
 
-        verifyFlags(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, nullptr, 0, nullptr, false), false, false);
+        verifyFlags(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, nullptr, 0, nullptr, copyParams), false, false);
 
-        verifyFlags(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, nullptr, 0, nullptr, false), false, false);
+        verifyFlags(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, nullptr, 0, nullptr, copyParams), false, false);
 
-        verifyFlags(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, 0, nullptr, false), false, false);
+        verifyFlags(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, nullptr, 0, nullptr, copyParams), false, false);
 
-        verifyFlags(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, 0, nullptr, false), false, false);
+        verifyFlags(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, 0, nullptr, copyParams), false, false);
+
+        verifyFlags(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, 0, nullptr, copyParams), false, false);
     }
 
     size_t rangeSizes = 1;
@@ -1410,9 +1449,9 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
     CmdListKernelLaunchParams cooperativeParams = {};
     cooperativeParams.isCooperative = true;
 
-    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, cooperativeParams, false), false, stallingCmdRequired);
+    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, cooperativeParams), false, stallingCmdRequired);
 
-    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, cooperativeParams, false), false, false);
+    verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, cooperativeParams), false, false);
 
     driverHandle->releaseImportedPointer(dstPtr);
 }
@@ -1501,11 +1540,11 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
 
         // non-pipelined state or first in-order exec
         resetFlags();
-        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 1, &event, launchParams, false));
+        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 1, &event, launchParams));
 
         // non-pipelined state already programmed
         resetFlags();
-        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitEvents, waitlist, launchParams, false));
+        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitEvents, waitlist, launchParams));
 
         resetFlags();
         verifyFlags(commandList->appendLaunchKernelIndirect(kernel.toHandle(), groupCount, nullptr, numWaitEvents, waitlist, false));
@@ -1517,7 +1556,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
         verifyFlags(commandList->appendMemoryCopyRegion(dstPtr, &region, 0, 0, srcPtr, &region, 0, 0, nullptr, numWaitEvents, waitlist, copyParams));
 
         resetFlags();
-        verifyFlags(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, nullptr, numWaitEvents, waitlist, false));
+        verifyFlags(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, nullptr, numWaitEvents, waitlist, copyParams));
 
         if constexpr (FamilyType::supportsSampler) {
             auto kernel = device->getBuiltinFunctionsLib()->getImageFunction(ImageBuiltin::copyImageRegion);
@@ -1530,25 +1569,25 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
             zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
             image->initialize(device, &zeDesc);
             auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
+            CmdListMemoryCopyParams copyParams = {};
+            resetFlags();
+            verifyFlags(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, nullptr, numWaitEvents, waitlist, copyParams));
 
             resetFlags();
-            verifyFlags(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, nullptr, numWaitEvents, waitlist, false));
+            verifyFlags(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, nullptr, numWaitEvents, waitlist, copyParams));
 
             resetFlags();
-            verifyFlags(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, nullptr, numWaitEvents, waitlist, false));
+            verifyFlags(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, nullptr, numWaitEvents, waitlist, copyParams));
 
             resetFlags();
-            verifyFlags(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, nullptr, numWaitEvents, waitlist, false));
+            verifyFlags(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitEvents, waitlist, copyParams));
 
             resetFlags();
-            verifyFlags(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitEvents, waitlist, false));
-
-            resetFlags();
-            verifyFlags(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitEvents, waitlist, false));
+            verifyFlags(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitEvents, waitlist, copyParams));
         }
 
         resetFlags();
-        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitEvents, waitlist, cooperativeParams, false));
+        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitEvents, waitlist, cooperativeParams));
     }
 
     driverHandle->releaseImportedPointer(dstPtr);
@@ -1575,7 +1614,7 @@ HWTEST2_F(CommandListCreateTests, whenDispatchingThenPassNumCsrClients, IsAtLeas
     ultCsr->registerClient(&client1);
     ultCsr->registerClient(&client2);
 
-    auto result = commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+    auto result = commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
     EXPECT_EQ(ultCsr->latestFlushedBatchBuffer.numCsrClients, ultCsr->getNumClients());
@@ -1615,7 +1654,7 @@ HWTEST_F(CommandListCreateTests, givenSignalEventWhenCallingSynchronizeThenUnreg
     EXPECT_EQ(ultCsr->getNumClients(), 0u);
 
     {
-        commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event1, 0, nullptr, launchParams, false);
+        commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event1, 0, nullptr, launchParams);
         EXPECT_EQ(ultCsr->getNumClients(), 1u);
 
         Event::fromHandle(event1)->setIsCompleted();
@@ -1625,7 +1664,7 @@ HWTEST_F(CommandListCreateTests, givenSignalEventWhenCallingSynchronizeThenUnreg
     }
 
     {
-        commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event2, 0, nullptr, launchParams, false);
+        commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event2, 0, nullptr, launchParams);
         EXPECT_EQ(ultCsr->getNumClients(), 1u);
 
         *reinterpret_cast<uint32_t *>(Event::fromHandle(event2)->getHostAddress()) = static_cast<uint32_t>(Event::STATE_SIGNALED);
@@ -1635,7 +1674,7 @@ HWTEST_F(CommandListCreateTests, givenSignalEventWhenCallingSynchronizeThenUnreg
     }
 
     {
-        commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event3, 0, nullptr, launchParams, false);
+        commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event3, 0, nullptr, launchParams);
         EXPECT_EQ(ultCsr->getNumClients(), 1u);
 
         zeEventHostReset(event3);
@@ -1680,7 +1719,7 @@ HWTEST_F(CommandListCreateTests, givenDebugFlagSetWhenCallingSynchronizeThenDont
     ASSERT_EQ(ZE_RESULT_SUCCESS, eventPool->createEvent(&eventDesc, &event));
 
     EXPECT_EQ(ultCsr->getNumClients(), 0u);
-    commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams, false);
+    commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams);
     EXPECT_EQ(ultCsr->getNumClients(), 1u);
 
     Event::fromHandle(event)->setIsCompleted();
@@ -1756,7 +1795,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
         ze_event_handle_t *waitlist = hasEventDependencies ? &event : nullptr;
         uint32_t numWaitlistEvents = hasEventDependencies ? 1 : 0;
 
-        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitlistEvents, waitlist, launchParams, false),
+        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitlistEvents, waitlist, launchParams),
                     hasEventDependencies, hasEventDependencies);
 
         verifyFlags(commandList->appendLaunchKernelIndirect(kernel.toHandle(), groupCount, nullptr, numWaitlistEvents, waitlist, false),
@@ -1771,7 +1810,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
         verifyFlags(commandList->appendMemoryCopyRegion(dstPtr, &region, 0, 0, srcPtr, &region, 0, 0, nullptr, numWaitlistEvents, waitlist, copyParams),
                     hasEventDependencies, hasEventDependencies);
 
-        verifyFlags(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, nullptr, numWaitlistEvents, waitlist, false),
+        verifyFlags(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, nullptr, numWaitlistEvents, waitlist, copyParams),
                     hasEventDependencies, hasEventDependencies);
 
         verifyFlags(commandList->appendEventReset(event), false, false);
@@ -1798,19 +1837,21 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
             image->initialize(device, &zeDesc);
             auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
 
-            verifyFlags(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, nullptr, numWaitlistEvents, waitlist, false),
+            CmdListMemoryCopyParams copyParams = {};
+
+            verifyFlags(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, nullptr, numWaitlistEvents, waitlist, copyParams),
                         hasEventDependencies, hasEventDependencies);
 
-            verifyFlags(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, nullptr, numWaitlistEvents, waitlist, false),
+            verifyFlags(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, nullptr, numWaitlistEvents, waitlist, copyParams),
                         hasEventDependencies, hasEventDependencies);
 
-            verifyFlags(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, nullptr, numWaitlistEvents, waitlist, false),
+            verifyFlags(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, nullptr, numWaitlistEvents, waitlist, copyParams),
                         hasEventDependencies, hasEventDependencies);
 
-            verifyFlags(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitlistEvents, waitlist, false),
+            verifyFlags(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitlistEvents, waitlist, copyParams),
                         hasEventDependencies, hasEventDependencies);
 
-            verifyFlags(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitlistEvents, waitlist, false),
+            verifyFlags(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, nullptr, numWaitlistEvents, waitlist, copyParams),
                         hasEventDependencies, hasEventDependencies);
         }
 
@@ -1826,7 +1867,7 @@ HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatch
     for (bool hasEventDependencies : {true, false}) {
         ze_event_handle_t *waitlist = hasEventDependencies ? &event : nullptr;
         uint32_t numWaitlistEvents = hasEventDependencies ? 1 : 0;
-        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitlistEvents, waitlist, cooperativeParams, false),
+        verifyFlags(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, numWaitlistEvents, waitlist, cooperativeParams),
                     hasEventDependencies, hasEventDependencies);
     }
 
@@ -1883,9 +1924,9 @@ HWTEST2_F(CommandListCreateTests, givenInOrderExecutionWhenDispatchingRelaxedOrd
     ultCsr->registerClient(&client1);
     ultCsr->registerClient(&client2);
 
-    commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams, false);
+    commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams);
 
-    commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+    commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
     if (useImmediateFlushTask) {
         EXPECT_TRUE(ultCsr->recordedImmediateDispatchFlags.hasRelaxedOrderingDependencies);
     } else {
@@ -2088,12 +2129,12 @@ HWTEST2_F(CommandListCreateTests, givenInOrderExecutionWhenDispatchingRelaxedOrd
 
     auto cmdStream = cmdList->getCmdContainer().getCommandStream();
 
-    cmdList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
-    cmdList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+    cmdList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    cmdList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
 
     size_t offset = cmdStream->getUsed();
 
-    cmdList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams, false);
+    cmdList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
 
     GenCmdList genCmdList;
     ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(
@@ -2666,7 +2707,7 @@ TEST_F(ContextCommandListCreate, givenDeferredEngineCreationWhenImmediateCommand
         const auto &group = groups[groupIndex];
         for (uint32_t queueIndex = 0; queueIndex < group.numQueues; queueIndex++) {
             CommandStreamReceiver *expectedCsr{};
-            EXPECT_EQ(ZE_RESULT_SUCCESS, device->getCsrForOrdinalAndIndex(&expectedCsr, groupIndex, queueIndex, ZE_COMMAND_QUEUE_PRIORITY_NORMAL, false));
+            EXPECT_EQ(ZE_RESULT_SUCCESS, device->getCsrForOrdinalAndIndex(&expectedCsr, groupIndex, queueIndex, ZE_COMMAND_QUEUE_PRIORITY_NORMAL, 0, false));
 
             ze_command_queue_desc_t desc = {};
             desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
@@ -2985,7 +3026,7 @@ HWTEST_F(CommandListCreateTests, givenCommandListWhenAppendingBarrierWithIncorre
     EXPECT_EQ(returnValue, ZE_RESULT_ERROR_INVALID_ARGUMENT);
 }
 
-HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingBeforeCommandForCopyOnlyThenCommandsHaveCorrectEventOffsets, MatchAny) {
+HWTEST_F(CommandListCreateTests, givenCopyCommandListWhenProfilingBeforeCommandForCopyOnlyThenCommandsHaveCorrectEventOffsets) {
     using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
@@ -3023,7 +3064,7 @@ HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingBeforeCommand
     EXPECT_EQ(cmd->getMemoryAddress(), ptrOffset(baseAddr, contextOffset));
 }
 
-HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingAfterCommandForCopyOnlyThenCommandsHaveCorrectEventOffsets, MatchAny) {
+HWTEST_F(CommandListCreateTests, givenCopyCommandListWhenProfilingAfterCommandForCopyOnlyThenCommandsHaveCorrectEventOffsets) {
     using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
     using MI_STORE_REGISTER_MEM = typename GfxFamily::MI_STORE_REGISTER_MEM;
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
@@ -3058,7 +3099,7 @@ HWTEST2_F(CommandListCreateTests, givenCopyCommandListWhenProfilingAfterCommandF
     EXPECT_EQ(cmd->getMemoryAddress(), ptrOffset(baseAddr, contextOffset));
 }
 
-HWTEST2_F(CommandListCreateTests, givenNullEventWhenAppendEventAfterWalkerThenNothingAddedToStream, MatchAny) {
+HWTEST_F(CommandListCreateTests, givenNullEventWhenAppendEventAfterWalkerThenNothingAddedToStream) {
     auto commandList = std::make_unique<WhiteBox<::L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandList->initialize(device, NEO::EngineGroupType::copy, 0u);
 
@@ -3226,13 +3267,200 @@ HWTEST2_F(CommandListCreateTests, givenDummyBlitNotRequiredWhenEncodeMiFlushThen
     EXPECT_EQ(commandContainer.getResidencyContainer().size(), 0u);
 }
 
-HWTEST2_F(CommandListCreateTests, givenEmptySvmManagerWhenIsAllocationImportedThenFalseIsReturned, MatchAny) {
+HWTEST_F(CommandListCreateTests, givenEmptySvmManagerWhenIsAllocationImportedThenFalseIsReturned) {
     auto commandListCore = std::make_unique<WhiteBox<L0::CommandListCoreFamily<FamilyType::gfxCoreFamily>>>();
     commandListCore->initialize(device, NEO::EngineGroupType::compute, 0u);
 
     NEO::SVMAllocsManager *svmManager = nullptr;
 
     EXPECT_FALSE(commandListCore->isAllocationImported(nullptr, svmManager));
+}
+
+using CommandListAppendLaunchKernelWithArgumentsTests = Test<CommandListCreateFixture>;
+TEST_F(CommandListAppendLaunchKernelWithArgumentsTests, givenNullptrInputWhenAppendLaunchKernelWithArgumentsThenErrorIsReturned) {
+
+    const ze_group_count_t groupCounts{1, 2, 3};
+    const ze_group_size_t groupSizes{4, 5, 6};
+    auto retVal = zeCommandListAppendLaunchKernelWithArguments(nullptr, nullptr, groupCounts, groupSizes, nullptr, nullptr, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_NULL_HANDLE, retVal);
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, retVal, false));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
+
+    retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), nullptr, groupCounts, groupSizes, nullptr, nullptr, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_NULL_HANDLE, retVal);
+
+    NEO::KernelInfo kernelInfo{};
+    uint8_t kernelHeap[10]{};
+    kernelInfo.heapInfo.pKernelHeap = kernelHeap;
+    kernelInfo.heapInfo.kernelHeapSize = sizeof(kernelHeap);
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel";
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(1);
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].type = NEO::ArgDescriptor::argTPointer; // arg buffer
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<NEO::ArgDescPointer>().bindful = NEO::undefined<NEO::SurfaceStateHeapOffset>;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<NEO::ArgDescPointer>().bindless = NEO::undefined<NEO::SurfaceStateHeapOffset>;
+
+    auto kernelImmutableData = std::make_unique<KernelImmutableData>(device);
+    auto mockIsaAllocation = std::make_unique<MockGraphicsAllocation>(reinterpret_cast<void *>(0x543000), 10);
+    mockIsaAllocation->setAllocationType(NEO::AllocationType::kernelIsa);
+    kernelImmutableData->setIsaPerKernelAllocation(mockIsaAllocation.release());
+    kernelImmutableData->initialize(&kernelInfo, device, 0, nullptr, nullptr, false);
+
+    std::unique_ptr<L0::ult::Module> mockModule = std::make_unique<L0::ult::Module>(device, nullptr, ModuleType::user);
+    mockModule->kernelImmDatas.push_back(std::move(kernelImmutableData));
+
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = mockModule.get();
+    ze_kernel_desc_t desc = {ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    desc.pKernelName = kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str();
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel.initialize(&desc));
+    retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), kernel.toHandle(), groupCounts, groupSizes, nullptr, nullptr, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_NULL_POINTER, retVal);
+}
+
+TEST_F(CommandListAppendLaunchKernelWithArgumentsTests, givenIncorrectGroupSizeWhenAppendLaunchKernelWithArgumentsThenErrorIsReturned) {
+
+    const ze_group_count_t groupCounts{1, 2, 3};
+    const ze_group_size_t groupSizes{std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max(), std::numeric_limits<uint32_t>::max()};
+
+    auto retVal = ZE_RESULT_ERROR_UNINITIALIZED;
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, retVal, false));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
+
+    std::unique_ptr<L0::ult::Module> mockModule = std::make_unique<L0::ult::Module>(device, nullptr, ModuleType::user);
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = mockModule.get();
+
+    void *arguments = nullptr;
+    retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), kernel.toHandle(), groupCounts, groupSizes, &arguments, nullptr, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION, retVal);
+}
+
+TEST_F(CommandListAppendLaunchKernelWithArgumentsTests, whenAppendLaunchKernelWithArgumentsThenProperKernelArgumentsAreSet) {
+
+    const ze_group_count_t groupCounts{1, 2, 3};
+    const ze_group_size_t groupSizes{4, 5, 6};
+
+    auto retVal = ZE_RESULT_ERROR_UNINITIALIZED;
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, retVal, false));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
+
+    NEO::KernelInfo kernelInfo{};
+    uint8_t kernelHeap[10]{};
+    kernelInfo.heapInfo.pKernelHeap = kernelHeap;
+    kernelInfo.heapInfo.kernelHeapSize = sizeof(kernelHeap);
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel";
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(5);
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].type = NEO::ArgDescriptor::argTPointer; // arg buffer
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<NEO::ArgDescPointer>().bindful = NEO::undefined<NEO::SurfaceStateHeapOffset>;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[0].as<NEO::ArgDescPointer>().bindless = NEO::undefined<NEO::SurfaceStateHeapOffset>;
+
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[1].type = NEO::ArgDescriptor::argTImage;   // arg image
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[2].type = NEO::ArgDescriptor::argTSampler; // arg sampler
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].type = NEO::ArgDescriptor::argTValue;   // arg immediate
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements.resize(3);
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements[0].size = 4;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements[0].sourceOffset = 0;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements[1].size = 8;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements[1].sourceOffset = 4;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements[2].size = 4;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[3].as<NEO::ArgDescValue>().elements[2].sourceOffset = 12;
+
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[4].type = NEO::ArgDescriptor::argTPointer; // arg slm
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[4].getTraits().addressQualifier = NEO::KernelArgMetadata::AddrLocal;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[4].as<NEO::ArgDescPointer>().bindful = NEO::undefined<NEO::SurfaceStateHeapOffset>;
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[4].as<NEO::ArgDescPointer>().bindless = NEO::undefined<NEO::SurfaceStateHeapOffset>;
+
+    auto kernelImmutableData = std::make_unique<KernelImmutableData>(device);
+    auto mockIsaAllocation = std::make_unique<MockGraphicsAllocation>(reinterpret_cast<void *>(0x543000), 10);
+    mockIsaAllocation->setAllocationType(NEO::AllocationType::kernelIsa);
+    kernelImmutableData->setIsaPerKernelAllocation(mockIsaAllocation.release());
+    kernelImmutableData->initialize(&kernelInfo, device, 0, nullptr, nullptr, false);
+
+    std::unique_ptr<L0::ult::Module> mockModule = std::make_unique<L0::ult::Module>(device, nullptr, ModuleType::user);
+    mockModule->kernelImmDatas.push_back(std::move(kernelImmutableData));
+
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = mockModule.get();
+    ze_kernel_desc_t desc = {ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    desc.pKernelName = kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str();
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel.initialize(&desc));
+    kernel.checkPassedArgumentValues = true;
+    kernel.useExplicitArgs = true;
+    kernel.passedArgumentValues.resize(5);
+
+    void *argBuffer = reinterpret_cast<void *>(0xDEADF00);
+    ze_image_handle_t argImage = reinterpret_cast<ze_image_handle_t>(0x1234F000);
+    ze_sampler_handle_t argSampler = reinterpret_cast<ze_sampler_handle_t>(0x1235F000);
+    uint8_t argImmediate[16]{};
+    size_t argSlm = 0x60;
+
+    void *arguments[] = {&argBuffer, &argImage, &argSampler, &argImmediate, &argSlm};
+    retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), kernel.toHandle(), groupCounts, groupSizes, arguments, nullptr, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
+
+    EXPECT_EQ(sizeof(argBuffer), kernel.passedArgumentValues[0].size());
+    EXPECT_EQ(0, memcmp(&argBuffer, kernel.passedArgumentValues[0].data(), sizeof(argBuffer)));
+
+    EXPECT_EQ(sizeof(argImage), kernel.passedArgumentValues[1].size());
+    EXPECT_EQ(0, memcmp(&argImage, kernel.passedArgumentValues[1].data(), sizeof(argImage)));
+
+    EXPECT_EQ(sizeof(argSampler), kernel.passedArgumentValues[2].size());
+    EXPECT_EQ(0, memcmp(&argSampler, kernel.passedArgumentValues[2].data(), sizeof(argSampler)));
+
+    EXPECT_EQ(sizeof(argImmediate), kernel.passedArgumentValues[3].size()); // manually reduced by mock
+    EXPECT_EQ(0, memcmp(&argImmediate, kernel.passedArgumentValues[3].data(), sizeof(argImmediate)));
+
+    EXPECT_EQ(argSlm, kernel.passedArgumentValues[4].size());
+
+    EXPECT_EQ(groupSizes.groupSizeX, kernel.getGroupSize()[0]);
+    EXPECT_EQ(groupSizes.groupSizeY, kernel.getGroupSize()[1]);
+    EXPECT_EQ(groupSizes.groupSizeZ, kernel.getGroupSize()[2]);
+}
+
+TEST_F(CommandListAppendLaunchKernelWithArgumentsTests, givenKernelWithoutArgumentsAndNullptrArgumentsPointerWhenAppendLaunchKernelWithArgumentsThenKernelIsAppendedWithoutError) {
+
+    const ze_group_count_t groupCounts{1, 2, 3};
+    const ze_group_size_t groupSizes{4, 5, 6};
+
+    auto retVal = ZE_RESULT_ERROR_UNINITIALIZED;
+
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, retVal, false));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
+
+    NEO::KernelInfo kernelInfo{};
+    uint8_t kernelHeap[10]{};
+    kernelInfo.heapInfo.pKernelHeap = kernelHeap;
+    kernelInfo.heapInfo.kernelHeapSize = sizeof(kernelHeap);
+    kernelInfo.kernelDescriptor.kernelMetadata.kernelName = "kernel";
+    kernelInfo.kernelDescriptor.payloadMappings.explicitArgs.resize(0);
+
+    auto kernelImmutableData = std::make_unique<KernelImmutableData>(device);
+    auto mockIsaAllocation = std::make_unique<MockGraphicsAllocation>(reinterpret_cast<void *>(0x543000), 10);
+    mockIsaAllocation->setAllocationType(NEO::AllocationType::kernelIsa);
+    kernelImmutableData->setIsaPerKernelAllocation(mockIsaAllocation.release());
+    kernelImmutableData->initialize(&kernelInfo, device, 0, nullptr, nullptr, false);
+
+    std::unique_ptr<L0::ult::Module> mockModule = std::make_unique<L0::ult::Module>(device, nullptr, ModuleType::user);
+    mockModule->kernelImmDatas.push_back(std::move(kernelImmutableData));
+
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = mockModule.get();
+    ze_kernel_desc_t desc = {ZE_STRUCTURE_TYPE_KERNEL_DESC};
+    desc.pKernelName = kernelInfo.kernelDescriptor.kernelMetadata.kernelName.c_str();
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, kernel.initialize(&desc));
+
+    retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), kernel.toHandle(), groupCounts, groupSizes, nullptr, nullptr, nullptr, 0, nullptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
+
+    EXPECT_EQ(groupSizes.groupSizeX, kernel.getGroupSize()[0]);
+    EXPECT_EQ(groupSizes.groupSizeY, kernel.getGroupSize()[1]);
+    EXPECT_EQ(groupSizes.groupSizeZ, kernel.getGroupSize()[2]);
 }
 
 } // namespace ult

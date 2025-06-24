@@ -45,4 +45,17 @@ bool ProductHelperHw<gfxProduct>::isCompressionForbidden(const HardwareInfo &hwI
     return isCompressionForbiddenCommon(true);
 }
 
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isResourceUncachedForCS(AllocationType allocationType) const {
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isNonCoherentTimestampsModeEnabled() const {
+    if (debugManager.flags.ForceNonCoherentModeForTimestamps.get() != -1) {
+        return debugManager.flags.ForceNonCoherentModeForTimestamps.get();
+    }
+    return !this->isDcFlushAllowed();
+}
+
 } // namespace NEO

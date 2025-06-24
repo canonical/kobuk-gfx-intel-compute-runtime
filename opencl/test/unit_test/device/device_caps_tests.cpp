@@ -847,6 +847,8 @@ TEST_F(DeviceGetCapsTest, givenDefaultDeviceWhenQueriedForExtensionsWithVersionT
     for (auto extensionWithVersion : pClDevice->getDeviceInfo().extensionsWithVersion) {
         if (strcmp(extensionWithVersion.name, "cl_khr_integer_dot_product") == 0) {
             EXPECT_EQ(CL_MAKE_VERSION(2u, 0, 0), extensionWithVersion.version);
+        } else if (strcmp(extensionWithVersion.name, "cl_intel_unified_shared_memory") == 0) {
+            EXPECT_EQ(CL_MAKE_VERSION(1u, 1u, 0), extensionWithVersion.version);
         } else if (strcmp(extensionWithVersion.name, "cl_khr_external_memory") == 0) {
             EXPECT_EQ(CL_MAKE_VERSION(0, 9u, 1u), extensionWithVersion.version);
         } else {
@@ -866,6 +868,8 @@ TEST_F(DeviceGetCapsTest, givenClDeviceWhenGetExtensionsVersionCalledThenCorrect
     for (auto extensionWithVersion : pClDevice->getDeviceInfo().extensionsWithVersion) {
         if (strcmp(extensionWithVersion.name, "cl_khr_integer_dot_product") == 0) {
             EXPECT_EQ(CL_MAKE_VERSION(2u, 0, 0), pClDevice->getExtensionVersion(std::string(extensionWithVersion.name)));
+        } else if (strcmp(extensionWithVersion.name, "cl_intel_unified_shared_memory") == 0) {
+            EXPECT_EQ(CL_MAKE_VERSION(1u, 1u, 0), pClDevice->getExtensionVersion(std::string(extensionWithVersion.name)));
         } else if (strcmp(extensionWithVersion.name, "cl_khr_external_memory") == 0) {
             EXPECT_EQ(CL_MAKE_VERSION(0, 9u, 1u), pClDevice->getExtensionVersion(std::string(extensionWithVersion.name)));
         } else {
@@ -1312,14 +1316,19 @@ TEST_F(DeviceGetCapsTest, whenDeviceIsCreatedThenMaxParameterSizeIsSetCorrectly)
 }
 
 TEST_F(DeviceGetCapsTest, givenUnifiedMemorySharedSystemFlagWhenDeviceIsCreatedThenSystemMemoryIsSetCorrectly) {
-
+    DebugManagerStateRestore dbgRestore;
+    debugManager.flags.EnableSharedSystemUsmSupport.set(-1);
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
     device->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.sharedSystemMemCapabilities = 0;
-    EXPECT_EQ(0u, device->getDeviceInfo().sharedSystemMemCapabilities);
     EXPECT_FALSE(device->areSharedSystemAllocationsAllowed());
 
     device.reset(new MockClDevice{MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get())});
-    device->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.sharedSystemMemCapabilities = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::sharedSystemPageFaultEnabled;
+    device->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.sharedSystemMemCapabilities = (UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess);
+    EXPECT_FALSE(device->areSharedSystemAllocationsAllowed());
+
+    debugManager.flags.EnableSharedSystemUsmSupport.set(1);
+    device.reset(new MockClDevice{MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get())});
+    device->getRootDeviceEnvironment().getMutableHardwareInfo()->capabilityTable.sharedSystemMemCapabilities = (UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess);
     EXPECT_TRUE(device->areSharedSystemAllocationsAllowed());
 }
 

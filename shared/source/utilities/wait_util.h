@@ -28,9 +28,12 @@ enum class WaitpkgUse : int32_t {
 
 constexpr int64_t defaultWaitPkgThresholdInMicroSeconds = 20;
 constexpr int64_t defaultWaitPkgThresholdForDiscreteInMicroSeconds = 28;
-constexpr uint64_t defaultCounterValue = 16000;
+constexpr uint64_t defaultCounterValue = 12000;
 constexpr uint32_t defaultControlValue = 0;
 constexpr uint32_t defaultWaitCount = 1u;
+
+constexpr int64_t defaultWaitPkgThresholdForUllsLightInMicroSeconds = 1;
+constexpr uint64_t defaultCounterValueForUllsLight = 16000;
 
 extern WaitpkgUse waitpkgUse;
 extern int64_t waitPkgThresholdInMicroSeconds;
@@ -81,6 +84,9 @@ inline bool waitFunction(volatile TagAddressType *pollAddress, TaskCountType exp
 }
 
 void init(WaitpkgUse inputWaitpkgUse, const HardwareInfo &hwInfo);
+void overrideWaitpkgParams();
+void adjustWaitpkgParamsForUllsLight();
+
 } // namespace WaitUtils
 
 } // namespace NEO

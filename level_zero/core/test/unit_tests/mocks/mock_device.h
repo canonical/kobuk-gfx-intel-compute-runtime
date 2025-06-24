@@ -50,6 +50,7 @@ struct MockDevice : public Device {
     ADDMETHOD_NOBASE(getExternalMemoryProperties, ze_result_t, ZE_RESULT_SUCCESS, (ze_device_external_memory_properties_t * pExternalMemoryProperties));
     ADDMETHOD_NOBASE(getGlobalTimestamps, ze_result_t, ZE_RESULT_SUCCESS, (uint64_t * hostTimestamp, uint64_t *deviceTimestamp));
     ADDMETHOD_NOBASE(systemBarrier, ze_result_t, ZE_RESULT_SUCCESS, ());
+    ADDMETHOD_NOBASE(synchronize, ze_result_t, ZE_RESULT_SUCCESS, ());
     ADDMETHOD_NOBASE(getRootDevice, ze_result_t, ZE_RESULT_SUCCESS, (ze_device_handle_t * phRootDevice));
     // Runtime internal methods
     ADDMETHOD_NOBASE(getExecEnvironment, void *, nullptr, ());
@@ -74,7 +75,7 @@ struct MockDevice : public Device {
     ADDMETHOD_NOBASE(allocateMemoryFromHostPtr, NEO::GraphicsAllocation *, nullptr, (const void *buffer, size_t size, bool hostCopyAllowed));
     ADDMETHOD_NOBASE_VOIDRETURN(setSysmanHandle, (SysmanDevice *));
     ADDMETHOD_NOBASE(getSysmanHandle, SysmanDevice *, nullptr, ());
-    ADDMETHOD_NOBASE(getCsrForOrdinalAndIndex, ze_result_t, ZE_RESULT_SUCCESS, (NEO::CommandStreamReceiver * *csr, uint32_t ordinal, uint32_t index, ze_command_queue_priority_t priority, bool allocateInterrupt));
+    ADDMETHOD_NOBASE(getCsrForOrdinalAndIndex, ze_result_t, ZE_RESULT_SUCCESS, (NEO::CommandStreamReceiver * *csr, uint32_t ordinal, uint32_t index, ze_command_queue_priority_t priority, int priorityLevel, bool allocateInterrupt));
     ADDMETHOD_NOBASE(getCsrForLowPriority, ze_result_t, ZE_RESULT_SUCCESS, (NEO::CommandStreamReceiver * *csr, bool copyOnly));
     ADDMETHOD_NOBASE(getDebugProperties, ze_result_t, ZE_RESULT_SUCCESS, (zet_device_debug_properties_t * properties));
     ADDMETHOD_NOBASE(getDebugSession, DebugSession *, nullptr, (const zet_debug_config_t &config));
@@ -108,6 +109,8 @@ struct MockDeviceImp : public L0::DeviceImp {
     using Base::implicitScalingCapable;
     using Base::inOrderTimestampAllocator;
     using Base::neoDevice;
+    using Base::queuePriorityHigh;
+    using Base::queuePriorityLow;
     using Base::subDeviceCopyEngineGroups;
     using Base::syncDispatchTokenAllocation;
 

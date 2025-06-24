@@ -71,18 +71,26 @@ HWTEST_F(ProductHelperTest, givenDebugFlagSetWhenAskingForHostMemCapabilitesThen
 HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingSharedSystemMemCapabilitiesThenCorrectValueIsReturned) {
     DebugManagerStateRestore restore;
 
-    EXPECT_EQ(0u, productHelper->getSharedSystemMemCapabilities(&pInHwInfo));
+    uint64_t caps = (UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess);
+    pInHwInfo.capabilityTable.sharedSystemMemCapabilities = caps;
 
     for (auto enable : {-1, 0, 1}) {
         debugManager.flags.EnableSharedSystemUsmSupport.set(enable);
-
-        if (enable > 0) {
-            auto caps = UnifiedSharedMemoryFlags::access | UnifiedSharedMemoryFlags::atomicAccess | UnifiedSharedMemoryFlags::concurrentAccess | UnifiedSharedMemoryFlags::concurrentAtomicAccess;
-            EXPECT_EQ(caps, productHelper->getSharedSystemMemCapabilities(&pInHwInfo));
-        } else {
+        if (enable != 1) {
             EXPECT_EQ(0u, productHelper->getSharedSystemMemCapabilities(&pInHwInfo));
+        } else {
+            for (auto pfEnable : {-1, 0, 1}) {
+                debugManager.flags.EnableRecoverablePageFaults.set(pfEnable);
+                if (pfEnable != 0) {
+                    EXPECT_EQ(caps, productHelper->getSharedSystemMemCapabilities(&pInHwInfo));
+                } else {
+                    EXPECT_EQ(0u, productHelper->getSharedSystemMemCapabilities(&pInHwInfo));
+                }
+            }
         }
     }
+
+    pInHwInfo.capabilityTable.sharedSystemMemCapabilities = caps;
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfIsBlitSplitEnqueueWARequiredThenReturnFalse) {
@@ -322,36 +330,6 @@ HWTEST_F(ProductHelperTest, givenVariousValuesWhenGettingAubStreamSteppingFromHw
     EXPECT_EQ(AubMemDump::SteppingValues::A, mockProductHelper.getAubStreamSteppingFromHwRevId(pInHwInfo));
 }
 
-HWTEST_F(ProductHelperTest, givenDcFlushMitigationWhenOverridePatToUCAndTwoWayCohForDcFlushMitigationThenReturnCorrectValue) {
-    DebugManagerStateRestore restorer;
-    if (!productHelper->isDcFlushMitigated()) {
-        for (auto i = 0; i < static_cast<int>(AllocationType::count); ++i) {
-            auto allocationType = static_cast<AllocationType>(i);
-            EXPECT_FALSE(productHelper->overridePatToUCAndTwoWayCohForDcFlushMitigation(allocationType));
-        }
-    }
-    debugManager.flags.AllowDcFlush.set(0);
-    for (auto i = 0; i < static_cast<int>(AllocationType::count); ++i) {
-        auto allocationType = static_cast<AllocationType>(i);
-        if (allocationType == AllocationType::externalHostPtr ||
-            allocationType == AllocationType::bufferHostMemory ||
-            allocationType == AllocationType::mapAllocation ||
-            allocationType == AllocationType::svmCpu ||
-            allocationType == AllocationType::svmZeroCopy ||
-            allocationType == AllocationType::internalHostMemory ||
-            allocationType == AllocationType::timestampPacketTagBuffer ||
-            allocationType == AllocationType::tagBuffer ||
-            allocationType == AllocationType::gpuTimestampDeviceBuffer ||
-            allocationType == AllocationType::linearStream ||
-            allocationType == AllocationType::internalHeap ||
-            allocationType == AllocationType::printfSurface) {
-            EXPECT_EQ(productHelper->overrideUsageForDcFlushMitigation(allocationType), productHelper->isDcFlushMitigated());
-        } else {
-            EXPECT_FALSE(productHelper->overridePatToUCAndTwoWayCohForDcFlushMitigation(allocationType));
-        }
-    }
-}
-
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedForDefaultEngineTypeAdjustmentThenFalseIsReturned) {
 
     EXPECT_FALSE(productHelper->isDefaultEngineTypeAdjustmentRequired(pInHwInfo));
@@ -371,10 +349,6 @@ HWTEST_F(ProductHelperTest, givenVariousDebugKeyValuesWhenGettingLocalMemoryAcce
     EXPECT_EQ(LocalMemoryAccessMode::cpuAccessAllowed, productHelper->getLocalMemoryAccessMode(pInHwInfo));
     debugManager.flags.ForceLocalMemoryAccessMode.set(3);
     EXPECT_EQ(LocalMemoryAccessMode::cpuAccessDisallowed, productHelper->getLocalMemoryAccessMode(pInHwInfo));
-}
-
-HWTEST_F(ProductHelperTest, WhenCheckAssignEngineRoundRobinSupportedThenReturnFalse) {
-    EXPECT_FALSE(productHelper->isAssignEngineRoundRobinSupported());
 }
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfPipeControlPriorToNonPipelinedStateCommandsWARequiredThenFalseIsReturned, IsNotXeHpgOrXeHpcCore) {
@@ -1019,6 +993,12 @@ HWTEST_F(ProductHelperTest, givenBooleanUncachedWhenCallOverridePatIndexThenProp
     EXPECT_EQ(patIndex, productHelper->overridePatIndex(isUncached, patIndex, AllocationType::buffer));
 }
 
+HWTEST_F(ProductHelperTest, givenGmmUsageTypeWhenCallingGetGmmResourceUsageOverrideThenReturnNoOverride) {
+    constexpr uint32_t noOverride = GMM_RESOURCE_USAGE_UNKNOWN;
+    EXPECT_EQ(noOverride, productHelper->getGmmResourceUsageOverride(GMM_RESOURCE_USAGE_OCL_BUFFER));
+    EXPECT_EQ(noOverride, productHelper->getGmmResourceUsageOverride(GMM_RESOURCE_USAGE_XADAPTER_SHARED_RESOURCE));
+}
+
 HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingSupportedNumGrfsThenCorrectValueIsReturned) {
     if (releaseHelper) {
         EXPECT_EQ(releaseHelper->getSupportedNumGrfs(), productHelper->getSupportedNumGrfs(releaseHelper));
@@ -1171,4 +1151,36 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenQueryIsPostImageWriteFlushRequ
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenIsExposingSubdevicesAllowedThenTrueIsReturned) {
     EXPECT_TRUE(productHelper->isExposingSubdevicesAllowed());
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingIsPrimaryContextsAggregationSupportedThenReturnCorrectValue) {
+    EXPECT_FALSE(productHelper->isPrimaryContextsAggregationSupported());
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWhenCallingUseAdditionalBlitPropertiesThenFalseReturned) {
+    EXPECT_FALSE(productHelper->useAdditionalBlitProperties());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallingIsResourceUncachedForCSThenFalseReturned, IsBeforeXe2HpgCore) {
+    for (uint32_t i = 0; i < static_cast<uint32_t>(AllocationType::count); i++) {
+        auto allocationType = static_cast<AllocationType>(i);
+        EXPECT_FALSE(productHelper->isResourceUncachedForCS(allocationType));
+    }
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallingIsResourceUncachedForCSThenTrueReturned, IsAtLeastXe2HpgCore) {
+    for (uint32_t i = 0; i < static_cast<uint32_t>(AllocationType::count); i++) {
+        auto allocationType = static_cast<AllocationType>(i);
+        if (allocationType == AllocationType::commandBuffer ||
+            allocationType == AllocationType::ringBuffer ||
+            allocationType == AllocationType::semaphoreBuffer) {
+            EXPECT_TRUE(productHelper->isResourceUncachedForCS(allocationType));
+        } else {
+            EXPECT_FALSE(productHelper->isResourceUncachedForCS(allocationType));
+        }
+    }
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingPreferredWorkgroupCountPerSubsliceThenZeroReturned) {
+    EXPECT_EQ(0u, productHelper->getPreferredWorkgroupCountPerSubslice());
 }

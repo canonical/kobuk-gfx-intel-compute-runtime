@@ -107,7 +107,7 @@ size_t HardwareCommandsHelper<GfxFamily>::sendCrossThreadData(
         auto ptrToPatchImplicitArgs = indirectHeap.getSpace(sizeForImplicitArgsProgramming);
         EncodeDispatchKernel<GfxFamily>::template patchScratchAddressInImplicitArgs<heaplessModeEnabled>(*pImplicitArgs, scratchAddress, true);
 
-        ImplicitArgsHelper::patchImplicitArgs(ptrToPatchImplicitArgs, *pImplicitArgs, kernelDescriptor, std::make_pair(generationOfLocalIdsByRuntime, requiredWalkOrder), rootDeviceEnvironment, nullptr);
+        ImplicitArgsHelper::patchImplicitArgs(ptrToPatchImplicitArgs, *pImplicitArgs, kernelDescriptor, std::make_pair(!generationOfLocalIdsByRuntime, requiredWalkOrder), rootDeviceEnvironment, nullptr);
     }
 
     uint32_t sizeToCopy = sizeCrossThreadData;
@@ -130,6 +130,9 @@ size_t HardwareCommandsHelper<GfxFamily>::sendCrossThreadData(
     }
 
     if (sizeCrossThreadData > 0) {
+        if constexpr (!heaplessModeEnabled) {
+            DEBUG_BREAK_IF(indirectHeap.getUsed() % 64 != 0);
+        }
         dest = static_cast<char *>(indirectHeap.getSpace(sizeCrossThreadData));
         memcpy_s(dest, sizeCrossThreadData, src, sizeCrossThreadData);
     }

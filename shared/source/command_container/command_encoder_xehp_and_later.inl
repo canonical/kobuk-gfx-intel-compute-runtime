@@ -271,7 +271,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
                 pImplicitArgs->setLocalIdTablePtr(heap->getGraphicsAllocation()->getGpuAddress() + heap->getUsed() - iohRequiredSize);
                 EncodeDispatchKernel<Family>::patchScratchAddressInImplicitArgs<heaplessModeEnabled>(*pImplicitArgs, scratchAddressForImmediatePatching, args.immediateScratchAddressPatching);
 
-                ptr = NEO::ImplicitArgsHelper::patchImplicitArgs(ptr, *pImplicitArgs, kernelDescriptor, std::make_pair(localIdsGenerationByRuntime, requiredWorkgroupOrder), rootDeviceEnvironment, &args.outImplicitArgsPtr);
+                ptr = NEO::ImplicitArgsHelper::patchImplicitArgs(ptr, *pImplicitArgs, kernelDescriptor, std::make_pair(!localIdsGenerationByRuntime, requiredWorkgroupOrder), rootDeviceEnvironment, &args.outImplicitArgsPtr);
             }
 
             if (args.isIndirect) {
@@ -345,8 +345,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
         }
     }
 
-    uint8_t *inlineData = reinterpret_cast<uint8_t *>(walkerCmd.getInlineDataPointer());
-    EncodeDispatchKernel<Family>::programInlineDataHeapless<heaplessModeEnabled>(inlineData, args, container, offsetThreadData, scratchAddressForImmediatePatching);
+    uint8_t *inlineDataPtr = reinterpret_cast<uint8_t *>(walkerCmd.getInlineDataPointer());
+    EncodeDispatchKernel<Family>::programInlineDataHeapless<heaplessModeEnabled>(inlineDataPtr, args, container, offsetThreadData, scratchAddressForImmediatePatching);
 
     if constexpr (heaplessModeEnabled == false) {
         if (!args.makeCommandView) {
@@ -372,7 +372,7 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
 
     if (args.postSyncArgs.inOrderExecInfo) {
         EncodePostSync<Family>::setupPostSyncForInOrderExec(walkerCmd, args.postSyncArgs);
-    } else if (args.postSyncArgs.eventAddress) {
+    } else if (args.postSyncArgs.isRegularEvent()) {
         EncodePostSync<Family>::setupPostSyncForRegularEvent(walkerCmd, args.postSyncArgs);
     } else {
         EncodeDispatchKernel<Family>::forceComputeWalkerPostSyncFlushWithWrite(walkerCmd);
@@ -387,7 +387,8 @@ void EncodeDispatchKernel<Family>::encode(CommandContainer &container, EncodeDis
     walkerCmd.setPredicateEnable(args.isPredicate);
 
     auto threadGroupCount = walkerCmd.getThreadGroupIdXDimension() * walkerCmd.getThreadGroupIdYDimension() * walkerCmd.getThreadGroupIdZDimension();
-    EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(idd, *args.device, hwInfo, threadDimsVec, threadGroupCount, kernelDescriptor.kernelAttributes.numGrfRequired, threadsPerThreadGroup, walkerCmd);
+    EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(idd, *args.device, hwInfo, threadDimsVec, threadGroupCount,
+                                                            kernelDescriptor.kernelMetadata.requiredThreadGroupDispatchSize, kernelDescriptor.kernelAttributes.numGrfRequired, threadsPerThreadGroup, walkerCmd);
     if (debugManager.flags.PrintKernelDispatchParameters.get()) {
         fprintf(stdout, "kernel, %s, grfCount, %d, simdSize, %d, tilesCount, %d, implicitScaling, %s, threadGroupCount, %d, numberOfThreadsInGpgpuThreadGroup, %d, threadGroupDimensions, %d, %d, %d, threadGroupDispatchSize enum, %d\n",
                 kernelDescriptor.kernelMetadata.kernelName.c_str(),
@@ -487,7 +488,7 @@ template <typename CommandType>
 void EncodePostSync<Family>::setupPostSyncForRegularEvent(CommandType &cmd, const EncodePostSyncArgs &args) {
     using POSTSYNC_DATA = decltype(Family::template getPostSyncType<CommandType>());
 
-    auto &postSync = cmd.getPostSync();
+    auto &postSync = getPostSync(cmd, 0);
 
     auto operationType = POSTSYNC_DATA::OPERATION_WRITE_IMMEDIATE_DATA;
     uint64_t gpuVa = args.eventAddress;
@@ -652,8 +653,15 @@ void EncodeDispatchKernel<Family>::encodeThreadData(WalkerType &walkerCmd,
     // so whenever local ids are driver or hw generated, reserve space by setting right values for emitLocalIds
     // 2) Auto-generation of local ids should be possible, when in fact local ids are used
     if (!localIdsGenerationByRuntime && localIdDimensions > 0) {
-        UNRECOVERABLE_IF(localIdDimensions != 3);
-        uint32_t emitLocalIdsForDim = (1 << 0) | (1 << 1) | (1 << 2);
+        UNRECOVERABLE_IF(localIdDimensions > 3);
+        uint32_t emitLocalIdsForDim = (1 << 0);
+
+        if (localIdDimensions > 1) {
+            emitLocalIdsForDim |= (1 << 1);
+        }
+        if (localIdDimensions > 2) {
+            emitLocalIdsForDim |= (1 << 2);
+        }
         walkerCmd.setEmitLocalId(emitLocalIdsForDim);
 
         walkerCmd.setLocalXMaximum(static_cast<uint32_t>(workGroupSizes[0] - 1));
@@ -1064,10 +1072,13 @@ void EncodeDispatchKernel<Family>::overrideDefaultValues(WalkerType &walkerCmd, 
 template <typename Family>
 template <typename WalkerType, typename InterfaceDescriptorType>
 void EncodeDispatchKernel<Family>::encodeThreadGroupDispatch(InterfaceDescriptorType &interfaceDescriptor, const Device &device, const HardwareInfo &hwInfo,
-                                                             const uint32_t *threadGroupDimensions, const uint32_t threadGroupCount, const uint32_t grfCount, const uint32_t threadsPerThreadGroup, WalkerType &walkerCmd) {
+                                                             const uint32_t *threadGroupDimensions, const uint32_t threadGroupCount, const uint32_t requiredThreadGroupDispatchSize,
+                                                             const uint32_t grfCount, const uint32_t threadsPerThreadGroup, WalkerType &walkerCmd) {
     const auto &productHelper = device.getProductHelper();
 
-    if (productHelper.isDisableOverdispatchAvailable(hwInfo)) {
+    if (requiredThreadGroupDispatchSize != 0) {
+        interfaceDescriptor.setThreadGroupDispatchSize(static_cast<typename InterfaceDescriptorType::THREAD_GROUP_DISPATCH_SIZE>(requiredThreadGroupDispatchSize));
+    } else if (productHelper.isDisableOverdispatchAvailable(hwInfo)) {
         interfaceDescriptor.setThreadGroupDispatchSize(InterfaceDescriptorType::THREAD_GROUP_DISPATCH_SIZE_TG_SIZE_1);
 
         bool adjustTGDispatchSize = true;

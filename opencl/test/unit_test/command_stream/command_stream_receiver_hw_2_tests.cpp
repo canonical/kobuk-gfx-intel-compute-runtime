@@ -1400,7 +1400,7 @@ HWTEST_F(BcsTests, givenMapAllocationInBuiltinOpParamsWhenConstructingThenUseItA
 HWTEST_F(BcsTests, givenNonZeroCopySvmAllocationWhenConstructingBlitPropertiesForReadWriteBufferCallThenSetValidAllocations) {
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     MockMemoryManager mockMemoryManager(true, true);
-    SVMAllocsManager svmAllocsManager(&mockMemoryManager, false);
+    SVMAllocsManager svmAllocsManager(&mockMemoryManager);
 
     auto svmAllocationProperties = MemObjHelper::getSvmAllocationProperties(CL_MEM_READ_WRITE);
     auto svmAlloc = svmAllocsManager.createSVMAlloc(1, svmAllocationProperties, context->getRootDeviceIndices(), context->getDeviceBitfields());
@@ -1445,7 +1445,7 @@ HWTEST_F(BcsTests, givenNonZeroCopySvmAllocationWhenConstructingBlitPropertiesFo
 HWTEST_F(BcsTests, givenSvmAllocationWhenBlitCalledThenUsePassedPointers) {
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
     MockMemoryManager mockMemoryManager(true, true);
-    SVMAllocsManager svmAllocsManager(&mockMemoryManager, false);
+    SVMAllocsManager svmAllocsManager(&mockMemoryManager);
 
     auto svmAllocationProperties = MemObjHelper::getSvmAllocationProperties(CL_MEM_READ_WRITE);
     auto svmAlloc = svmAllocsManager.createSVMAlloc(1, svmAllocationProperties, context->getRootDeviceIndices(), context->getDeviceBitfields());
@@ -1769,7 +1769,7 @@ HWTEST_F(BcsTests, givenAuxTranslationRequestWhenBlitCalledThenProgramCommandCor
 HWTEST_F(BcsTests, givenInvalidBlitDirectionWhenConstructPropertiesThenExceptionIsThrow) {
     auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
 
-    EXPECT_THROW(ClBlitProperties::constructProperties(static_cast<BlitterConstants::BlitDirection>(7), csr, {}), std::exception); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange), NEO-12901
+    EXPECT_THROW(ClBlitProperties::constructProperties(static_cast<BlitterConstants::BlitDirection>(7), csr, {}), std::exception); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
 }
 
 HWTEST_F(BcsTests, givenBlitterDirectSubmissionEnabledWhenProgrammingBlitterThenExpectRingBufferDispatched) {

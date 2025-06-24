@@ -225,14 +225,15 @@ class IoctlHelper {
 
     virtual void insertEngineToContextParams(ContextParamEngines<> &contextParamEngines, uint32_t engineId, const EngineClassInstance *engineClassInstance, uint32_t tileId, bool hasVirtualEngines) = 0;
     virtual bool isPreemptionSupported() = 0;
-    virtual int getTileIdFromGtId(int gtId) const = 0;
+    virtual uint32_t getTileIdFromGtId(uint32_t gtId) const = 0;
+    virtual uint32_t getGtIdFromTileId(uint32_t tileId, uint16_t engineClass) const = 0;
 
     virtual bool allocateInterrupt(uint32_t &outHandle) { return false; }
     virtual bool releaseInterrupt(uint32_t handle) { return false; }
 
     virtual uint64_t *getPagingFenceAddress(uint32_t vmHandleId, OsContextLinux *osContext);
-    virtual uint64_t acquireGpuRange(DrmMemoryManager &memoryManager, size_t &size, uint32_t rootDeviceIndex, HeapIndex heapIndex);
-    virtual void releaseGpuRange(DrmMemoryManager &memoryManager, void *address, size_t size, uint32_t rootDeviceIndex);
+    virtual uint64_t acquireGpuRange(DrmMemoryManager &memoryManager, size_t &size, uint32_t rootDeviceIndex, AllocationType allocType, HeapIndex heapIndex);
+    virtual void releaseGpuRange(DrmMemoryManager &memoryManager, void *address, size_t size, uint32_t rootDeviceIndex, AllocationType allocType);
     virtual void *mmapFunction(DrmMemoryManager &memoryManager, void *ptr, size_t size, int prot, int flags, int fd, off_t offset);
     virtual int munmapFunction(DrmMemoryManager &memoryManager, void *ptr, size_t size);
     virtual void registerMemoryToUnmap(DrmAllocation &allocation, void *pointer, size_t size, DrmAllocation::MemoryUnmapFunction unmapFunction);
@@ -284,7 +285,8 @@ class IoctlHelperI915 : public IoctlHelper {
     bool getGemTiling(void *setTiling) override;
     bool setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) override;
     void insertEngineToContextParams(ContextParamEngines<> &contextParamEngines, uint32_t engineId, const EngineClassInstance *engineClassInstance, uint32_t tileId, bool hasVirtualEngines) override;
-    int getTileIdFromGtId(int gtId) const override { return gtId; }
+    uint32_t getTileIdFromGtId(uint32_t gtId) const override { return gtId; }
+    uint32_t getGtIdFromTileId(uint32_t tileId, uint16_t engineClass) const override { return tileId; }
     bool hasContextFreqHint() override;
     void fillExtSetparamLowLatency(GemContextCreateExtSetParam &extSetparam) override;
 

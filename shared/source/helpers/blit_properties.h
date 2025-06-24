@@ -6,6 +6,7 @@
  */
 
 #pragma once
+#include "shared/source/command_container/command_encoder.h"
 #include "shared/source/command_stream/csr_deps.h"
 #include "shared/source/gmm_helper/gmm_lib.h"
 #include "shared/source/helpers/aux_translation.h"
@@ -17,6 +18,7 @@
 
 namespace NEO {
 struct TimestampPacketDependencies;
+struct BlitSyncPropertiesExt;
 class TagNodeBase;
 class TimestampPacketContainer;
 class GraphicsAllocation;
@@ -31,13 +33,13 @@ enum class BlitSyncMode {
 };
 
 struct BlitSyncProperties {
+    EncodePostSyncArgs postSyncArgs{};
     TagNodeBase *outputTimestampPacket = nullptr;
     BlitSyncMode syncMode = BlitSyncMode::none;
     uint64_t deviceGpuWriteAddress = 0;
     uint64_t hostGpuWriteAddress = 0;
     uint64_t timestampGpuWriteAddress = 0;
     uint64_t writeValue = 0;
-
     bool isTimestampMode() const {
         return (syncMode == BlitSyncMode::timestamp) || (syncMode == BlitSyncMode::timestampAndImmediate);
     }
@@ -83,9 +85,11 @@ struct BlitProperties {
     GraphicsAllocation *dstAllocation = nullptr;
     GraphicsAllocation *srcAllocation = nullptr;
     GraphicsAllocation *clearColorAllocation = nullptr;
+    void *lastBlitCommand = nullptr;
     uint32_t *fillPattern = nullptr;
     uint64_t dstGpuAddress = 0;
     uint64_t srcGpuAddress = 0;
+    uint32_t computeStreamPartitionCount = 0;
 
     Vec3<size_t> copySize = 0;
     Vec3<size_t> dstOffset = 0;
@@ -102,6 +106,7 @@ struct BlitProperties {
     GMM_YUV_PLANE_ENUM dstPlane = GMM_YUV_PLANE_ENUM::GMM_NO_PLANE;
     GMM_YUV_PLANE_ENUM srcPlane = GMM_YUV_PLANE_ENUM::GMM_NO_PLANE;
     bool isSystemMemoryPoolUsed = false;
+    bool highPriority = false;
 };
 
 } // namespace NEO

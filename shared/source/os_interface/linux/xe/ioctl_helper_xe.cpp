@@ -39,13 +39,6 @@
 #define STRINGIFY_ME(X) return #X
 #define RETURN_ME(X) return X
 
-#ifndef DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR
-#define DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR (1 << 5)
-#endif
-
-#ifndef DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR
-#define DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR (1 << 2)
-#endif
 namespace NEO {
 
 const char *IoctlHelperXe::xeGetClassName(int className) const {
@@ -167,11 +160,19 @@ bool IoctlHelperXe::queryDeviceIdAndRevision(Drm &drm) {
     hwInfo->platform.usDeviceID = config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] & 0xffff;
     hwInfo->platform.usRevId = static_cast<int>((config->info[DRM_XE_QUERY_CONFIG_REV_AND_DEVICE_ID] >> 16) & 0xff);
 
-    if ((debugManager.flags.EnableRecoverablePageFaults.get() != 0) && (debugManager.flags.EnableSharedSystemUsmSupport.get() != 0) && (config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR)) {
+    if ((debugManager.flags.EnableRecoverablePageFaults.get() != 0) && (debugManager.flags.EnableSharedSystemUsmSupport.get() == 1) && (config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_QUERY_CONFIG_FLAG_HAS_CPU_ADDR_MIRROR)) {
         drm.setSharedSystemAllocEnable(true);
         drm.setPageFaultSupported(true);
     }
     return true;
+}
+
+uint32_t IoctlHelperXe::getGtIdFromTileId(uint32_t tileId, uint16_t engineClass) const {
+
+    if (engineClass == DRM_XE_ENGINE_CLASS_VIDEO_DECODE || engineClass == DRM_XE_ENGINE_CLASS_VIDEO_ENHANCE) {
+        return static_cast<uint32_t>(tileIdToMediaGtId[tileId]);
+    }
+    return static_cast<uint32_t>(tileIdToGtId[tileId]);
 }
 
 bool IoctlHelperXe::initialize() {
@@ -210,8 +211,17 @@ bool IoctlHelperXe::initialize() {
 
     xeLog("DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY\t\t%#llx\n",
           config->info[DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY]);
+    xeLog("  DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY\t%s\n",
+          config->info[DRM_XE_QUERY_CONFIG_FLAGS] &
+                  DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY
+              ? "ON"
+              : "OFF");
 
     maxExecQueuePriority = config->info[DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY] & 0xffff;
+    isLowLatencyHintAvailable = config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY;
+    if (debugManager.flags.ForceLowLatencyHint.get() != -1) {
+        isLowLatencyHintAvailable = !!debugManager.flags.ForceLowLatencyHint.get();
+    }
 
     memset(&queryConfig, 0, sizeof(queryConfig));
     queryConfig.query = DRM_XE_DEVICE_QUERY_HWCONFIG;
@@ -252,9 +262,9 @@ bool IoctlHelperXe::initialize() {
             assignValue(tileIdToGtId, gt.tile_id, gt.gt_id);
         } else if (isMediaGt(gt.type)) {
             assignValue(mediaGtIdToTileId, gt.gt_id, gt.tile_id);
+            assignValue(tileIdToMediaGtId, gt.tile_id, gt.gt_id);
         }
     }
-    querySupportedFeatures();
     return true;
 }
 
@@ -860,13 +870,13 @@ bool IoctlHelperXe::setVmBoAdviseForChunking(int32_t handle, uint64_t start, uin
 }
 
 bool IoctlHelperXe::setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) {
-    xeLog(" -> IoctlHelperXe::%s s=0x%llx l=0x%llx vmid=0x%x\n", __FUNCTION__, start, length, vmId);
+    xeLog(" -> IoctlHelperXe::%s s=0x%llx l=0x%llx align_s=0x%llx align_l=0x%llx vmid=0x%x\n", __FUNCTION__, start, length, alignDown(start, MemoryConstants::pageSize), alignSizeWholePage(reinterpret_cast<void *>(start), length), vmId);
     drm_xe_vm_bind bind = {};
     bind.vm_id = vmId;
     bind.num_binds = 1;
 
-    bind.bind.range = length;
-    bind.bind.addr = start;
+    bind.bind.range = alignSizeWholePage(reinterpret_cast<void *>(start), length);
+    bind.bind.addr = alignDown(start, MemoryConstants::pageSize);
     bind.bind.op = DRM_XE_VM_BIND_OP_PREFETCH;
 
     auto pHwInfo = this->drm.getRootDeviceEnvironment().getHardwareInfo();
@@ -1006,8 +1016,25 @@ int IoctlHelperXe::queryDistances(std::vector<QueryItem> &queryItems, std::vecto
 }
 
 bool IoctlHelperXe::isPageFaultSupported() {
-    xeLog(" -> IoctlHelperXe::%s %d\n", __FUNCTION__, false);
-    return false;
+    auto checkVmCreateFlagsSupport = [&](uint32_t flags) -> bool {
+        struct drm_xe_vm_create vmCreate = {};
+        vmCreate.flags = flags;
+
+        auto ret = IoctlHelper::ioctl(DrmIoctl::gemVmCreate, &vmCreate);
+        if (ret == 0) {
+            struct drm_xe_vm_destroy vmDestroy = {};
+            vmDestroy.vm_id = vmCreate.vm_id;
+            ret = IoctlHelper::ioctl(DrmIoctl::gemVmDestroy, &vmDestroy);
+            DEBUG_BREAK_IF(ret != 0);
+            return true;
+        }
+        return false;
+    };
+    bool pageFaultSupport = checkVmCreateFlagsSupport(DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE);
+
+    xeLog(" -> IoctlHelperXe::%s %d\n", __FUNCTION__, pageFaultSupport);
+
+    return pageFaultSupport;
 }
 
 uint32_t IoctlHelperXe::getEuStallFdParameter() {
@@ -1355,6 +1382,12 @@ void IoctlHelperXe::xeShowBindTable() {
     }
 }
 
+void IoctlHelperXe::applyContextFlags(void *execQueueCreate, bool allocateInterrupt) {
+    if (this->isLowLatencyHintAvailable) {
+        reinterpret_cast<drm_xe_exec_queue_create *>(execQueueCreate)->flags |= DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT;
+    }
+}
+
 int IoctlHelperXe::createDrmContext(Drm &drm, OsContextLinux &osContext, uint32_t drmVmId, uint32_t deviceIndex, bool allocateInterrupt) {
     uint32_t drmContextId = 0;
 
@@ -1456,7 +1489,7 @@ int IoctlHelperXe::xeVmBind(const VmBindParams &vmBindParams, bool isBind) {
         if (vmBindParams.sharedSystemUsmEnabled) {
             // Use of MAP on unbind required for restoring the address space to the system allocator
             bind.bind.op = DRM_XE_VM_BIND_OP_MAP;
-            bind.bind.flags |= DRM_XE_VM_BIND_FLAG_SYSTEM_ALLOCATOR;
+            bind.bind.flags |= DRM_XE_VM_BIND_FLAG_CPU_ADDR_MIRROR;
         } else {
             bind.bind.op = DRM_XE_VM_BIND_OP_UNMAP;
             if (userptr) {
@@ -1773,6 +1806,16 @@ unsigned int IoctlHelperXe::getIoctlRequestValue(DrmIoctl ioctlRequest) const {
         RETURN_ME(DRM_IOCTL_PRIME_FD_TO_HANDLE);
     case DrmIoctl::primeHandleToFd:
         RETURN_ME(DRM_IOCTL_PRIME_HANDLE_TO_FD);
+    case DrmIoctl::syncObjFdToHandle:
+        RETURN_ME(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE);
+    case DrmIoctl::syncObjWait:
+        RETURN_ME(DRM_IOCTL_SYNCOBJ_WAIT);
+    case DrmIoctl::syncObjSignal:
+        RETURN_ME(DRM_IOCTL_SYNCOBJ_SIGNAL);
+    case DrmIoctl::syncObjTimelineWait:
+        RETURN_ME(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
+    case DrmIoctl::syncObjTimelineSignal:
+        RETURN_ME(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL);
     case DrmIoctl::getResetStats:
         RETURN_ME(DRM_IOCTL_XE_EXEC_QUEUE_GET_PROPERTY);
     case DrmIoctl::debuggerOpen:
@@ -1822,6 +1865,16 @@ std::string IoctlHelperXe::getIoctlString(DrmIoctl ioctlRequest) const {
         STRINGIFY_ME(DRM_IOCTL_PRIME_FD_TO_HANDLE);
     case DrmIoctl::primeHandleToFd:
         STRINGIFY_ME(DRM_IOCTL_PRIME_HANDLE_TO_FD);
+    case DrmIoctl::syncObjFdToHandle:
+        STRINGIFY_ME(DRM_IOCTL_SYNCOBJ_FD_TO_HANDLE);
+    case DrmIoctl::syncObjWait:
+        STRINGIFY_ME(DRM_IOCTL_SYNCOBJ_WAIT);
+    case DrmIoctl::syncObjSignal:
+        STRINGIFY_ME(DRM_IOCTL_SYNCOBJ_SIGNAL);
+    case DrmIoctl::syncObjTimelineWait:
+        STRINGIFY_ME(DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT);
+    case DrmIoctl::syncObjTimelineSignal:
+        STRINGIFY_ME(DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL);
     case DrmIoctl::debuggerOpen:
         STRINGIFY_ME(DRM_IOCTL_XE_EUDEBUG_CONNECT);
     case DrmIoctl::metadataCreate:
@@ -1834,23 +1887,5 @@ std::string IoctlHelperXe::getIoctlString(DrmIoctl ioctlRequest) const {
         return "???";
     }
 }
-
-void IoctlHelperXe::querySupportedFeatures() {
-    auto checkVmCreateFlagsSupport = [&](uint32_t flags) -> bool {
-        struct drm_xe_vm_create vmCreate = {};
-        vmCreate.flags = flags;
-
-        auto ret = IoctlHelper::ioctl(DrmIoctl::gemVmCreate, &vmCreate);
-        if (ret == 0) {
-            struct drm_xe_vm_destroy vmDestroy = {};
-            vmDestroy.vm_id = vmCreate.vm_id;
-            ret = IoctlHelper::ioctl(DrmIoctl::gemVmDestroy, &vmDestroy);
-            DEBUG_BREAK_IF(ret != 0);
-            return true;
-        }
-        return false;
-    };
-    supportedFeatures.flags.pageFault = checkVmCreateFlagsSupport(DRM_XE_VM_CREATE_FLAG_LR_MODE | DRM_XE_VM_CREATE_FLAG_FAULT_MODE);
-};
 
 } // namespace NEO

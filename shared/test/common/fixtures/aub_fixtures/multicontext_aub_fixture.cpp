@@ -23,7 +23,7 @@ void MulticontextAubFixture::setUp(uint32_t numberOfTiles, EnabledCommandStreame
     this->numberOfEnabledTiles = numberOfTiles;
     const ::testing::TestInfo *const testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
 
-    debugManager.flags.CsrDispatchMode.set(static_cast<int32_t>(DispatchMode::batchedDispatch));
+    debugManager.flags.CsrDispatchMode.set(static_cast<int32_t>(dispatchMode));
     debugManager.flags.CreateMultipleSubDevices.set(numberOfTiles);
 
     HardwareInfo localHwInfo = *defaultHwInfo;
@@ -69,6 +69,9 @@ void MulticontextAubFixture::setUp(uint32_t numberOfTiles, EnabledCommandStreame
     }
     isRenderEngineSupported = (renderEngine != aub_stream::NUM_ENGINES);
     auto firstEngine = isRenderEngineSupported ? renderEngine : aub_stream::ENGINE_CCS;
+    if (isFirstEngineBcs) {
+        firstEngine = aub_stream::ENGINE_BCS;
+    }
 
     std::stringstream strfilename;
     strfilename << ApiSpecificConfig::getAubPrefixForSpecificApi();

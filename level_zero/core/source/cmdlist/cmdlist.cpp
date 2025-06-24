@@ -78,17 +78,6 @@ void CommandList::removeHostPtrAllocations() {
     hostPtrMap.clear();
 }
 
-void CommandList::forceDcFlushForDcFlushMitigation() {
-    if (this->device && this->device->getProductHelper().isDcFlushMitigated()) {
-        for (const auto &engine : this->device->getNEODevice()->getMemoryManager()->getRegisteredEngines(this->device->getNEODevice()->getRootDeviceIndex())) {
-            if (engine.commandStreamReceiver->isDirectSubmissionEnabled()) {
-                engine.commandStreamReceiver->registerDcFlushForDcMitigation();
-                engine.commandStreamReceiver->flushTagUpdate();
-            }
-        }
-    }
-}
-
 void CommandList::removeMemoryPrefetchAllocations() {
     if (this->performMemoryPrefetch) {
         auto prefetchManager = this->device->getDriverHandle()->getMemoryManager()->getPrefetchManager();
@@ -96,13 +85,6 @@ void CommandList::removeMemoryPrefetchAllocations() {
             prefetchManager->removeAllocations(prefetchContext);
         }
         performMemoryPrefetch = false;
-    }
-}
-
-void CommandList::registerCsrDcFlushForDcMitigation(NEO::CommandStreamReceiver &csr) {
-    if (this->requiresDcFlushForDcMitigation) {
-        csr.registerDcFlushForDcMitigation();
-        this->requiresDcFlushForDcMitigation = false;
     }
 }
 
@@ -230,6 +212,8 @@ void CommandList::synchronizeEventList(uint32_t numWaitEvents, ze_event_handle_t
 }
 
 NEO::CommandStreamReceiver *CommandList::getCsr(bool copyOffload) const {
-    return copyOffload ? static_cast<CommandQueueImp *>(this->cmdQImmediateCopyOffload)->getCsr() : static_cast<CommandQueueImp *>(this->cmdQImmediate)->getCsr();
+    auto queue = isDualStreamCopyOffloadOperation(copyOffload) ? this->cmdQImmediateCopyOffload : this->cmdQImmediate;
+
+    return static_cast<CommandQueueImp *>(queue)->getCsr();
 }
 } // namespace L0

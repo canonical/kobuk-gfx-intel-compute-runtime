@@ -135,9 +135,10 @@ class IoctlHelperXe : public IoctlHelper {
     bool resourceRegistrationEnabled() override { return true; }
     bool isPreemptionSupported() override { return true; }
     bool isTimestampsRefreshEnabled() override { return true; }
-    int getTileIdFromGtId(int gtId) const override {
+    uint32_t getTileIdFromGtId(uint32_t gtId) const override {
         return gtIdToTileId[gtId];
     }
+    uint32_t getGtIdFromTileId(uint32_t tileId, uint16_t engineClass) const override;
     bool makeResidentBeforeLockNeeded() const override;
 
   protected:
@@ -175,7 +176,7 @@ class IoctlHelperXe : public IoctlHelper {
     uint16_t getDefaultEngineClass(const aub_stream::EngineType &defaultEngineType);
     void setOptionalContextProperties(Drm &drm, void *extProperties, uint32_t &extIndexInOut);
     virtual void setContextProperties(const OsContextLinux &osContext, uint32_t deviceIndex, void *extProperties, uint32_t &extIndexInOut);
-    virtual void applyContextFlags(void *execQueueCreate, bool allocateInterrupt){};
+    virtual void applyContextFlags(void *execQueueCreate, bool allocateInterrupt);
 
     struct GtIpVersion {
         uint16_t major;
@@ -184,6 +185,7 @@ class IoctlHelperXe : public IoctlHelper {
     };
     bool queryHwIpVersion(GtIpVersion &gtIpVersion);
 
+    bool isLowLatencyHintAvailable = false;
     int maxExecQueuePriority = 0;
     std::mutex xeLock;
     std::mutex gemCloseLock;
@@ -196,6 +198,7 @@ class IoctlHelperXe : public IoctlHelper {
     GtIdContainer gtIdToTileId;
     GtIdContainer tileIdToGtId;
     GtIdContainer mediaGtIdToTileId;
+    GtIdContainer tileIdToMediaGtId;
     XeDrm::drm_xe_query_gt_list *xeGtListData = nullptr;
 
     std::unique_ptr<XeDrm::drm_xe_engine_class_instance> defaultEngine;
@@ -220,18 +223,6 @@ class IoctlHelperXe : public IoctlHelper {
         uint32_t drmContextId;
     };
 
-    struct SupportedFeatures {
-        union {
-            struct {
-                uint32_t pageFault : 1;
-                uint32_t reserved : 31;
-            } flags;
-            uint32_t allFlags = 0;
-        };
-    } supportedFeatures{};
-    static_assert(sizeof(SupportedFeatures::flags) == sizeof(SupportedFeatures::allFlags), "");
-
-    void querySupportedFeatures();
     std::unique_ptr<EuDebugInterface> euDebugInterface;
 };
 

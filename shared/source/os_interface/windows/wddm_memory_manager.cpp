@@ -76,6 +76,7 @@ WddmMemoryManager::WddmMemoryManager(ExecutionEnvironment &executionEnvironment)
         alignmentSelector.addCandidateAlignment(customAlignment, false, AlignmentSelector::anyWastage);
     }
     osMemory = OSMemory::create();
+    usmDeviceAllocationMode = toLocalMemAllocationMode(debugManager.flags.NEO_LOCAL_MEMORY_ALLOCATION_MODE.get());
 
     initialized = true;
 }
@@ -237,13 +238,9 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryUsingKmdAndMapItToC
     GmmRequirements gmmRequirements{};
     gmmRequirements.allowLargePages = allowLargePages;
     gmmRequirements.preferCompressed = allocationData.flags.preferCompressed;
-    if (productHelper.overrideAllocationCacheable(allocationData)) {
+    if (productHelper.overrideAllocationCpuCacheable(allocationData)) {
         gmmRequirements.overriderCacheable.enableOverride = true;
         gmmRequirements.overriderCacheable.value = true;
-    }
-    if (productHelper.overrideCacheableForDcFlushMitigation(allocationData.type)) {
-        gmmRequirements.overriderPreferNoCpuAccess.enableOverride = true;
-        gmmRequirements.overriderPreferNoCpuAccess.value = false;
     }
 
     auto gmm = new Gmm(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmHelper(), nullptr,
@@ -467,13 +464,9 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryForNonSvmHostPtr(co
     GmmRequirements gmmRequirements{};
     gmmRequirements.allowLargePages = true;
     gmmRequirements.preferCompressed = false;
-    if (productHelper.overrideAllocationCacheable(allocationData)) {
+    if (productHelper.overrideAllocationCpuCacheable(allocationData)) {
         gmmRequirements.overriderCacheable.enableOverride = true;
         gmmRequirements.overriderCacheable.value = true;
-    }
-    if (productHelper.overrideCacheableForDcFlushMitigation(allocationData.type)) {
-        gmmRequirements.overriderPreferNoCpuAccess.enableOverride = true;
-        gmmRequirements.overriderPreferNoCpuAccess.value = false;
     }
 
     auto gmm = new Gmm(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmHelper(), alignedPtr, alignedSize, 0u,
