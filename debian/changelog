@@ -1,3 +1,9 @@
+intel-compute-runtime (25.22.33944.12-1~25.04~ppa2) plucky; urgency=medium
+
+  * Remove strip step to allow for debug symbols
+
+ -- Shane McKee <shane.mckee@canonical.com>  Wed, 09 Jul 2025 09:11:25 +0800
+
 intel-compute-runtime (25.22.33944.12-1~25.04~ppa1) plucky; urgency=medium
 
   * Update version to 25.22.33944.12
