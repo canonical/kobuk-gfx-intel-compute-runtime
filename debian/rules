@@ -11,6 +11,8 @@ export DEB_BUILD_MAINT_OPTIONS	= hardening=+all
 %:
 	dh $@ --builddir build/
 
+override_dh_strip:
+
 override_dh_auto_configure:
 	dh_auto_configure -- \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -23,6 +25,3 @@ override_dh_auto_configure:
 		-DNEO_ENABLE_XE_EU_DEBUG_SUPPORT=TRUE \
 		-DNEO_ENABLE_XE_PRELIM_DETECTION=TRUE \
 		-Wno-dev
-
-override_dh_install:
-	dh_install
