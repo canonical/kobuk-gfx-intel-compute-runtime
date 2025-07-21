@@ -8,7 +8,6 @@
 #include "shared/source/gen_common/reg_configs_common.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
-#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_gmm_resource_info.h"
 #include "shared/test/common/test_macros/test.h"
 
@@ -221,7 +220,7 @@ HWTEST_F(EnqueueFillImageTest, WhenFillingImage1dBufferThenCorrectBuitInIsSelect
     VariableBackup<CommandQueue *> cmdQBackup(&pCmdQ, mockCmdQ.get());
 
     std::unique_ptr<Image> image1dBuffer;
-    image1dBuffer.reset(Image1dBufferHelper<>::create(context));
+    image1dBuffer.reset(Image1dBufferHelperUlt<>::create(context));
     VariableBackup<Image *> imageBackup(&image, image1dBuffer.get());
 
     mockCmdQ->storeMultiDispatchInfo = true;
@@ -241,7 +240,7 @@ HWTEST_F(EnqueueFillImageTest, givenHeaplessWhenFillingImage1dBufferThenCorrectB
     VariableBackup<CommandQueue *> cmdQBackup(&pCmdQ, mockCmdQ.get());
 
     std::unique_ptr<Image> image1dBuffer;
-    image1dBuffer.reset(Image1dBufferHelper<>::create(context));
+    image1dBuffer.reset(Image1dBufferHelperUlt<>::create(context));
     VariableBackup<Image *> imageBackup(&image, image1dBuffer.get());
 
     mockCmdQ->storeMultiDispatchInfo = true;
@@ -252,7 +251,7 @@ HWTEST_F(EnqueueFillImageTest, givenHeaplessWhenFillingImage1dBufferThenCorrectB
     EXPECT_TRUE(kernelInfo.kernelDescriptor.kernelMetadata.kernelName == "FillImage1dBuffer");
 }
 
-HWTEST2_F(EnqueueFillImageTest, WhenFillingImageThenNumberOfPipelineSelectsIsOne, IsAtMostXeHpcCore) {
+HWTEST2_F(EnqueueFillImageTest, WhenFillingImageThenNumberOfPipelineSelectsIsOne, IsAtMostXeCore) {
     enqueueFillImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);

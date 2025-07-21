@@ -7,9 +7,11 @@
 
 #pragma once
 #include "shared/source/command_stream/task_count_helper.h"
+#include "shared/source/helpers/common_types.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/device_bitfield.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
+#include "shared/source/memory_manager/memadvise_flags.h"
 #include "shared/source/memory_manager/multi_graphics_allocation.h"
 #include "shared/source/memory_manager/residency_container.h"
 #include "shared/source/unified_memory/unified_memory.h"
@@ -68,6 +70,7 @@ struct SvmAllocationData : NEO::NonCopyableAndNonMovableClass {
     }
     bool mappedAllocData = false;
     bool isInternalAllocation = false;
+    bool isSavedForReuse = false;
 
     uint32_t getAllocId() const {
         return allocId;
@@ -156,7 +159,8 @@ class SVMAllocsManager {
         void *allocation;
         SvmAllocationData *svmData;
         std::chrono::high_resolution_clock::time_point saveTime;
-        SvmCacheAllocationInfo(size_t allocationSize, void *allocation, SvmAllocationData *svmData) : allocationSize(allocationSize), allocation(allocation), svmData(svmData) {
+        bool completed;
+        SvmCacheAllocationInfo(size_t allocationSize, void *allocation, SvmAllocationData *svmData, bool completed) : allocationSize(allocationSize), allocation(allocation), svmData(svmData), completed(completed) {
             saveTime = std::chrono::high_resolution_clock::now();
         }
         bool operator<(SvmCacheAllocationInfo const &other) const {
@@ -196,9 +200,10 @@ class SVMAllocsManager {
         SvmAllocationCache();
 
         static bool sizeAllowed(size_t size) { return size <= SvmAllocationCache::maxServicedSize; }
-        bool insert(size_t size, void *ptr, SvmAllocationData *svmData);
+        bool insert(size_t size, void *ptr, SvmAllocationData *svmData, bool waitForCompletion);
         static bool allocUtilizationAllows(size_t requestedSize, size_t reuseCandidateSize);
-        bool isInUse(SvmAllocationData *svmData);
+        static bool alignmentAllows(void *ptr, size_t alignment);
+        bool isInUse(SvmCacheAllocationInfo &cacheAllocInfo);
         void *get(size_t size, const UnifiedMemoryProperties &unifiedMemoryProperties);
         void trim();
         void trimOldAllocs(std::chrono::high_resolution_clock::time_point trimTimePoint, bool trimAll);
@@ -272,8 +277,10 @@ class SVMAllocsManager {
     std::atomic<uint32_t> allocationsCounter = 0;
     MOCKABLE_VIRTUAL void makeIndirectAllocationsResident(CommandStreamReceiver &commandStreamReceiver, TaskCountType taskCount);
     void prepareIndirectAllocationForDestruction(SvmAllocationData *allocationData, bool isNonBlockingFree);
+    void sharedSystemMemAdvise(Device &device, MemAdvise memAdviseOp, const void *ptr, const size_t size);
     MOCKABLE_VIRTUAL void prefetchMemory(Device &device, CommandStreamReceiver &commandStreamReceiver, const void *ptr, const size_t size);
     void prefetchSVMAllocs(Device &device, CommandStreamReceiver &commandStreamReceiver);
+    void sharedSystemAtomicAccess(Device &device, AtomicAccessMode mode, const void *ptr, const size_t size);
     std::unique_lock<std::mutex> obtainOwnership();
 
     std::map<CommandStreamReceiver *, InternalAllocationsTracker> indirectAllocationsResidency;
@@ -284,6 +291,8 @@ class SVMAllocsManager {
     void initUsmAllocationsCaches(Device &device);
 
     bool submitIndirectAllocationsAsPack(CommandStreamReceiver &csr);
+
+    void waitForEnginesCompletion(SvmAllocationData *allocationData);
 
   protected:
     void *createZeroCopySvmAllocation(size_t size, const SvmAllocationProperties &svmProperties,

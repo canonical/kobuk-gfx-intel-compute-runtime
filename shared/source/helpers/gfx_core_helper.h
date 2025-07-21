@@ -10,11 +10,12 @@
 #include "shared/source/helpers/definitions/engine_group_types.h"
 #include "shared/source/helpers/device_hierarchy_mode.h"
 #include "shared/source/helpers/engine_node_helper.h"
+#include "shared/source/helpers/fence_type.h"
 #include "shared/source/helpers/options.h"
 #include "shared/source/utilities/stackvec.h"
 
 #include "aubstream/aubstream.h"
-#include "igfxfmid.h"
+#include "neo_igfxfmid.h"
 
 #include <cstdint>
 #include <memory>
@@ -98,12 +99,24 @@ class GfxCoreHelper {
     virtual uint32_t getMocsIndex(const GmmHelper &gmmHelper, bool l3enabled, bool l1enabled) const = 0;
     virtual uint8_t getBarriersCountFromHasBarriers(uint8_t hasBarriers) const = 0;
     virtual uint32_t calculateAvailableThreadCount(const HardwareInfo &hwInfo, uint32_t grfCount) const = 0;
-    virtual uint32_t calculateMaxWorkGroupSize(const KernelDescriptor &kernelDescriptor, uint32_t defaultMaxGroupSize) const = 0;
+    virtual uint32_t calculateMaxWorkGroupSize(const KernelDescriptor &kernelDescriptor, uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual uint32_t alignSlmSize(uint32_t slmSize) const = 0;
     virtual uint32_t computeSlmValues(const HardwareInfo &hwInfo, uint32_t slmSize, ReleaseHelper *releaseHelper, bool isHeapless) const = 0;
 
     virtual bool isWaDisableRccRhwoOptimizationRequired() const = 0;
     virtual uint32_t getMinimalSIMDSize() const = 0;
+    virtual uint32_t getPreferredVectorWidthChar(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getPreferredVectorWidthShort(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getPreferredVectorWidthInt(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getPreferredVectorWidthLong(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getPreferredVectorWidthFloat(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getPreferredVectorWidthHalf(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getNativeVectorWidthChar(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getNativeVectorWidthShort(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getNativeVectorWidthInt(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getNativeVectorWidthLong(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getNativeVectorWidthFloat(uint32_t vectorWidthSize) const = 0;
+    virtual uint32_t getNativeVectorWidthHalf(uint32_t vectorWidthSize) const = 0;
     virtual uint32_t getMinimalGrfSize() const = 0;
     virtual bool isOffsetToSkipSetFFIDGPWARequired(const HardwareInfo &hwInfo, const ProductHelper &productHelper) const = 0;
     virtual bool isFusedEuDispatchEnabled(const HardwareInfo &hwInfo, bool disableEUFusionForKernel) const = 0;
@@ -120,7 +133,7 @@ class GfxCoreHelper {
     virtual bool isCooperativeDispatchSupported(const EngineGroupType engineGroupType, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual uint32_t adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
                                              const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
-    virtual uint32_t adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, bool isHwLocalGeneration, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
+    virtual uint32_t adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual size_t getMaxFillPaternSizeForCopyEngine() const = 0;
     virtual bool isCpuImageTransferPreferred(const HardwareInfo &hwInfo) const = 0;
     virtual aub_stream::MMIOList getExtraMmioList(const HardwareInfo &hwInfo, const GmmHelper &gmmHelper) const = 0;
@@ -158,14 +171,13 @@ class GfxCoreHelper {
     virtual const void *getBatchBufferEndReference() const = 0;
     virtual size_t getBatchBufferStartSize() const = 0;
     virtual void encodeBatchBufferStart(void *cmdBuffer, uint64_t address, bool secondLevel, bool indirect, bool predicate) const = 0;
-    virtual bool isPlatformFlushTaskEnabled(const NEO::ProductHelper &productHelper) const = 0;
     virtual uint32_t getMinimalScratchSpaceSize() const = 0;
     virtual bool copyThroughLockedPtrEnabled(const HardwareInfo &hwInfo, const ProductHelper &productHelper) const = 0;
     virtual uint32_t getAmountOfAllocationsToFill() const = 0;
     virtual bool isChipsetUniqueUUIDSupported() const = 0;
     virtual bool isTimestampShiftRequired() const = 0;
     virtual bool isRelaxedOrderingSupported() const = 0;
-    virtual uint32_t calculateNumThreadsPerThreadGroup(uint32_t simd, uint32_t totalWorkItems, uint32_t grfCount, bool isHwLocalIdGeneration, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
+    virtual uint32_t calculateNumThreadsPerThreadGroup(uint32_t simd, uint32_t totalWorkItems, uint32_t grfCount, const RootDeviceEnvironment &rootDeviceEnvironment) const = 0;
     virtual uint32_t overrideMaxWorkGroupSize(uint32_t maxWG) const = 0;
     virtual DeviceHierarchyMode getDefaultDeviceHierarchy() const = 0;
     static bool isWorkaroundRequired(uint32_t lowestSteppingWithBug, uint32_t steppingWithFix, const HardwareInfo &hwInfo, const ProductHelper &productHelper);
@@ -197,7 +209,6 @@ class GfxCoreHelper {
 
     virtual bool usmCompressionSupported(const NEO::HardwareInfo &hwInfo) const = 0;
 
-    virtual uint32_t getDeviceTimestampWidth() const = 0;
     virtual void alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const = 0;
     virtual bool getSipBinaryFromExternalLib() const = 0;
     virtual uint32_t getImplicitArgsVersion() const = 0;
@@ -319,7 +330,7 @@ class GfxCoreHelperHw : public GfxCoreHelper {
 
     void alignThreadGroupCountToDssSize(uint32_t &threadCount, uint32_t dssCount, uint32_t threadsPerDss, uint32_t threadGroupSize) const override;
 
-    uint32_t calculateMaxWorkGroupSize(const KernelDescriptor &kernelDescriptor, uint32_t defaultMaxGroupSize) const override;
+    uint32_t calculateMaxWorkGroupSize(const KernelDescriptor &kernelDescriptor, uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
 
     uint32_t alignSlmSize(uint32_t slmSize) const override;
 
@@ -336,6 +347,19 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     bool isWaDisableRccRhwoOptimizationRequired() const override;
 
     uint32_t getMinimalSIMDSize() const override;
+
+    uint32_t getPreferredVectorWidthChar(uint32_t vectorWidthSize) const override;
+    uint32_t getPreferredVectorWidthShort(uint32_t vectorWidthSize) const override;
+    uint32_t getPreferredVectorWidthInt(uint32_t vectorWidthSize) const override;
+    uint32_t getPreferredVectorWidthLong(uint32_t vectorWidthSize) const override;
+    uint32_t getPreferredVectorWidthFloat(uint32_t vectorWidthSize) const override;
+    uint32_t getPreferredVectorWidthHalf(uint32_t vectorWidthSize) const override;
+    uint32_t getNativeVectorWidthChar(uint32_t vectorWidthSize) const override;
+    uint32_t getNativeVectorWidthShort(uint32_t vectorWidthSize) const override;
+    uint32_t getNativeVectorWidthInt(uint32_t vectorWidthSize) const override;
+    uint32_t getNativeVectorWidthLong(uint32_t vectorWidthSize) const override;
+    uint32_t getNativeVectorWidthFloat(uint32_t vectorWidthSize) const override;
+    uint32_t getNativeVectorWidthHalf(uint32_t vectorWidthSize) const override;
 
     uint32_t getMinimalGrfSize() const override;
 
@@ -362,7 +386,7 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     uint32_t adjustMaxWorkGroupCount(uint32_t maxWorkGroupCount, const EngineGroupType engineGroupType,
                                      const RootDeviceEnvironment &rootDeviceEnvironment) const override;
 
-    uint32_t adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, bool isHwLocalGeneration, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
+    uint32_t adjustMaxWorkGroupSize(const uint32_t grfCount, const uint32_t simd, const uint32_t defaultMaxGroupSize, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
     size_t getMaxFillPaternSizeForCopyEngine() const override;
 
     bool isCpuImageTransferPreferred(const HardwareInfo &hwInfo) const override;
@@ -407,14 +431,13 @@ class GfxCoreHelperHw : public GfxCoreHelper {
     const void *getBatchBufferEndReference() const override;
     size_t getBatchBufferStartSize() const override;
     void encodeBatchBufferStart(void *cmdBuffer, uint64_t address, bool secondLevel, bool indirect, bool predicate) const override;
-    bool isPlatformFlushTaskEnabled(const NEO::ProductHelper &productHelper) const override;
     uint32_t getMinimalScratchSpaceSize() const override;
     bool copyThroughLockedPtrEnabled(const HardwareInfo &hwInfo, const ProductHelper &productHelper) const override;
     uint32_t getAmountOfAllocationsToFill() const override;
     bool isChipsetUniqueUUIDSupported() const override;
     bool isTimestampShiftRequired() const override;
     bool isRelaxedOrderingSupported() const override;
-    uint32_t calculateNumThreadsPerThreadGroup(uint32_t simd, uint32_t totalWorkItems, uint32_t grfCount, bool isHwLocalIdGeneration, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
+    uint32_t calculateNumThreadsPerThreadGroup(uint32_t simd, uint32_t totalWorkItems, uint32_t grfCount, const RootDeviceEnvironment &rootDeviceEnvironment) const override;
     uint32_t overrideMaxWorkGroupSize(uint32_t maxWG) const override;
     DeviceHierarchyMode getDefaultDeviceHierarchy() const override;
 
@@ -446,7 +469,6 @@ class GfxCoreHelperHw : public GfxCoreHelper {
 
     bool usmCompressionSupported(const NEO::HardwareInfo &hwInfo) const override;
 
-    uint32_t getDeviceTimestampWidth() const override;
     uint32_t getImplicitArgsVersion() const override;
 
     bool getSipBinaryFromExternalLib() const override;
@@ -492,14 +514,15 @@ struct MemorySynchronizationCommands {
     static void setSingleBarrier(void *commandsBuffer, PostSyncMode postSyncMode, uint64_t gpuAddress, uint64_t immediateData, PipeControlArgs &args);
     static void addSingleBarrier(LinearStream &commandStream, PipeControlArgs &args);
     static void setSingleBarrier(void *commandsBuffer, PipeControlArgs &args);
+    static void setStallingBarrier(void *commandsBuffer, PipeControlArgs &args);
 
     static void addBarrierWithPostSyncOperation(LinearStream &commandStream, PostSyncMode postSyncMode, uint64_t gpuAddress, uint64_t immediateData, const RootDeviceEnvironment &rootDeviceEnvironment, PipeControlArgs &args);
     static void setBarrierWithPostSyncOperation(void *&commandsBuffer, PostSyncMode postSyncMode, uint64_t gpuAddress, uint64_t immediateData, const RootDeviceEnvironment &rootDeviceEnvironment, PipeControlArgs &args);
 
     static void setPostSyncExtraProperties(PipeControlArgs &args);
 
-    static void addBarrierWa(LinearStream &commandStream, uint64_t gpuAddress, const RootDeviceEnvironment &rootDeviceEnvironment);
-    static void setBarrierWa(void *&commandsBuffer, uint64_t gpuAddress, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void addBarrierWa(LinearStream &commandStream, uint64_t gpuAddress, const RootDeviceEnvironment &rootDeviceEnvironment, NEO::PostSyncMode postSyncMode);
+    static void setBarrierWa(void *&commandsBuffer, uint64_t gpuAddress, const RootDeviceEnvironment &rootDeviceEnvironment, NEO::PostSyncMode postSyncMode);
 
     static void setBarrierWaFlags(void *barrierCmd);
 
@@ -508,9 +531,9 @@ struct MemorySynchronizationCommands {
         fence,
         none
     };
-    static void addAdditionalSynchronizationForDirectSubmission(LinearStream &commandStream, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment);
-    static void addAdditionalSynchronization(LinearStream &commandStream, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment);
-    static void setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, bool acquire, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void addAdditionalSynchronizationForDirectSubmission(LinearStream &commandStream, uint64_t gpuAddress, NEO::FenceType fenceType, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void addAdditionalSynchronization(LinearStream &commandStream, uint64_t gpuAddress, NEO::FenceType fenceType, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static void setAdditionalSynchronization(void *&commandsBuffer, uint64_t gpuAddress, NEO::FenceType fenceType, const RootDeviceEnvironment &rootDeviceEnvironment);
 
     static bool getDcFlushEnable(bool isFlushPreferred, const RootDeviceEnvironment &rootDeviceEnvironment);
 
@@ -519,13 +542,14 @@ struct MemorySynchronizationCommands {
     static void addStateCacheFlush(LinearStream &commandStream, const RootDeviceEnvironment &rootDeviceEnvironment);
     static void addInstructionCacheFlush(LinearStream &commandStream);
 
-    static size_t getSizeForBarrierWithPostSyncOperation(const RootDeviceEnvironment &rootDeviceEnvironment, bool postSyncWrite);
-    static size_t getSizeForBarrierWa(const RootDeviceEnvironment &rootDeviceEnvironment);
+    static size_t getSizeForBarrierWithPostSyncOperation(const RootDeviceEnvironment &rootDeviceEnvironment, NEO::PostSyncMode postSyncMode);
+    static size_t getSizeForBarrierWa(const RootDeviceEnvironment &rootDeviceEnvironment, NEO::PostSyncMode postSyncMode);
     static size_t getSizeForSingleBarrier();
     static size_t getSizeForSingleAdditionalSynchronizationForDirectSubmission(const RootDeviceEnvironment &rootDeviceEnvironment);
-    static size_t getSizeForSingleAdditionalSynchronization(const RootDeviceEnvironment &rootDeviceEnvironment);
-    static size_t getSizeForAdditonalSynchronization(const RootDeviceEnvironment &rootDeviceEnvironment);
+    static size_t getSizeForSingleAdditionalSynchronization(NEO::FenceType fenceType, const RootDeviceEnvironment &rootDeviceEnvironment);
+    static size_t getSizeForAdditionalSynchronization(NEO::FenceType fenceType, const RootDeviceEnvironment &rootDeviceEnvironment);
     static size_t getSizeForInstructionCacheFlush();
+    static size_t getSizeForStallingBarrier();
 
     static bool isBarrierWaRequired(const RootDeviceEnvironment &rootDeviceEnvironment);
     static bool isBarrierPriorToPipelineSelectWaRequired(const RootDeviceEnvironment &rootDeviceEnvironment);

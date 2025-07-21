@@ -21,17 +21,20 @@
 #include "level_zero/core/test/unit_tests/mock.h"
 
 class MockPageFaultManager;
+
 namespace NEO {
 struct UltDeviceFactory;
 class MockMemoryManager;
 class OsAgnosticMemoryManager;
 class MemoryManagerMemHandleMock;
+class Device;
 } // namespace NEO
 
 namespace L0 {
 struct Context;
 struct Device;
 struct ContextImp;
+struct DeviceImp;
 
 namespace ult {
 class MockBuiltins;
@@ -60,6 +63,7 @@ template <typename T>
 struct DeviceFixtureWithCustomMemoryManager : public DeviceFixture {
     void setUp() {
         debugManager.flags.EnableDeviceUsmAllocationPool.set(0);
+        debugManager.flags.EnableHostUsmAllocationPool.set(0);
         auto executionEnvironment = NEO::MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
         memoryManager = new T(*executionEnvironment);
         executionEnvironment->memoryManager.reset(memoryManager);

@@ -15,8 +15,6 @@
 #include "opencl/source/event/user_event.h"
 #include "opencl/source/helpers/dispatch_info.h"
 #include "opencl/test/unit_test/context/driver_diagnostics_tests.h"
-#include "opencl/test/unit_test/fixtures/buffer_fixture.h"
-#include "opencl/test/unit_test/test_macros/test_checks_ocl.h"
 
 using namespace NEO;
 
@@ -571,9 +569,9 @@ TEST_P(PerformanceHintEnqueueMapTest, GivenZeroCopyFlagWhenEnqueueMapImageIsCall
     size_t region[] = {1, 1, 1};
 
     if (isZeroCopyImage) {
-        image = ImageHelper<ImageReadOnly<Image1dDefaults>>::create(context);
+        image = ImageHelperUlt<ImageReadOnly<Image1dDefaults>>::create(context);
     } else {
-        image = ImageHelper<ImageUseHostPtr<Image1dDefaults>>::create(context);
+        image = ImageHelperUlt<ImageUseHostPtr<Image1dDefaults>>::create(context);
     }
     EXPECT_EQ(isZeroCopyImage, image->isMemObjZeroCopy());
     pCmdQ->enqueueMapImage(
@@ -600,14 +598,14 @@ TEST_P(PerformanceHintEnqueueMapTest, GivenZeroCopyFlagWhenEnqueueMapImageIsCall
 
 TEST_P(PerformanceHintEnqueueMapTest, GivenZeroCopyFlagAndBlockingEventWhenEnqueueMapImageIsCallingThenContextProvidesProperHint) {
 
-    auto image = std::unique_ptr<Image>(ImageHelper<ImageReadOnly<Image1dDefaults>>::create(context));
+    auto image = std::unique_ptr<Image>(ImageHelperUlt<ImageReadOnly<Image1dDefaults>>::create(context));
     bool isZeroCopyImage = GetParam();
 
     size_t origin[] = {0, 0, 0};
     size_t region[] = {1, 1, 1};
 
     if (!isZeroCopyImage) {
-        image.reset(ImageHelper<ImageUseHostPtr<Image1dDefaults>>::create(context));
+        image.reset(ImageHelperUlt<ImageUseHostPtr<Image1dDefaults>>::create(context));
     }
     EXPECT_EQ(isZeroCopyImage, image->isMemObjZeroCopy());
 
@@ -704,9 +702,9 @@ TEST_P(PerformanceHintEnqueueMapTest, GivenZeroCopyFlagWhenEnqueueUnmapIsCalling
     size_t region[] = {1, 1, 1};
 
     if (isZeroCopyImage) {
-        image = ImageHelper<ImageReadOnly<Image1dDefaults>>::create(context);
+        image = ImageHelperUlt<ImageReadOnly<Image1dDefaults>>::create(context);
     } else {
-        image = ImageHelper<ImageUseHostPtr<Image1dDefaults>>::create(context);
+        image = ImageHelperUlt<ImageUseHostPtr<Image1dDefaults>>::create(context);
     }
     EXPECT_EQ(isZeroCopyImage, image->isMemObjZeroCopy());
 

@@ -60,7 +60,7 @@ class IoctlHelperXe : public IoctlHelper {
     uint32_t getPreferredLocationAdvise() override;
     std::optional<MemoryClassInstance> getPreferredLocationRegion(PreferredLocation memoryLocation, uint32_t memoryInstance) override;
     bool setVmBoAdvise(int32_t handle, uint32_t attribute, void *region) override;
-    bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) override;
+    bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const std::vector<uint32_t> &vmIds) override;
     bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) override;
     bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) override;
     bool setGemTiling(void *setTiling) override;
@@ -140,6 +140,7 @@ class IoctlHelperXe : public IoctlHelper {
     }
     uint32_t getGtIdFromTileId(uint32_t tileId, uint16_t engineClass) const override;
     bool makeResidentBeforeLockNeeded() const override;
+    bool isSmallBarConfigAllowed() const override { return false; }
 
   protected:
     static constexpr uint32_t maxContextSetProperties = 4;
@@ -176,7 +177,7 @@ class IoctlHelperXe : public IoctlHelper {
     uint16_t getDefaultEngineClass(const aub_stream::EngineType &defaultEngineType);
     void setOptionalContextProperties(Drm &drm, void *extProperties, uint32_t &extIndexInOut);
     virtual void setContextProperties(const OsContextLinux &osContext, uint32_t deviceIndex, void *extProperties, uint32_t &extIndexInOut);
-    virtual void applyContextFlags(void *execQueueCreate, bool allocateInterrupt);
+    virtual void applyContextFlags(void *execQueueCreate, bool allocateInterrupt){};
 
     struct GtIpVersion {
         uint16_t major;
@@ -185,7 +186,6 @@ class IoctlHelperXe : public IoctlHelper {
     };
     bool queryHwIpVersion(GtIpVersion &gtIpVersion);
 
-    bool isLowLatencyHintAvailable = false;
     int maxExecQueuePriority = 0;
     std::mutex xeLock;
     std::mutex gemCloseLock;
@@ -229,7 +229,6 @@ class IoctlHelperXe : public IoctlHelper {
 template <typename... XeLogArgs>
 void IoctlHelperXe::xeLog(XeLogArgs &&...args) const {
     if (debugManager.flags.PrintXeLogs.get()) {
-        PRINT_DEBUG_STRING(debugManager.flags.PrintXeLogs.get(), stderr, TimestampHelper::getTimestamp().c_str());
         PRINT_DEBUG_STRING(debugManager.flags.PrintXeLogs.get(), stderr, args...);
     }
 }

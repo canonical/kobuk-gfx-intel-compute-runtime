@@ -12,6 +12,7 @@
 #include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/event/event_imp.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
@@ -42,6 +43,7 @@ struct InOrderFixtureMockEvent : public EventImp<uint32_t> {
     using EventImp<uint32_t>::latestUsedCmdQueue;
     using EventImp<uint32_t>::inOrderTimestampNode;
     using EventImp<uint32_t>::additionalTimestampNode;
+    using EventImp<uint32_t>::isCompleted;
 
     void makeCounterBasedInitiallyDisabled(MultiGraphicsAllocation &poolAllocation) {
         resetInOrderTimestampNode(nullptr, 0);
@@ -187,7 +189,6 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
         mockCmdQs.emplace_back(std::make_unique<Mock<CommandQueue>>(device, csr, &desc));
 
         cmdList->cmdQImmediate = mockCmdQs[createdCmdLists].get();
-        cmdList->isFlushTaskSubmissionEnabled = true;
         cmdList->cmdListType = CommandList::CommandListType::typeImmediate;
         cmdList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
         cmdList->commandContainer.setImmediateCmdListCsr(csr);
@@ -240,7 +241,7 @@ struct InOrderCmdListFixture : public ::Test<ModuleFixture> {
 
         cmdList->engineGroupType = EngineGroupType::copy;
 
-        mockCopyOsContext = std::make_unique<NEO::MockOsContext>(0, NEO::EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS, EngineUsage::regular}, DeviceBitfield(1)));
+        mockCopyOsContext = std::make_unique<NEO::MockOsContext>(0, NEO::EngineDescriptorHelper::getDefaultDescriptor({device->getProductHelper().getDefaultCopyEngine(), EngineUsage::regular}, DeviceBitfield(1)));
         cmdList->getCsr(false)->setupContext(*mockCopyOsContext);
         return cmdList;
     }

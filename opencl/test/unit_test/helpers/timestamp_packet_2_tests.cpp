@@ -15,6 +15,10 @@
 #include "opencl/test/unit_test/helpers/timestamp_packet_tests.h"
 #include "opencl/test/unit_test/mocks/mock_event.h"
 
+namespace NEO {
+class IndirectHeap;
+} // namespace NEO
+
 using namespace NEO;
 
 HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndNoOutputEventWhenEnqueueingMarkerThenDoNothing) {
@@ -70,36 +74,16 @@ class MockCommandStreamReceiverHW : public UltCommandStreamReceiver<FamilyType> 
             device);
     }
 
-    CompletionStamp flushTaskStateless(
-        LinearStream &commandStream,
-        size_t commandStreamStart,
-        const IndirectHeap *dsh,
-        const IndirectHeap *ioh,
-        const IndirectHeap *ssh,
-        TaskCountType taskLevel,
-        DispatchFlags &dispatchFlags,
-        Device &device) override {
-        stream = &commandStream;
-        return UltCommandStreamReceiver<FamilyType>::flushTaskStateless(
-            commandStream,
-            commandStreamStart,
-            dsh,
-            ioh,
-            ssh,
-            taskLevel,
-            dispatchFlags,
-            device);
-    }
     LinearStream *stream = nullptr;
 };
 
-HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndEventWheBarrierProfilingEnabledThenPipeControlAddedBeforeWritingTimestamp) {
+using TimestampPacketTestsWithMockCsrHw = TimestampPacketTestsWithMockCsrT<MockCommandStreamReceiverHW>;
+
+HWTEST_TEMPLATED_F(TimestampPacketTestsWithMockCsrHw, givenEmptyWaitlistAndEventWheBarrierProfilingEnabledThenPipeControlAddedBeforeWritingTimestamp) {
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    auto commandStreamReceiver = std::make_unique<MockCommandStreamReceiverHW<FamilyType>>(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield());
-    auto commandStreamReceiverPtr = commandStreamReceiver.get();
+    auto commandStreamReceiver = static_cast<MockCommandStreamReceiverHW<FamilyType> *>(&device->getUltCommandStreamReceiver<FamilyType>());
     commandStreamReceiver->timestampPacketWriteEnabled = true;
-    device->resetCommandStreamReceiver(commandStreamReceiver.release());
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(context, device.get(), nullptr));
     cmdQ->setProfilingEnabled();
@@ -108,7 +92,7 @@ HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndEventWheBarrierProfilingEnab
     cmdQ->enqueueBarrierWithWaitList(0, nullptr, &event);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(*(commandStreamReceiverPtr->stream), 0);
+    hwParser.parseCommands<FamilyType>(*(commandStreamReceiver->stream), 0);
     GenCmdList storeRegMemList = hwParser.getCommandsList<MI_STORE_REGISTER_MEM>();
     EXPECT_EQ(0u, storeRegMemList.size() % 4u);
     auto storeRegMemIt = find<MI_STORE_REGISTER_MEM *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
@@ -120,13 +104,11 @@ HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndEventWheBarrierProfilingEnab
     clReleaseEvent(event);
 }
 
-HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndEventWhenMarkerProfilingEnabledThenPipeControlAddedBeforeWritingTimestamp) {
+HWTEST_TEMPLATED_F(TimestampPacketTestsWithMockCsrHw, givenEmptyWaitlistAndEventWhenMarkerProfilingEnabledThenPipeControlAddedBeforeWritingTimestamp) {
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-    auto commandStreamReceiver = std::make_unique<MockCommandStreamReceiverHW<FamilyType>>(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield());
-    auto commandStreamReceiverPtr = commandStreamReceiver.get();
+    auto commandStreamReceiver = static_cast<MockCommandStreamReceiverHW<FamilyType> *>(&device->getUltCommandStreamReceiver<FamilyType>());
     commandStreamReceiver->timestampPacketWriteEnabled = true;
-    device->resetCommandStreamReceiver(commandStreamReceiver.release());
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(context, device.get(), nullptr));
     cmdQ->setProfilingEnabled();
@@ -135,7 +117,7 @@ HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndEventWhenMarkerProfilingEnab
     cmdQ->enqueueMarkerWithWaitList(0, nullptr, &event);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(*(commandStreamReceiverPtr->stream), 0);
+    hwParser.parseCommands<FamilyType>(*(commandStreamReceiver->stream), 0);
     GenCmdList storeRegMemList = hwParser.getCommandsList<MI_STORE_REGISTER_MEM>();
     EXPECT_EQ(0u, storeRegMemList.size() % 4u);
     auto storeRegMemIt = find<MI_STORE_REGISTER_MEM *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
@@ -147,22 +129,20 @@ HWTEST_F(TimestampPacketTests, givenEmptyWaitlistAndEventWhenMarkerProfilingEnab
     clReleaseEvent(event);
 }
 
-HWCMDTEST_F(IGFX_XE_HP_CORE, TimestampPacketTests, givenEmptyWaitlistAndEventWhenMarkerProfilingEnabledOnMultiTileCommandQueueThenCrossTileBarrierAddedBeforeWritingTimestamp) {
+HWCMDTEST_TEMPLATED_F(IGFX_XE_HP_CORE, TimestampPacketTestsWithMockCsrHw, givenEmptyWaitlistAndEventWhenMarkerProfilingEnabledOnMultiTileCommandQueueThenCrossTileBarrierAddedBeforeWritingTimestamp) {
     using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
     using MI_BATCH_BUFFER_START = typename FamilyType::MI_BATCH_BUFFER_START;
     using MI_ATOMIC = typename FamilyType::MI_ATOMIC;
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
-    auto commandStreamReceiver = std::make_unique<MockCommandStreamReceiverHW<FamilyType>>(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield());
-    auto commandStreamReceiverPtr = commandStreamReceiver.get();
+    auto commandStreamReceiver = static_cast<MockCommandStreamReceiverHW<FamilyType> *>(&device->getGpgpuCommandStreamReceiver());
     commandStreamReceiver->timestampPacketWriteEnabled = true;
     commandStreamReceiver->activePartitions = 2;
     commandStreamReceiver->activePartitionsConfig = 2;
     commandStreamReceiver->staticWorkPartitioningEnabled = true;
 
-    device->resetCommandStreamReceiver(commandStreamReceiver.release());
-    *ptrOffset(commandStreamReceiverPtr->tagAddress, commandStreamReceiverPtr->immWritePostSyncWriteOffset) = *commandStreamReceiverPtr->tagAddress;
+    *ptrOffset(commandStreamReceiver->tagAddress, commandStreamReceiver->immWritePostSyncWriteOffset) = *commandStreamReceiver->tagAddress;
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(context, device.get(), nullptr));
     cmdQ->setProfilingEnabled();
@@ -171,7 +151,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, TimestampPacketTests, givenEmptyWaitlistAndEventWhe
     cmdQ->enqueueMarkerWithWaitList(0, nullptr, &event);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(*(commandStreamReceiverPtr->stream), 0);
+    hwParser.parseCommands<FamilyType>(*(commandStreamReceiver->stream), 0);
     GenCmdList storeRegMemList = hwParser.getCommandsList<MI_STORE_REGISTER_MEM>();
     EXPECT_EQ(0u, storeRegMemList.size() % 4u);
     auto storeRegMemIt = find<MI_STORE_REGISTER_MEM *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
@@ -196,11 +176,9 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, TimestampPacketTests, givenEmptyWaitlistAndEventWhe
     clReleaseEvent(event);
 }
 
-HWTEST_F(TimestampPacketTests, givenWithWaitlistAndEventWhenMarkerProfilingEnabledThenPipeControllNotAddedBeforeWritingTimestamp) {
-    auto commandStreamReceiver = std::make_unique<MockCommandStreamReceiverHW<FamilyType>>(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield());
-    auto commandStreamReceiverPtr = commandStreamReceiver.get();
+HWTEST_TEMPLATED_F(TimestampPacketTestsWithMockCsrHw, givenWithWaitlistAndEventWhenMarkerProfilingEnabledThenPipeControllNotAddedBeforeWritingTimestamp) {
+    auto commandStreamReceiver = static_cast<MockCommandStreamReceiverHW<FamilyType> *>(&device->getUltCommandStreamReceiver<FamilyType>());
     commandStreamReceiver->timestampPacketWriteEnabled = true;
-    device->resetCommandStreamReceiver(commandStreamReceiver.release());
 
     auto cmdQ = clUniquePtr(new MockCommandQueueHw<FamilyType>(context, device.get(), nullptr));
     cmdQ->setProfilingEnabled();
@@ -217,7 +195,7 @@ HWTEST_F(TimestampPacketTests, givenWithWaitlistAndEventWhenMarkerProfilingEnabl
     cmdQ->enqueueMarkerWithWaitList(waitListSize, waitList, &event);
 
     HardwareParse hwParser;
-    hwParser.parseCommands<FamilyType>(*(commandStreamReceiverPtr->stream), 0);
+    hwParser.parseCommands<FamilyType>(*(commandStreamReceiver->stream), 0);
     auto storeRegMemIt = find<typename FamilyType::MI_STORE_REGISTER_MEM *>(hwParser.cmdList.begin(), hwParser.cmdList.end());
     EXPECT_NE(storeRegMemIt, hwParser.cmdList.end());
     auto pipeControlIt = find<typename FamilyType::PIPE_CONTROL *>(hwParser.cmdList.begin(), storeRegMemIt);
@@ -250,7 +228,6 @@ HWTEST_F(TimestampPacketTests, whenEnqueueingBarrierThenDontRequestPipeControlOn
 HWTEST_F(TimestampPacketTests, givenWaitlistWhenEnqueueingBarrierThenProgramNonStallingBarrier) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
-    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
 
     auto &csr = device->getUltCommandStreamReceiver<FamilyType>();
     csr.timestampPacketWriteEnabled = true;
@@ -277,7 +254,7 @@ HWTEST_F(TimestampPacketTests, givenWaitlistWhenEnqueueingBarrierThenProgramNonS
     auto it = hwParser.cmdList.begin();
 
     if (device->getProductHelper().isResolveDependenciesByPipeControlsSupported(device->getHardwareInfo(), false, cmdQ.taskCount, cmdQ.getGpgpuCommandStreamReceiver())) {
-        EXPECT_NE(nullptr, genCmdCast<PIPE_CONTROL *>(*it));
+        EXPECT_TRUE(hwParser.isStallingBarrier<FamilyType>(it));
     } else {
         EXPECT_NE(nullptr, genCmdCast<MI_SEMAPHORE_WAIT *>(*it));
         EXPECT_NE(nullptr, genCmdCast<MI_SEMAPHORE_WAIT *>(*(++it)));
@@ -400,7 +377,7 @@ HWTEST_F(TimestampPacketTests, givenPipeControlRequestWithBarrierWriteWhenEstima
     flags.isStallingCommandsOnNextFlushRequired = true;
     auto sizeWithPcRequest = device->getUltCommandStreamReceiver<FamilyType>().getRequiredCmdStreamSize(flags, device->getDevice());
 
-    size_t extendedSize = sizeWithoutPcRequest + MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(device->getRootDeviceEnvironment(), true);
+    size_t extendedSize = sizeWithoutPcRequest + MemorySynchronizationCommands<FamilyType>::getSizeForBarrierWithPostSyncOperation(device->getRootDeviceEnvironment(), NEO::PostSyncMode::immediateData);
 
     EXPECT_EQ(sizeWithPcRequest, extendedSize);
 }
@@ -614,11 +591,12 @@ HWTEST_F(TimestampPacketTests, givenWaitlistAndOutputEventWhenEnqueueingWithoutK
     cmdQ->isQueueBlocked();
 }
 
-HWTEST_F(TimestampPacketTests, givenBlockedEnqueueWithoutKernelWhenSubmittingThenDispatchBlockedCommands) {
+using TimestampPacketTestsWithMockCsrHw2 = TimestampPacketTestsWithMockCsrT<MockCsrHw2>;
+
+HWTEST_TEMPLATED_F(TimestampPacketTestsWithMockCsrHw2, givenBlockedEnqueueWithoutKernelWhenSubmittingThenDispatchBlockedCommands) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
-    auto mockCsr = new MockCsrHw2<FamilyType>(*device->getExecutionEnvironment(), device->getRootDeviceIndex(), device->getDeviceBitfield());
-    device->resetCommandStreamReceiver(mockCsr);
+    auto mockCsr = static_cast<MockCsrHw2<FamilyType> *>(&device->getGpgpuCommandStreamReceiver());
     mockCsr->timestampPacketWriteEnabled = true;
     mockCsr->storeFlushedTaskStream = true;
 

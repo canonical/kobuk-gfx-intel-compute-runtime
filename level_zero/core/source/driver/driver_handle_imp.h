@@ -11,6 +11,7 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/memory_manager/unified_memory_pooling.h"
 #include "shared/source/os_interface/os_library.h"
+#include "shared/source/os_interface/sys_calls_common.h"
 
 #include "level_zero/api/extensions/public/ze_exp_ext.h"
 #include "level_zero/core/source/driver/driver_handle.h"
@@ -35,6 +36,24 @@ struct IpcMemoryData {
 };
 #pragma pack()
 static_assert(sizeof(IpcMemoryData) <= ZE_MAX_IPC_HANDLE_SIZE, "IpcMemoryData is bigger than ZE_MAX_IPC_HANDLE_SIZE");
+
+enum class IpcHandleType : uint8_t {
+    fdHandle = 0,
+    maxHandle
+};
+
+struct IpcOpaqueMemoryData {
+    union IpcHandle {
+        int fd;
+        uint64_t reserved;
+    };
+    IpcHandle handle = {};
+    uint64_t poolOffset = 0;
+    unsigned int processId = 0;
+    IpcHandleType type = IpcHandleType::maxHandle;
+    uint8_t memoryType = 0;
+};
+static_assert(sizeof(IpcOpaqueMemoryData) <= ZE_MAX_IPC_HANDLE_SIZE, "IpcOpaqueMemoryData is bigger than ZE_MAX_IPC_HANDLE_SIZE");
 
 struct IpcHandleTracking {
     uint64_t refcnt = 0;
@@ -125,6 +144,10 @@ struct DriverHandleImp : public DriverHandle {
     void initHostUsmAllocPool();
     void initDeviceUsmAllocPool(NEO::Device &device);
 
+    std::unique_lock<std::mutex> obtainPeerAccessQueryLock() {
+        return std::unique_lock<std::mutex>(peerAccessQueryMutex);
+    }
+
     std::unique_ptr<HostPointerManager> hostPointerManager;
 
     std::mutex sharedMakeResidentAllocationsLock;
@@ -174,6 +197,7 @@ struct DriverHandleImp : public DriverHandle {
     // not based on the lifetime of the object of a class.
     std::unordered_map<std::thread::id, std::string> errorDescs;
     std::mutex errorDescsMutex;
+    std::mutex peerAccessQueryMutex;
     int setErrorDescription(const std::string &str) override;
     ze_result_t getErrorDescription(const char **ppString) override;
     ze_result_t clearErrorDescription() override;

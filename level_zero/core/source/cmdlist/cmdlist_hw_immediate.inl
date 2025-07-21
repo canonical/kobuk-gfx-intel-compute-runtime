@@ -27,6 +27,7 @@
 #include "shared/source/utilities/wait_util.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
+#include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue_hw.h"
 #include "level_zero/core/source/device/bcs_split.h"
 #include "level_zero/core/source/device/device_imp.h"
@@ -373,8 +374,7 @@ NEO::CompletionStamp CommandListCoreFamilyImmediate<gfxCoreFamily>::flushRegular
             ssh = this->commandContainer.getIndirectHeap(NEO::IndirectHeap::Type::surfaceState);
         }
 
-        if (this->device->getL0Debugger()) {
-            UNRECOVERABLE_IF(!NEO::Debugger::isDebugEnabled(this->internalUsage));
+        if (this->device->getL0Debugger() && NEO::Debugger::isDebugEnabled(this->internalUsage)) {
             csr->makeResident(*this->device->getL0Debugger()->getSbaTrackingBuffer(csr->getOsContext().getContextId()));
             csr->makeResident(*this->device->getDebugSurface());
             if (this->device->getNEODevice()->getBindlessHeapsHelper()) {
@@ -528,9 +528,9 @@ inline ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::executeCommand
 
     lockCSR.unlock();
     ze_result_t status = ZE_RESULT_SUCCESS;
-    if (cmdQ == this->cmdQImmediate || cmdQ == this->cmdQImmediateCopyOffload) {
-        cmdQ->setTaskCount(completionStamp.taskCount);
+    cmdQ->setTaskCount(completionStamp.taskCount);
 
+    if (cmdQ == this->cmdQImmediate || cmdQ == this->cmdQImmediateCopyOffload) {
         if (this->isSyncModeQueue) {
             status = hostSynchronize(std::numeric_limits<uint64_t>::max(), true);
         }
@@ -628,7 +628,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendBarrier(ze_even
     if (isInOrderExecutionEnabled()) {
         if (isSkippingInOrderBarrierAllowed(hSignalEvent, numWaitEvents, phWaitEvents)) {
             if (hSignalEvent) {
-                Event::fromHandle(hSignalEvent)->updateInOrderExecState(inOrderExecInfo, inOrderExecInfo->getCounterValue(), inOrderExecInfo->getAllocationOffset());
+                assignInOrderExecInfoToEvent(Event::fromHandle(hSignalEvent));
             }
 
             return ZE_RESULT_SUCCESS;
@@ -1197,6 +1197,8 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::hostSynchronize(uint6
                 if (inOrderExecInfo) {
                     inOrderExecInfo->releaseNotUsedTempTimestampNodes(false);
                 }
+
+                this->storeFillPatternResourcesForReuse();
             }
 
             bool hangDetected = status == ZE_RESULT_ERROR_DEVICE_LOST;
@@ -1251,15 +1253,11 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::flushImmediate(ze_res
     }
 
     if (inputRet == ZE_RESULT_SUCCESS) {
-        if (this->isFlushTaskSubmissionEnabled) {
-            if (signalEvent && (NEO::debugManager.flags.TrackNumCsrClientsOnSyncPoints.get() != 0)) {
-                signalEvent->setLatestUsedCmdQueue(queue);
-            }
-            inputRet = executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, appendOperation, copyOffloadSubmission, requireTaskCountUpdate,
-                                                                outerLock, outerLockForIndirect);
-        } else {
-            inputRet = executeCommandListImmediate(performMigration);
+        if (signalEvent && (NEO::debugManager.flags.TrackNumCsrClientsOnSyncPoints.get() != 0)) {
+            signalEvent->setLatestUsedCmdQueue(queue);
         }
+        inputRet = executeCommandListImmediateWithFlushTask(performMigration, hasStallingCmds, hasRelaxedOrderingDependencies, appendOperation, copyOffloadSubmission, requireTaskCountUpdate,
+                                                            outerLock, outerLockForIndirect);
     }
 
     this->latestFlushIsHostVisible = !this->dcFlushSupport;
@@ -1403,7 +1401,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::performCpuMemcpy(cons
         signalEvent = Event::fromHandle(hSignalEvent);
     }
 
-    if (!this->handleCounterBasedEventOperations(signalEvent)) {
+    if (!this->handleCounterBasedEventOperations(signalEvent, false)) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
@@ -1431,7 +1429,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::performCpuMemcpy(cons
         signalEvent->setGpuEndTimestamp();
 
         if (signalEvent->isCounterBased()) {
-            signalEvent->updateInOrderExecState(inOrderExecInfo, inOrderExecInfo->getCounterValue(), inOrderExecInfo->getAllocationOffset());
+            assignInOrderExecInfoToEvent(signalEvent);
         }
 
         signalEvent->hostSignal(true);
@@ -1776,7 +1774,7 @@ ze_result_t CommandListCoreFamilyImmediate<gfxCoreFamily>::appendCommandLists(ui
         dcFlush = this->getDcFlushRequired(signalEvent->isSignalScope());
     }
 
-    if (!this->handleCounterBasedEventOperations(signalEvent)) {
+    if (!this->handleCounterBasedEventOperations(signalEvent, false)) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
 

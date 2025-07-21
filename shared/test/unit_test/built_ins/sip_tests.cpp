@@ -639,8 +639,6 @@ TEST(DebugBindlessSip, givenOfflineDebuggingModeWhenGettingSipForContextThenCorr
     auto csr = mockDevice->createCommandStreamReceiver();
     csr->setupContext(*osContext);
 
-    EXPECT_NE(nullptr, mockDevice);
-
     auto &sipKernel = NEO::SipKernel::getSipKernel(*mockDevice, &csr->getOsContext());
     EXPECT_NE(nullptr, &sipKernel);
 
@@ -650,6 +648,38 @@ TEST(DebugBindlessSip, givenOfflineDebuggingModeWhenGettingSipForContextThenCorr
     EXPECT_EQ(SipKernelType::dbgBindless, contextSip->getType());
     EXPECT_NE(nullptr, contextSip->getSipAllocation());
     EXPECT_FALSE(contextSip->getStateSaveAreaHeader().empty());
+}
+
+TEST(DebugSip, givenOfflineDebuggingModeWhenGettingSipForContextThenMemoryTransferGoesThroughCpuPointer) {
+    auto executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
+    executionEnvironment->setDebuggingMode(DebuggingMode::offline);
+    VariableBackup<bool> mockSipBackup(&MockSipData::useMockSip, false);
+    auto builtIns = new NEO::MockBuiltins();
+    builtIns->callBaseGetSipKernel = true;
+    MockRootDeviceEnvironment::resetBuiltins(executionEnvironment->rootDeviceEnvironments[0].get(), builtIns);
+    auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithExecutionEnvironment<MockDevice>(defaultHwInfo.get(), executionEnvironment, 0u));
+
+    auto memoryManager = static_cast<MockMemoryManager *>(mockDevice->getMemoryManager());
+
+    const uint32_t contextId = 2u;
+    std::unique_ptr<OsContext> osContext(OsContext::create(executionEnvironment->rootDeviceEnvironments[0]->osInterface.get(),
+                                                           mockDevice->getRootDeviceIndex(), contextId,
+                                                           EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_BCS, EngineUsage::regular}, PreemptionMode::ThreadGroup, mockDevice->getDeviceBitfield())));
+    osContext->setDefaultContext(true);
+
+    auto csr = mockDevice->createCommandStreamReceiver();
+    csr->setupContext(*osContext);
+
+    std::vector<char> sipBinary;
+    std::vector<char> stateSaveAreaHeader;
+    mockDevice->getCompilerInterface()->getSipKernelBinary(*mockDevice, SipKernelType::dbgBindless, sipBinary, stateSaveAreaHeader);
+
+    memoryManager->copyMemoryToAllocationBanksCalled = 0;
+    auto &sipKernel = NEO::SipKernel::getSipKernel(*mockDevice, &csr->getOsContext());
+    ASSERT_NE(nullptr, &sipKernel);
+    EXPECT_EQ(1u, memoryManager->copyMemoryToAllocationBanksCalled);
+
+    EXPECT_EQ(0, memcmp(sipBinary.data(), sipKernel.getSipAllocation()->getUnderlyingBuffer(), sipBinary.size()));
 }
 
 TEST(DebugBindlessSip, givenTwoContextsWhenBindlessDebugSipIsRequestedThenEachSipKernelIsAssignedToADifferentContextId) {
@@ -866,10 +896,6 @@ TEST(DebugBindlessSip, givenOfflineDebuggingModeWhenDebugSipForContextIsCreatedT
 
     gEnvironment->igcPopDebugVars();
 }
-class SipKernelMock : public SipKernel {
-  public:
-    using SipKernel::selectSipClassType;
-};
 
 using DebugBuiltinSipTest = Test<DeviceFixture>;
 
@@ -882,23 +908,23 @@ TEST_F(DebugBuiltinSipTest, givenDebuggerWhenInitSipKernelThenDbgSipIsLoadedFrom
 
     auto sipAllocation = SipKernel::getSipKernel(*pDevice, nullptr).getSipAllocation();
     EXPECT_NE(nullptr, sipAllocation);
-    EXPECT_EQ(SipKernelMock::classType, SipClassType::builtins);
+    EXPECT_EQ(MockSipKernel::classType, SipClassType::builtins);
 
     SipKernel::freeSipKernels(&pDevice->getRootDeviceEnvironmentRef(), pDevice->getMemoryManager());
 }
 
 TEST_F(DebugBuiltinSipTest, givenDebugFlagForForceSipClassWhenInitSipKernelThenProperSipClassIsSet) {
     VariableBackup<bool> mockSipBackup(&MockSipData::useMockSip, false);
-    VariableBackup sipClassBackup(&SipKernelMock::classType);
+    VariableBackup sipClassBackup(&MockSipKernel::classType);
     DebugManagerStateRestore restorer;
 
     debugManager.flags.ForceSipClass.set(static_cast<int32_t>(SipClassType::builtins));
     EXPECT_TRUE(SipKernel::initSipKernel(SipKernelType::csr, *pDevice));
-    EXPECT_EQ(SipKernelMock::classType, SipClassType::builtins);
+    EXPECT_EQ(MockSipKernel::classType, SipClassType::builtins);
 
     debugManager.flags.ForceSipClass.set(static_cast<int32_t>(SipClassType::hexadecimalHeaderFile));
     EXPECT_TRUE(SipKernel::initSipKernel(SipKernelType::csr, *pDevice));
-    EXPECT_EQ(SipKernelMock::classType, SipClassType::hexadecimalHeaderFile);
+    EXPECT_EQ(MockSipKernel::classType, SipClassType::hexadecimalHeaderFile);
 
     SipKernel::freeSipKernels(&pDevice->getRootDeviceEnvironmentRef(), pDevice->getMemoryManager());
 }
@@ -945,8 +971,8 @@ HWTEST2_F(DebugExternalLibSipTest, givenDebuggerWhenInitSipKernelThenDbgSipIsLoa
     VariableBackup<bool> mockSipBackup(&MockSipData::useMockSip, false);
     pDevice->executionEnvironment->rootDeviceEnvironments[0]->initDebuggerL0(pDevice);
     std::string fileName = "unk";
-    SipKernelMock::selectSipClassType(fileName, *pDevice);
-    EXPECT_EQ(SipKernelMock::classType, SipClassType::builtins);
+    MockSipKernel::selectSipClassType(fileName, *pDevice);
+    EXPECT_EQ(MockSipKernel::classType, SipClassType::builtins);
 }
 
 TEST_F(DebugExternalLibSipTest, givenGetSipBinaryFromExternalLibRetunsTrueWhenGetSipExternalLibInterfaceIsCalledThenNullptrReturned) {

@@ -7,6 +7,7 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/os_interface/product_helper.inl"
+#include "shared/source/os_interface/product_helper_from_xe_hpc_to_xe3.inl"
 #include "shared/source/os_interface/product_helper_from_xe_hpg_to_xe3.inl"
 #include "shared/source/os_interface/product_helper_xe2_and_later.inl"
 #include "shared/source/os_interface/product_helper_xe_hpc_and_later.inl"
@@ -20,7 +21,12 @@ bool ProductHelperHw<gfxProduct>::isBlitterForImagesSupported() const {
 }
 
 template <>
-bool ProductHelperHw<gfxProduct>::isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const {
+bool ProductHelperHw<gfxProduct>::isReleaseGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const {
+    return !hwInfo.capabilityTable.isIntegratedDevice;
+}
+
+template <>
+bool ProductHelperHw<gfxProduct>::isAcquireGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const {
     return !hwInfo.capabilityTable.isIntegratedDevice;
 }
 
@@ -64,6 +70,16 @@ bool ProductHelperHw<gfxProduct>::isResolveDependenciesByPipeControlsSupported(c
         return debugManager.flags.ResolveDependenciesViaPipeControls.get() == 1;
     }
     return enabled;
+}
+
+template <>
+bool ProductHelperHw<gfxProduct>::isDeviceUsmAllocationReuseSupported() const {
+    return true;
+}
+
+template <>
+bool ProductHelperHw<gfxProduct>::isHostUsmAllocationReuseSupported() const {
+    return true;
 }
 
 } // namespace NEO

@@ -23,25 +23,6 @@
 #include <string>
 
 namespace NEO {
-
-struct MockAubFileStreamMockMmioWrite : public AubMemDump::AubFileStream {
-    void writeMMIOImpl(uint32_t offset, uint32_t value) override {
-        mmioList.push_back(std::make_pair(offset, value));
-    }
-    bool isOnMmioList(const MMIOPair &mmio) {
-        bool mmioFound = false;
-        for (auto &mmioPair : mmioList) {
-            if (mmioPair.first == mmio.first && mmioPair.second == mmio.second) {
-                mmioFound = true;
-                break;
-            }
-        }
-        return mmioFound;
-    }
-
-    std::vector<std::pair<uint32_t, uint32_t>> mmioList;
-};
-
 template <typename GfxFamily>
 struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
     using CommandStreamReceiverHw<GfxFamily>::defaultSshSize;
@@ -64,14 +45,6 @@ struct MockAubCsr : public AUBCommandStreamReceiverHw<GfxFamily> {
         recordedDispatchFlags = dispatchFlags;
 
         return AUBCommandStreamReceiverHw<GfxFamily>::flushTask(commandStream, commandStreamStart, dsh, ioh, ssh, taskLevel, dispatchFlags, device);
-    }
-
-    CompletionStamp flushTaskStateless(LinearStream &commandStream, size_t commandStreamStart,
-                                       const IndirectHeap *dsh, const IndirectHeap *ioh, const IndirectHeap *ssh,
-                                       TaskCountType taskLevel, DispatchFlags &dispatchFlags, Device &device) override {
-        recordedDispatchFlags = dispatchFlags;
-
-        return AUBCommandStreamReceiverHw<GfxFamily>::flushTaskStateless(commandStream, commandStreamStart, dsh, ioh, ssh, taskLevel, dispatchFlags, device);
     }
 
     DispatchMode peekDispatchMode() const {

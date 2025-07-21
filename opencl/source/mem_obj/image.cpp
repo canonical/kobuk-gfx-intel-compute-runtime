@@ -41,7 +41,7 @@
 #include "opencl/source/mem_obj/mem_obj_helper.h"
 #include "opencl/source/sharings/unified/unified_image.h"
 
-#include "igfxfmid.h"
+#include "neo_igfxfmid.h"
 
 namespace NEO {
 
@@ -795,7 +795,7 @@ cl_int Image::getImageInfo(cl_image_info paramName,
         retParam = imageDesc.image_width;
         if (this->baseMipLevel) {
             retParam = imageDesc.image_width >> this->baseMipLevel;
-            retParam = std::max(retParam, (size_t)1);
+            retParam = std::max(retParam, static_cast<size_t>(1));
         }
         srcParam = &retParam;
         break;
@@ -805,7 +805,7 @@ cl_int Image::getImageInfo(cl_image_info paramName,
         retParam = imageDesc.image_height * !((imageDesc.image_type == CL_MEM_OBJECT_IMAGE1D) || (imageDesc.image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY) || (imageDesc.image_type == CL_MEM_OBJECT_IMAGE1D_BUFFER));
         if ((retParam != 0) && (this->baseMipLevel > 0)) {
             retParam = retParam >> this->baseMipLevel;
-            retParam = std::max(retParam, (size_t)1);
+            retParam = std::max(retParam, static_cast<size_t>(1));
         }
         srcParam = &retParam;
         break;
@@ -815,7 +815,7 @@ cl_int Image::getImageInfo(cl_image_info paramName,
         retParam = imageDesc.image_depth * (imageDesc.image_type == CL_MEM_OBJECT_IMAGE3D);
         if ((retParam != 0) && (this->baseMipLevel > 0)) {
             retParam = retParam >> this->baseMipLevel;
-            retParam = std::max(retParam, (size_t)1);
+            retParam = std::max(retParam, static_cast<size_t>(1));
         }
         srcParam = &retParam;
         break;

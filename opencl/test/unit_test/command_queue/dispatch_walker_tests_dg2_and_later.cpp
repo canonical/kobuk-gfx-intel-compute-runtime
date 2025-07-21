@@ -5,19 +5,15 @@
  *
  */
 
-#include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/timestamp_packet.h"
-#include "shared/source/os_interface/product_helper.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/fixtures/linear_stream_fixture.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
-#include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_device.h"
-#include "shared/test/common/mocks/mock_execution_environment.h"
 
 #include "opencl/source/command_queue/hardware_interface.h"
 #include "opencl/test/unit_test/command_queue/hardware_interface_helper.h"
@@ -75,12 +71,12 @@ struct Dg2AndLaterDispatchWalkerBasicFixture : public LinearStreamFixture {
 
 using WalkerDispatchTestDg2AndLater = ::testing::Test;
 using Dg2AndLaterDispatchWalkerBasicTest = Test<Dg2AndLaterDispatchWalkerBasicFixture>;
-using matcherDG2AndLater = IsAtLeastXeHpgCore;
+using matcherDG2AndLater = IsAtLeastXeCore;
 
 struct L3PrefetchMatch {
     template <PRODUCT_FAMILY productFamily>
     static constexpr bool isMatched() {
-        return IsAtLeastXeHpCore::isMatched<productFamily>() && HeapfulSupportedMatch::isMatched<productFamily>();
+        return IsAtLeastXeCore::isMatched<productFamily>() && HeapfulSupportedMatch::isMatched<productFamily>();
     }
 };
 
@@ -188,7 +184,7 @@ HWTEST2_F(Dg2AndLaterDispatchWalkerBasicTest, givenDebugFlagToDisableL1FlushInPo
 }
 
 HWTEST2_F(Dg2AndLaterDispatchWalkerBasicTest, givenDebugVariableEnabledWhenEnqueueingThenWriteWalkerStamp, matcherDG2AndLater) {
-    using WalkerVariant = typename FamilyType::WalkerVariant;
+    using WalkerType = typename FamilyType::DefaultWalkerType;
 
     DebugManagerStateRestore restore;
     debugManager.flags.EnableTimestampPacket.set(true);
@@ -210,16 +206,13 @@ HWTEST2_F(Dg2AndLaterDispatchWalkerBasicTest, givenDebugVariableEnabledWhenEnque
     auto gmmHelper = device->getGmmHelper();
     auto expectedMocs = MemorySynchronizationCommands<FamilyType>::getDcFlushEnable(true, device->getRootDeviceEnvironment()) ? gmmHelper->getUncachedMOCS() : gmmHelper->getL3EnabledMOCS();
 
-    WalkerVariant walkerVariant = NEO::UnitTestHelper<FamilyType>::getWalkerVariant(*hwParser.itorWalker);
+    auto walker = genCmdCast<WalkerType *>(*hwParser.itorWalker);
 
-    std::visit([expectedMocs](auto &&walker) {
-        auto &postSyncData = walker->getPostSync();
-        using PostSyncType = std::decay_t<decltype(postSyncData)>;
+    auto &postSyncData = walker->getPostSync();
+    using PostSyncType = std::decay_t<decltype(postSyncData)>;
 
-        EXPECT_EQ(PostSyncType::OPERATION::OPERATION_WRITE_TIMESTAMP, postSyncData.getOperation());
-        EXPECT_TRUE(postSyncData.getDataportPipelineFlush());
-        EXPECT_TRUE(postSyncData.getDataportSubsliceCacheFlush());
-        EXPECT_EQ(expectedMocs, postSyncData.getMocs());
-    },
-               walkerVariant);
+    EXPECT_EQ(PostSyncType::OPERATION::OPERATION_WRITE_TIMESTAMP, postSyncData.getOperation());
+    EXPECT_TRUE(postSyncData.getDataportPipelineFlush());
+    EXPECT_TRUE(postSyncData.getDataportSubsliceCacheFlush());
+    EXPECT_EQ(expectedMocs, postSyncData.getMocs());
 }

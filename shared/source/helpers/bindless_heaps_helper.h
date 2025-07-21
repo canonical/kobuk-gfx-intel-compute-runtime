@@ -29,7 +29,8 @@ constexpr uint32_t image = 0;
 constexpr uint32_t implicitArgs = 1;
 constexpr uint32_t sampler = 2;
 constexpr uint32_t redescribedImage = 3;
-constexpr uint32_t max = 4;
+constexpr uint32_t packedImage = 4;
+constexpr uint32_t max = 5;
 }; // namespace BindlessImageSlot
 
 class BindlessHeapsHelper : NEO::NonCopyableAndNonMovableClass {
@@ -104,6 +105,7 @@ class BindlessHeapsHelper : NEO::NonCopyableAndNonMovableClass {
     bool isMultiOsContextCapable = false;
     bool reservedMemoryInitialized = false;
     bool useReservedMemory = false;
+    bool heaplessEnabled = false;
 };
 
 static_assert(NEO::NonCopyableAndNonMovable<BindlessHeapsHelper>);

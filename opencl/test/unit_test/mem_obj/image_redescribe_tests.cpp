@@ -1,23 +1,20 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/memory_manager/os_agnostic_memory_manager.h"
 
 #include "opencl/source/helpers/cl_memory_properties_helpers.h"
 #include "opencl/source/helpers/surface_formats.h"
 #include "opencl/source/mem_obj/image.h"
-#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 
 #include "gtest/gtest.h"
-#include "igfxfmid.h"
 
 extern GFXCORE_FAMILY renderCoreFamily;
 
@@ -231,7 +228,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(ImageRedescribeTestSimple, givenImageWhenItIsRedescribedThenCreateFunctionIsSameAsInOriginalImage) {
     MockContext context;
-    std::unique_ptr<Image> image(ImageHelper<Image1dDefaults>::create(&context));
+    std::unique_ptr<Image> image(ImageHelperUlt<Image1dDefaults>::create(&context));
     std::unique_ptr<Image> imageNew(image->redescribe());
     ASSERT_NE(nullptr, imageNew);
     EXPECT_EQ(image->createFunction, imageNew->createFunction);
@@ -239,7 +236,7 @@ TEST(ImageRedescribeTestSimple, givenImageWhenItIsRedescribedThenCreateFunctionI
 
 TEST(ImageRedescribeTestSimple, givenImageWhenItIsRedescribedThenPlaneIsSameAsInOriginalImage) {
     MockContext context;
-    std::unique_ptr<Image> image(ImageHelper<Image1dDefaults>::create(&context));
+    std::unique_ptr<Image> image(ImageHelperUlt<Image1dDefaults>::create(&context));
     image->setPlane(GMM_PLANE_U);
     std::unique_ptr<Image> imageNew(image->redescribe());
     ASSERT_NE(nullptr, imageNew);

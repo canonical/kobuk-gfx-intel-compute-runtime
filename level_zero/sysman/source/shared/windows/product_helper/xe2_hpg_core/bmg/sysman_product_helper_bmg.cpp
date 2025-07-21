@@ -59,8 +59,8 @@ static std::map<unsigned long, std::map<std::string, uint32_t>> guidToKeyOffsetM
       {"rx_pkt_count_msb", 73},
       {"tx_pkt_count_lsb", 76},
       {"tx_pkt_count_msb", 75},
-      {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", 92},
-      {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", 93},
+      {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", 93},
+      {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", 92},
       {"GDDR0_CH0_GT_32B_RD_REQ_UPPER", 94},
       {"GDDR0_CH0_GT_32B_RD_REQ_LOWER", 95},
       {"GDDR1_CH0_GT_32B_RD_REQ_UPPER", 134},
@@ -557,7 +557,23 @@ static std::map<unsigned long, std::map<std::string, uint32_t>> guidToKeyOffsetM
       {"GDDR4_CH1_GT_64B_WR_REQ_UPPER", 281},
       {"GDDR4_CH1_GT_64B_WR_REQ_LOWER", 280},
       {"GDDR5_CH1_GT_64B_WR_REQ_UPPER", 321},
-      {"GDDR5_CH1_GT_64B_WR_REQ_LOWER", 320}}}};
+      {"GDDR5_CH1_GT_64B_WR_REQ_LOWER", 320}}},
+    {0x1e2f8301, // BMG G31 PUNIT rev 2
+     {{"XTAL_CLK_FREQUENCY", 1},
+      {"ACCUM_PACKAGE_ENERGY", 12},
+      {"ACCUM_PSYS_ENERGY", 13},
+      {"VRAM_BANDWIDTH", 14},
+      {"XTAL_COUNT", 128},
+      {"VCCGT_ENERGY_ACCUMULATOR", 407},
+      {"VCCDDR_ENERGY_ACCUMULATOR", 410}}},
+    {0x1e2f8302, // BMG G31 PUNIT rev 3
+     {{"XTAL_CLK_FREQUENCY", 1},
+      {"ACCUM_PACKAGE_ENERGY", 12},
+      {"ACCUM_PSYS_ENERGY", 13},
+      {"VRAM_BANDWIDTH", 14},
+      {"XTAL_COUNT", 128},
+      {"VCCGT_ENERGY_ACCUMULATOR", 407},
+      {"VCCDDR_ENERGY_ACCUMULATOR", 410}}}};
 
 ze_result_t getGpuMaxTemperature(PlatformMonitoringTech *pPmt, double *pTemperature) {
     uint32_t gpuMaxTemperature = 0;
@@ -859,21 +875,8 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getMemoryBandWidth(zes_mem_bandwi
     // PMT reports maxBandwidth in units of 100 MBps (decimal). Need to convert it into Bytes/sec, unit to be returned by sysman.
     pBandwidth->maxBandwidth = static_cast<uint64_t>(maxBandwidth) * megaBytesToBytes * 100;
 
-    // timestamp calculation
-    uint32_t timeStampL = 0;
-    uint32_t timeStampH = 0;
-
-    status = pPmt->readValue("GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", timeStampH);
-    if (status != ZE_RESULT_SUCCESS) {
-        return status;
-    }
-    status = pPmt->readValue("GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", timeStampL);
-    if (status != ZE_RESULT_SUCCESS) {
-        return status;
-    }
-
-    // timestamp from PMT is in milli seconds
-    pBandwidth->timestamp = packInto64Bit(timeStampH, timeStampL) * milliSecsToMicroSecs;
+    // Get timestamp
+    pBandwidth->timestamp = SysmanDevice::getSysmanTimestamp();
 
     return status;
 }
@@ -979,6 +982,11 @@ std::map<unsigned long, std::map<std::string, uint32_t>> *SysmanProductHelperHw<
 
 template <>
 bool SysmanProductHelperHw<gfxProduct>::isZesInitSupported() {
+    return true;
+}
+
+template <>
+bool SysmanProductHelperHw<gfxProduct>::isLateBindingSupported() {
     return true;
 }
 

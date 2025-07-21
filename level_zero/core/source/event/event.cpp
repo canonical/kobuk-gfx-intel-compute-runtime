@@ -408,6 +408,7 @@ ze_result_t EventPool::getIpcHandle(ze_ipc_event_pool_handle_t *ipcHandle) {
     poolData.maxEventPackets = this->getEventMaxPackets();
     poolData.numDevices = static_cast<uint32_t>(this->devices.size());
     poolData.isEventPoolKernelMappedTsFlagSet = this->isEventPoolKernelMappedTsFlagSet();
+    poolData.isEventPoolTsFlagSet = this->isEventPoolTimestampFlagSet();
 
     auto memoryManager = this->context->getDriverHandle()->getMemoryManager();
     auto allocation = this->eventPoolAllocations->getDefaultGraphicsAllocation();
@@ -427,6 +428,9 @@ ze_result_t EventPool::openEventPoolIpcHandle(const ze_ipc_event_pool_handle_t &
     ze_event_pool_desc_t desc = {ZE_STRUCTURE_TYPE_EVENT_POOL_DESC};
     if (poolData.isEventPoolKernelMappedTsFlagSet) {
         desc.flags |= ZE_EVENT_POOL_FLAG_KERNEL_MAPPED_TIMESTAMP;
+    }
+    if (poolData.isEventPoolTsFlagSet) {
+        desc.flags |= ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
     }
     desc.count = static_cast<uint32_t>(poolData.numEvents);
     auto eventPool = std::make_unique<EventPool>(&desc);
@@ -532,8 +536,8 @@ void Event::releaseTempInOrderTimestampNodes() {
 
 ze_result_t Event::destroy() {
     resetInOrderTimestampNode(nullptr, 0);
+    resetAdditionalTimestampNode(nullptr, 0, true);
     releaseTempInOrderTimestampNodes();
-    resetAdditionalTimestampNode(nullptr, 0);
 
     if (isCounterBasedExplicitlyEnabled() && isFromIpcPool) {
         auto memoryManager = device->getNEODevice()->getMemoryManager();
@@ -700,29 +704,40 @@ void Event::resetInOrderTimestampNode(NEO::TagNodeBase *newNode, uint32_t partit
     }
 }
 
-void Event::resetAdditionalTimestampNode(NEO::TagNodeBase *newNode, uint32_t partitionCount) {
-    if (!newNode) {
-        for (auto &node : additionalTimestampNode) {
+void Event::resetAdditionalTimestampNode(NEO::TagNodeBase *newNode, uint32_t partitionCount, bool resetAggregatedEvent) {
+    if (inOrderIncrementValue > 0) {
+        if (newNode) {
+            additionalTimestampNode.push_back(newNode);
+            if (NEO::debugManager.flags.ClearStandaloneInOrderTimestampAllocation.get() != 0) {
+                clearTimestampTagData(partitionCount, newNode);
+            }
+        } else if (resetAggregatedEvent) {
+            // If we are resetting aggregated event, we need to clear all additional timestamp nodes
+            for (auto &node : additionalTimestampNode) {
+                inOrderExecInfo->pushTempTimestampNode(node, inOrderExecSignalValue);
+            }
+            additionalTimestampNode.clear();
+        }
+
+        return;
+    }
+
+    for (auto &node : additionalTimestampNode) {
+        if (inOrderExecInfo) {
+            // Push to temp node vector and releaseNotUsedTempTimestampNodes will clear when needed
+            inOrderExecInfo->pushTempTimestampNode(node, inOrderExecSignalValue);
+        } else {
             node->returnTag();
         }
-        additionalTimestampNode.clear();
-        return;
     }
+    additionalTimestampNode.clear();
 
-    if (inOrderIncrementValue > 0) {
-        // Aggregated events do not reset
+    if (newNode) {
         additionalTimestampNode.push_back(newNode);
-        return;
+        if (NEO::debugManager.flags.ClearStandaloneInOrderTimestampAllocation.get() != 0) {
+            clearTimestampTagData(partitionCount, newNode);
+        }
     }
-
-    if (additionalTimestampNode.size() > 0) {
-        auto existingNode = additionalTimestampNode.back();
-        existingNode->returnTag();
-        additionalTimestampNode.clear();
-    }
-    additionalTimestampNode.push_back(newNode);
-
-    clearTimestampTagData(partitionCount, newNode);
 }
 
 NEO::GraphicsAllocation *Event::getExternalCounterAllocationFromAddress(uint64_t *address) const {
@@ -770,6 +785,7 @@ ze_result_t Event::enableExtensions(const EventDescriptor &eventDescriptor) {
             auto inOrderExecInfo = NEO::InOrderExecInfo::createFromExternalAllocation(*device->getNEODevice(), deviceAlloc, castToUint64(externalSyncAllocProperties->deviceAddress),
                                                                                       hostAlloc, externalSyncAllocProperties->hostAddress, externalSyncAllocProperties->completionValue, 1, 1);
             updateInOrderExecState(inOrderExecInfo, externalSyncAllocProperties->completionValue, 0);
+            disableHostCaching(true);
         } else if (static_cast<uint32_t>(extendedDesc->stype) == ZEX_STRUCTURE_COUNTER_BASED_EVENT_EXTERNAL_STORAGE_ALLOC_PROPERTIES) {
             auto externalStorageProperties = reinterpret_cast<const zex_counter_based_event_external_storage_properties_t *>(extendedDesc);
 
@@ -789,6 +805,7 @@ ze_result_t Event::enableExtensions(const EventDescriptor &eventDescriptor) {
             updateInOrderExecState(inOrderExecInfo, externalStorageProperties->completionValue, 0);
 
             this->inOrderIncrementValue = externalStorageProperties->incrementValue;
+            disableHostCaching(true);
         }
 
         extendedDesc = reinterpret_cast<const ze_base_desc_t *>(extendedDesc->pNext);

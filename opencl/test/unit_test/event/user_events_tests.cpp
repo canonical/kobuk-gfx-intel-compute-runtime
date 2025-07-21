@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -10,7 +10,6 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 
@@ -902,7 +901,7 @@ TEST_F(MockEventTests, GivenEnqueueReadImageWhenWaitingforEventThenSuccessIsRetu
     uEvent = makeReleaseable<UserEvent>(context);
     cl_event eventWaitList[] = {uEvent.get()};
 
-    auto image = clUniquePtr(Image2dHelper<>::create(this->context));
+    auto image = clUniquePtr(Image2dHelperUlt<>::create(this->context));
     ASSERT_NE(nullptr, image);
 
     auto retVal = EnqueueReadImageHelper<>::enqueueReadImage(pCmdQ,

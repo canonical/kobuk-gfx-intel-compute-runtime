@@ -12,6 +12,7 @@
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/gmm_helper/resource_info.h"
 #include "shared/source/helpers/aligned_memory.h"
+#include "shared/source/helpers/image_helper.h"
 #include "shared/source/helpers/populate_factory.h"
 #include "shared/source/image/image_surface_state.h"
 #include "shared/source/release_helper/release_helper.h"
@@ -88,7 +89,7 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
         surfaceState->setShaderChannelSelectAlpha(RENDER_SURFACE_STATE::SHADER_CHANNEL_SELECT_ONE);
     }
 
-    surfaceState->setNumberOfMultisamples((typename RENDER_SURFACE_STATE::NUMBER_OF_MULTISAMPLES)mcsSurfaceInfo.multisampleCount);
+    surfaceState->setNumberOfMultisamples(static_cast<typename RENDER_SURFACE_STATE::NUMBER_OF_MULTISAMPLES>(mcsSurfaceInfo.multisampleCount));
 
     if (imageDesc.num_samples > 1) {
         setAuxParamsForMultisamples(surfaceState, rootDeviceIndex);
@@ -104,6 +105,10 @@ void ImageHw<GfxFamily>::setImageArg(void *memory, bool setAsMediaBlockImage, ui
     adjustDepthLimitations(surfaceState, minArrayElement, renderTargetViewExtent, depth, mipCount, is3DUAVOrRTV);
     appendSurfaceStateParams(surfaceState, rootDeviceIndex);
     appendSurfaceStateExt(surfaceState);
+
+    if (isPackedFormat) {
+        NEO::EncodeSurfaceState<GfxFamily>::convertSurfaceStateToPacked(surfaceState, imgInfo);
+    }
 }
 
 template <typename GfxFamily>
@@ -124,7 +129,7 @@ void ImageHw<GfxFamily>::setAuxParamsForMultisamples(RENDER_SURFACE_STATE *surfa
         } else if (mcsGmm->unifiedAuxTranslationCapable()) {
             EncodeSurfaceState<GfxFamily>::setImageAuxParamsForCCS(surfaceState, mcsGmm);
         } else {
-            surfaceState->setAuxiliarySurfaceMode((typename RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE)1);
+            surfaceState->setAuxiliarySurfaceMode(static_cast<typename RENDER_SURFACE_STATE::AUXILIARY_SURFACE_MODE>(1));
             surfaceState->setAuxiliarySurfacePitch(mcsSurfaceInfo.pitch);
             surfaceState->setAuxiliarySurfaceQPitch(mcsSurfaceInfo.qPitch);
             surfaceState->setAuxiliarySurfaceBaseAddress(mcsAllocation->getGpuAddress());

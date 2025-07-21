@@ -66,6 +66,7 @@ Drm::Drm(std::unique_ptr<HwDeviceIdDrm> &&hwDeviceIdIn, RootDeviceEnvironment &r
       hwDeviceId(std::move(hwDeviceIdIn)), rootDeviceEnvironment(rootDeviceEnvironment) {
     pagingFence.fill(0u);
     fenceVal.fill(0u);
+    minimalChunkingSize = MemoryConstants::pageSize2M;
 }
 
 SubmissionStatus Drm::getSubmissionStatusFromReturnCode(int32_t retCode) {
@@ -102,7 +103,7 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
         auto printIoctl = debugManager.flags.PrintIoctlEntries.get();
 
         if (printIoctl) {
-            printf("IOCTL %s called\n", ioctlHelper->getIoctlString(request).c_str());
+            PRINT_DEBUG_STRING(true, stdout, "IOCTL %s called\n", ioctlHelper->getIoctlString(request).c_str());
         }
 
         if (measureTime) {
@@ -137,11 +138,11 @@ int Drm::ioctl(DrmIoctl request, void *arg) {
 
         if (printIoctl) {
             if (ret == 0) {
-                printf("IOCTL %s returns %d\n",
-                       ioctlHelper->getIoctlString(request).c_str(), ret);
+                PRINT_DEBUG_STRING(true, stdout, "IOCTL %s returns %d\n",
+                                   ioctlHelper->getIoctlString(request).c_str(), ret);
             } else {
-                printf("IOCTL %s returns %d, errno %d(%s)\n",
-                       ioctlHelper->getIoctlString(request).c_str(), ret, returnedErrno, strerror(returnedErrno));
+                PRINT_DEBUG_STRING(true, stdout, "IOCTL %s returns %d, errno %d(%s)\n",
+                                   ioctlHelper->getIoctlString(request).c_str(), ret, returnedErrno, strerror(returnedErrno));
             }
         }
 
@@ -514,7 +515,9 @@ int Drm::setupHardwareInfo(const DeviceDescriptor *device, bool setupFeatureTabl
         printDebugString(debugManager.flags.PrintDebugMessages.get(), stderr, "%s", "WARNING: Failed to query memory info\n");
     } else if (getMemoryInfo()->isSmallBarDetected()) {
         IoFunctions::fprintf(stderr, "WARNING: Small BAR detected for device %s\n", getPciPath().c_str());
-        return -1;
+        if (!ioctlHelper->isSmallBarConfigAllowed()) {
+            return -1;
+        }
     }
 
     if (!queryEngineInfo()) {
@@ -1506,7 +1509,8 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
     }
 
     // Use only when debugger is disabled
-    const bool guaranteePagingFence = forcePagingFence && !drm->getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled();
+    auto debuggingEnabled = drm->getRootDeviceEnvironment().executionEnvironment.isDebuggingEnabled();
+    const bool guaranteePagingFence = forcePagingFence && !debuggingEnabled;
 
     std::unique_ptr<uint8_t[]> extensions;
     if (bind) {
@@ -1514,7 +1518,7 @@ int changeBufferObjectBinding(Drm *drm, OsContext *osContext, uint32_t vmHandleI
         if (bo->getBindExtHandles().size() > 0 && allowUUIDsForDebug) {
             extensions = ioctlHelper->prepareVmBindExt(bo->getBindExtHandles(), bo->getRegisteredBindHandleCookie());
         }
-        bool bindCapture = bo->isMarkedForCapture();
+        bool bindCapture = debuggingEnabled && bo->isMarkedForCapture();
         bool bindImmediate = bo->isImmediateBindingRequired();
         bool bindMakeResident = false;
         bool readOnlyResource = bo->isReadOnlyGpuResource();
@@ -1873,6 +1877,11 @@ void Drm::adjustSharedSystemMemCapabilities() {
 
 uint32_t Drm::getAggregatedProcessCount() const {
     return ioctlHelper->getNumProcesses();
+}
+
+uint32_t Drm::getVmIdForContext(OsContext &osContext, uint32_t vmHandleId) const {
+    auto osContextLinux = static_cast<const OsContextLinux *>(&osContext);
+    return osContextLinux->getDrmVmIds().size() > 0 ? osContextLinux->getDrmVmIds()[vmHandleId] : getVirtualMemoryAddressSpace(vmHandleId);
 }
 
 template std::vector<uint16_t> Drm::query<uint16_t>(uint32_t queryId, uint32_t queryItemFlags);

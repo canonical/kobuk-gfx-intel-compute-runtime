@@ -7,7 +7,7 @@
  *
  */
 
-dependenciesRevision='2d4f30c4b4f9e12d62a90c0027bc9e1223807149-3416'
+dependenciesRevision='338084d436aa07ffb9347223cd926d38afb02958-3468'
 buildConfig = [
 	'master-build': ['gcc11', 'gcc12', 'gcc13', 'gcc14'],
 	'master-gate': ['gcc11', 'gcc12', 'gcc13', 'gcc14'],

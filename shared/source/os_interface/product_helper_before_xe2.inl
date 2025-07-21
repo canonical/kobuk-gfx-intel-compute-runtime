@@ -58,4 +58,16 @@ bool ProductHelperHw<gfxProduct>::isNonCoherentTimestampsModeEnabled() const {
     return !this->isDcFlushAllowed();
 }
 
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isPidFdOrSocketForIpcSupported() const {
+    if (debugManager.flags.EnablePidFdOrSocketsForIpc.get() != -1) {
+        return debugManager.flags.EnablePidFdOrSocketsForIpc.get();
+    }
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+void ProductHelperHw<gfxProduct>::overrideDirectSubmissionTimeouts(uint64_t &timeoutUs, uint64_t &maxTimeoutUs) const {
+}
+
 } // namespace NEO

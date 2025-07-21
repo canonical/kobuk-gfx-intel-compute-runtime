@@ -34,7 +34,7 @@ CommandList::~CommandList() {
         cmdQImmediateCopyOffload->destroy();
     }
     removeDeallocationContainerData();
-    if (!isImmediateType() || !this->isFlushTaskSubmissionEnabled) {
+    if (!isImmediateType()) {
         removeHostPtrAllocations();
     }
     removeMemoryPrefetchAllocations();
@@ -88,6 +88,17 @@ void CommandList::removeMemoryPrefetchAllocations() {
     }
 }
 
+void CommandList::storeFillPatternResourcesForReuse() {
+    for (auto &patternAlloc : this->patternAllocations) {
+        device->storeReusableAllocation(*patternAlloc);
+    }
+    this->patternAllocations.clear();
+    for (auto &patternTag : this->patternTags) {
+        patternTag->returnTag();
+    }
+    this->patternTags.clear();
+}
+
 NEO::GraphicsAllocation *CommandList::getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize, bool copyOffload) {
     auto allocation = hostPtrMap.lower_bound(buffer);
     if (allocation != hostPtrMap.end()) {
@@ -101,7 +112,7 @@ NEO::GraphicsAllocation *CommandList::getAllocationFromHostPtrMap(const void *bu
             return allocation->second;
         }
     }
-    if (this->storeExternalPtrAsTemporary()) {
+    if (isImmediateType()) {
         auto csr = getCsr(copyOffload);
         auto allocation = csr->getInternalAllocationStorage()->obtainTemporaryAllocationWithPtr(bufferSize, buffer, NEO::AllocationType::externalHostPtr);
         if (allocation != nullptr) {
@@ -123,7 +134,7 @@ NEO::GraphicsAllocation *CommandList::getHostPtrAlloc(const void *buffer, uint64
     if (alloc == nullptr) {
         return nullptr;
     }
-    if (this->storeExternalPtrAsTemporary()) {
+    if (isImmediateType()) {
         alloc->hostPtrTaskCountAssignment++;
         auto csr = getCsr(copyOffload);
         csr->getInternalAllocationStorage()->storeAllocationWithTaskCount(std::unique_ptr<NEO::GraphicsAllocation>(alloc), NEO::AllocationUsage::TEMPORARY_ALLOCATION, csr->peekTaskCount());

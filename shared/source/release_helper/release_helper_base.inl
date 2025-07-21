@@ -7,6 +7,7 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/helpers/constants.h"
+#include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/helpers/string.h"
 #include "shared/source/release_helper/release_helper.h"
 
@@ -137,12 +138,8 @@ uint32_t ReleaseHelperHw<releaseType>::getAdditionalExtraCaps() const {
 }
 
 template <ReleaseType releaseType>
-uint32_t ReleaseHelperHw<releaseType>::getStackSizePerRay() const {
+uint32_t ReleaseHelperHw<releaseType>::getAsyncStackSizePerRay() const {
     return 0u;
-}
-
-template <ReleaseType releaseType>
-void ReleaseHelperHw<releaseType>::adjustRTDispatchGlobals(void *rtDispatchGlobals, uint32_t rtStacksPerDss, bool heaplessEnabled, uint32_t maxBvhLevels) const {
 }
 
 template <ReleaseType releaseType>
@@ -162,13 +159,13 @@ const SizeToPreferredSlmValueArray &ReleaseHelperHw<releaseType>::getSizeToPrefe
 }
 
 template <ReleaseType releaseType>
-bool ReleaseHelperHw<releaseType>::isNumRtStacksPerDssFixedValue() const {
+bool ReleaseHelperHw<releaseType>::getFtrXe2Compression() const {
     return true;
 }
 
 template <ReleaseType releaseType>
-bool ReleaseHelperHw<releaseType>::getFtrXe2Compression() const {
-    return true;
+bool ReleaseHelperHw<releaseType>::programmAdditionalStallPriorToBarrierWithTimestamp() const {
+    return false;
 }
 
 template <ReleaseType releaseType>
@@ -179,5 +176,8 @@ template <ReleaseType releaseType>
 bool ReleaseHelperHw<releaseType>::isBlitImageAllowedForDepthFormat() const {
     return true;
 }
-
+template <ReleaseType releaseType>
+bool ReleaseHelperHw<releaseType>::isPostImageWriteFlushRequired() const {
+    return false;
+}
 } // namespace NEO

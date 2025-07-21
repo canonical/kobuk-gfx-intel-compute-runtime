@@ -293,21 +293,27 @@ void EventImp<TagSizeT>::assignKernelEventCompletionData(void *address) {
 template <typename TagSizeT>
 ze_result_t EventImp<TagSizeT>::queryCounterBasedEventStatus() {
     if (!this->inOrderExecInfo.get()) {
-        return ZE_RESULT_SUCCESS;
+        return reportEmptyCbEventAsReady ? ZE_RESULT_SUCCESS : ZE_RESULT_NOT_READY;
     }
 
     auto waitValue = getInOrderExecSignalValueWithSubmissionCounter();
 
     if (!inOrderExecInfo->isCounterAlreadyDone(waitValue)) {
         bool signaled = true;
-        const uint64_t *hostAddress = ptrOffset(inOrderExecInfo->getBaseHostAddress(), this->inOrderAllocationOffset);
-        for (uint32_t i = 0; i < inOrderExecInfo->getNumHostPartitionsToWait(); i++) {
-            if (!NEO::WaitUtils::waitFunctionWithPredicate<const uint64_t>(hostAddress, waitValue, std::greater_equal<uint64_t>(), 0)) {
-                signaled = false;
-                break;
-            }
 
-            hostAddress = ptrOffset(hostAddress, device->getL0GfxCoreHelper().getImmediateWritePostSyncOffset());
+        if (this->isCounterBased() && !this->inOrderTimestampNode.empty() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled(this->device->getHwInfo())) {
+            this->synchronizeTimestampCompletionWithTimeout();
+            signaled = this->isTimestampPopulated();
+        } else {
+            const uint64_t *hostAddress = ptrOffset(inOrderExecInfo->getBaseHostAddress(), this->inOrderAllocationOffset);
+            for (uint32_t i = 0; i < inOrderExecInfo->getNumHostPartitionsToWait(); i++) {
+                if (!NEO::WaitUtils::waitFunctionWithPredicate<const uint64_t>(hostAddress, waitValue, std::greater_equal<uint64_t>(), 0)) {
+                    signaled = false;
+                    break;
+                }
+
+                hostAddress = ptrOffset(hostAddress, device->getL0GfxCoreHelper().getImmediateWritePostSyncOffset());
+            }
         }
 
         if (!signaled) {
@@ -833,7 +839,7 @@ ze_result_t EventImp<TagSizeT>::reset() {
     this->resetCompletionStatus();
     this->resetDeviceCompletionData(false);
     this->l3FlushAppliedOnKernel.reset();
-    this->resetAdditionalTimestampNode(nullptr, 0);
+    this->resetAdditionalTimestampNode(nullptr, 0, true);
     return ZE_RESULT_SUCCESS;
 }
 
@@ -854,7 +860,6 @@ void EventImp<TagSizeT>::resetDeviceCompletionData(bool resetAllPackets) {
 template <typename TagSizeT>
 void EventImp<TagSizeT>::synchronizeTimestampCompletionWithTimeout() {
     std::chrono::high_resolution_clock::time_point startTime = std::chrono::high_resolution_clock::now();
-    constexpr uint64_t timeoutMs = 1000 * 5; // 5s
     uint64_t timeDiff = 0;
 
     do {
@@ -862,7 +867,7 @@ void EventImp<TagSizeT>::synchronizeTimestampCompletionWithTimeout() {
         calculateProfilingData();
 
         timeDiff = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - startTime).count();
-    } while (!isTimestampPopulated() && (timeDiff < timeoutMs));
+    } while (!isTimestampPopulated() && (timeDiff < completionTimeoutMs));
     DEBUG_BREAK_IF(!isTimestampPopulated());
 }
 

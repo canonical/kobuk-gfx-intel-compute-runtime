@@ -52,19 +52,19 @@ bool ApiSpecificConfig::getBindlessMode(const Device &device) {
 }
 
 bool ApiSpecificConfig::isDeviceAllocationCacheEnabled() {
-    return false;
+    return true;
 }
 
 bool ApiSpecificConfig::isHostAllocationCacheEnabled() {
-    return false;
+    return true;
 }
 
 bool ApiSpecificConfig::isDeviceUsmPoolingEnabled() {
-    return false;
+    return true;
 }
 
 bool ApiSpecificConfig::isHostUsmPoolingEnabled() {
-    return false;
+    return true;
 }
 
 ApiSpecificConfig::ApiType ApiSpecificConfig::getApiType() {

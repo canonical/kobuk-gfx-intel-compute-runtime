@@ -254,7 +254,6 @@ class MockCommandListImmediateHwWithWaitEventFail : public WhiteBox<::L0::Comman
     using BaseClass::dcFlushSupport;
     using BaseClass::dependenciesPresent;
     using BaseClass::dummyBlitWa;
-    using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
     using BaseClass::setupFillKernelArguments;
@@ -276,14 +275,6 @@ class MockCommandListImmediateHwWithWaitEventFail : public WhiteBox<::L0::Comman
         return BaseClass::appendSignalEvent(hEvent, relaxedOrderingDispatch);
     }
 
-    ze_result_t executeCommandListImmediate(bool performMigration) override {
-        ++executeCommandListImmediateCalledCount;
-        if (callBaseExecute) {
-            return BaseClass::executeCommandListImmediate(performMigration);
-        }
-        return executeCommandListImmediateReturnValue;
-    }
-
     ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, NEO::AppendOperations appendOperation,
                                                          bool copyOffloadSubmission, bool requireTaskCountUpdate,
                                                          MutexLock *outerLock,
@@ -299,9 +290,6 @@ class MockCommandListImmediateHwWithWaitEventFail : public WhiteBox<::L0::Comman
     bool callBaseExecute = false;
     bool forceSignalEventError = false;
     bool forceWaitEventError = false;
-
-    ze_result_t executeCommandListImmediateReturnValue = ZE_RESULT_SUCCESS;
-    uint32_t executeCommandListImmediateCalledCount = 0;
 
     ze_result_t executeCommandListImmediateWithFlushTaskReturnValue = ZE_RESULT_SUCCESS;
     uint32_t executeCommandListImmediateWithFlushTaskCalledCount = 0;
@@ -833,7 +821,7 @@ HWTEST_F(CommandListAppendWaitOnSecondaryBatchBufferEvent, givenCommandBufferIsE
 
 using MultTileCommandListAppendWaitOnEvent = Test<MultiTileCommandListFixture<false, false, false, -1>>;
 HWTEST2_F(MultTileCommandListAppendWaitOnEvent,
-          GivenMultiTileCmdListWhenPartitionedEventUsedToWaitThenExpectProperGpuAddressAndSemaphoreCount, IsAtLeastXeHpCore) {
+          GivenMultiTileCmdListWhenPartitionedEventUsedToWaitThenExpectProperGpuAddressAndSemaphoreCount, IsAtLeastXeCore) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
 
     size_t expectedSize = commandList->partitionCount * NEO::EncodeSemaphore<FamilyType>::getSizeMiSemaphoreWait();

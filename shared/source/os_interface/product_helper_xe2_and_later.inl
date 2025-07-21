@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/os_interface/product_helper_hw.h"
+
 namespace NEO {
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -20,7 +21,7 @@ bool ProductHelperHw<gfxProduct>::deferMOCSToPatIndex(bool isWddmOnLinux) const 
 
 template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::isInitBuiltinAsyncSupported(const HardwareInfo &hwInfo) const {
-    return false;
+    return true;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
@@ -59,6 +60,26 @@ bool ProductHelperHw<gfxProduct>::isNonCoherentTimestampsModeEnabled() const {
         return debugManager.flags.ForceNonCoherentModeForTimestamps.get();
     }
     return true;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+bool ProductHelperHw<gfxProduct>::isPidFdOrSocketForIpcSupported() const {
+    if (debugManager.flags.EnablePidFdOrSocketsForIpc.get() != -1) {
+        return debugManager.flags.EnablePidFdOrSocketsForIpc.get();
+    }
+    return false;
+}
+
+template <PRODUCT_FAMILY gfxProduct>
+void ProductHelperHw<gfxProduct>::overrideDirectSubmissionTimeouts(uint64_t &timeoutUs, uint64_t &maxTimeoutUs) const {
+    timeoutUs = 1'000;
+    maxTimeoutUs = 1'000;
+    if (debugManager.flags.DirectSubmissionControllerTimeout.get() != -1) {
+        timeoutUs = debugManager.flags.DirectSubmissionControllerTimeout.get();
+    }
+    if (debugManager.flags.DirectSubmissionControllerMaxTimeout.get() != -1) {
+        maxTimeoutUs = debugManager.flags.DirectSubmissionControllerMaxTimeout.get();
+    }
 }
 
 } // namespace NEO

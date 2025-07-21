@@ -9,10 +9,13 @@
 
 #include "level_zero/sysman/source/shared/firmware_util/sysman_firmware_util_imp.h"
 
+#include <algorithm>
+
 static std::vector<std ::string> deviceSupportedFirmwareTypes = {"GSC", "OptionROM", "PSC"};
 static constexpr uint8_t eccStateNone = 0xFF;
 constexpr uint8_t maxGfspHeciOutBuffer = UINT8_MAX;
 constexpr uint8_t maxGfspHeciInBuffer = 4;
+static std::vector<std ::string> lateBindingFirmwareTypes = {"FanTable", "VRConfig"};
 
 namespace L0 {
 namespace Sysman {
@@ -142,7 +145,7 @@ void FirmwareUtilImp::fwGetMemoryHealthIndicator(zes_mem_health_t *health) {
     NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(); Could not get memory health indicator from igsc\n", __FUNCTION__);
 }
 
-ze_result_t FirmwareUtilImp::fwGetEccConfig(uint8_t *currentState, uint8_t *pendingState) {
+ze_result_t FirmwareUtilImp::fwGetEccConfig(uint8_t *currentState, uint8_t *pendingState, uint8_t *defaultState) {
     const std::lock_guard<std::mutex> lock(this->fwLock);
     gfspHeciCmd = reinterpret_cast<pIgscGfspHeciCmd>(libraryHandle->getProcAddress(fwGfspHeciCmd));
     if (gfspHeciCmd != nullptr) {
@@ -154,6 +157,7 @@ ze_result_t FirmwareUtilImp::fwGetEccConfig(uint8_t *currentState, uint8_t *pend
         if (ret == IGSC_SUCCESS) {
             *currentState = outBuf[GfspHeciConstants::GetEccCmd16BytePostition::eccCurrentState] & 0x1;
             *pendingState = outBuf[GfspHeciConstants::GetEccCmd16BytePostition::eccPendingState] & 0x1;
+            *defaultState = outBuf[GfspHeciConstants::GetEccCmd16BytePostition::eccDefaultState] & 0x1;
             return ZE_RESULT_SUCCESS;
         }
         receivedSize = 0;
@@ -163,6 +167,7 @@ ze_result_t FirmwareUtilImp::fwGetEccConfig(uint8_t *currentState, uint8_t *pend
         if (ret == IGSC_SUCCESS) {
             *currentState = outBuf[GfspHeciConstants::GetEccCmd9BytePostition::currentState];
             *pendingState = outBuf[GfspHeciConstants::GetEccCmd9BytePostition::pendingState];
+            *defaultState = 0xff;
             return ZE_RESULT_SUCCESS;
         }
         return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
@@ -247,7 +252,8 @@ ze_result_t FirmwareUtilImp::fwSetEccConfig(uint8_t newState, uint8_t *currentSt
 
         if (ret == IGSC_SUCCESS) {
             lock.unlock();
-            ze_result_t status = fwGetEccConfig(currentState, pendingState);
+            uint8_t defaultState = 0;
+            ze_result_t status = fwGetEccConfig(currentState, pendingState, &defaultState);
             lock.lock();
             if (status != ZE_RESULT_SUCCESS) {
                 return status;
@@ -339,11 +345,46 @@ ze_result_t FirmwareUtilImp::flashFirmware(std::string fwType, void *pImage, uin
     if (fwType == deviceSupportedFirmwareTypes[2]) { // PSC
         return fwFlashIafPsc(pImage, size);
     }
+    if (std::find(lateBindingFirmwareTypes.begin(), lateBindingFirmwareTypes.end(), fwType) != lateBindingFirmwareTypes.end()) { // FanTable and VRConfig
+        return fwFlashLateBinding(pImage, size, fwType);
+    }
     return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
 
 void FirmwareUtilImp::getDeviceSupportedFwTypes(std::vector<std::string> &fwTypes) {
-    fwTypes = deviceSupportedFirmwareTypes;
+    const std::lock_guard<std::mutex> lock(this->fwLock);
+    igsc_fw_version deviceFwVersion;
+    memset(&deviceFwVersion, 0, sizeof(deviceFwVersion));
+    deviceGetFwVersion = reinterpret_cast<pIgscDeviceFwVersion>(libraryHandle->getProcAddress(fwDeviceFwVersion));
+    int ret = deviceGetFwVersion(&fwDeviceHandle, &deviceFwVersion);
+    if (ret == IGSC_SUCCESS) {
+        fwTypes.push_back(deviceSupportedFirmwareTypes[0]);
+    }
+
+    igsc_oprom_version opromVersion;
+    memset(&opromVersion, 0, sizeof(opromVersion));
+    deviceOpromVersion = reinterpret_cast<pIgscDeviceOpromVersion>(libraryHandle->getProcAddress(fwDeviceOpromVersion));
+    ret = deviceOpromVersion(&fwDeviceHandle, IGSC_OPROM_CODE, &opromVersion);
+
+    if (ret == IGSC_SUCCESS) {
+        memset(&opromVersion, 0, sizeof(opromVersion));
+        int ret = deviceOpromVersion(&fwDeviceHandle, IGSC_OPROM_DATA, &opromVersion);
+        if (ret == IGSC_SUCCESS) {
+            fwTypes.push_back(deviceSupportedFirmwareTypes[1]);
+        }
+    }
+
+    igsc_psc_version devicePscVersion;
+    memset(&devicePscVersion, 0, sizeof(devicePscVersion));
+    deviceGetPscVersion = reinterpret_cast<pIgscDevicePscVersion>(libraryHandle->getProcAddress(fwDevicePscVersion));
+    ret = deviceGetPscVersion(&fwDeviceHandle, &devicePscVersion);
+    if (ret == IGSC_SUCCESS) {
+        fwTypes.push_back(deviceSupportedFirmwareTypes[2]);
+    }
+}
+
+void FirmwareUtilImp::getLateBindingSupportedFwTypes(std::vector<std::string> &fwTypes) {
+    fwTypes.insert(fwTypes.end(), lateBindingFirmwareTypes.begin(), lateBindingFirmwareTypes.end());
 }
 
 ze_result_t FirmwareUtilImp::getFwVersion(std::string fwType, std::string &firmwareVersion) {

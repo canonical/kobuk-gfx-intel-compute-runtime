@@ -41,7 +41,7 @@ DECLARE_DEBUG_VARIABLE(bool, AUBDumpAllocsOnEnqueueSVMMemcpyOnly, false, "Force 
 DECLARE_DEBUG_VARIABLE(bool, AUBDumpForceAllToLocalMemory, false, "Force placing every allocation in local memory address space")
 DECLARE_DEBUG_VARIABLE(bool, GenerateAubFilePerProcessId, true, "Generate aub file with process id")
 DECLARE_DEBUG_VARIABLE(bool, SetBufferHostMemoryAlwaysAubWritable, false, "Make buffer host memory allocation always uploaded to AUB/TBX")
-DECLARE_DEBUG_VARIABLE(bool, EnableTbxPageFaultManager, false, "Enables experimental page fault manager for host buffers and some other alloc types, replaces SetBufferHostMemoryAlwaysAubWritable")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableTbxPageFaultManager, -1, "Enable/Disable TbxPageFaultManager, overrides SetBufferHostMemoryAlwaysAubWritable to false if enabled: default 1, 0 - disable, 1 - enable")
 
 /*DEBUG FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, EnableSWTags, false, "Enable software tagging in batch buffer")
@@ -304,7 +304,6 @@ DECLARE_DEBUG_VARIABLE(int32_t, EnableTimestampPoolAllocator, -1, "-1: default, 
 DECLARE_DEBUG_VARIABLE(int32_t, ForceComputeWalkerPostSyncFlushWithWrite, -1, "-1: ignore. >=0: Force PostSync cache flush and override postSync immediate write address to given value")
 DECLARE_DEBUG_VARIABLE(int32_t, DeferStateInitSubmissionToFirstRegularUsage, -1, "-1: ignore, 0: disabled, 1: enabled. If set, instead of initializing at Device creation, submit initial state during first usage (eg. kernel submission)")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceNonWalkerSplitMemoryCopy, -1, "-1: default, 0: disabled, 1: enabled. If set, memory copy will be executed as single byte copy Walker without performance optimizations")
-DECLARE_DEBUG_VARIABLE(int32_t, OverrideTimestampWidth, -1, "-1: default from KMD, > 0: Override timestamp width used for profiling. Requires XeKMD kernel.")
 DECLARE_DEBUG_VARIABLE(int32_t, DebugUmdFifoPollInterval, -1, "-1: default , > 0: Fifo will be polled based on input in milliseconds.")
 DECLARE_DEBUG_VARIABLE(int32_t, SetMaxBVHLevels, -1, "-1: default , > 0: Set maxBVHLevel in RTDispatchGlobal.")
 DECLARE_DEBUG_VARIABLE(int32_t, DebugUmdInterruptTimeout, -1, "-1: default , > 0: interruptTimeout based on input in milliseconds. Default is 2000 milliseconds")
@@ -316,6 +315,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, GetSipBinaryFromExternalLib, -1, "-1: default, 0
 DECLARE_DEBUG_VARIABLE(int32_t, EnablePidFdOrSocketsForIpc, -1, "-1: default, 0: disabled (default), 1: enabled. If enabled, L0 IPC handles are opaque and pidfd or sockets are used for IPC exchange")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideCopyOffloadMode, -1, "-1: default, 0: disabled, >=1: if enabled, override to any value from CopyOffloadModes enum")
 DECLARE_DEBUG_VARIABLE(int32_t, UseSingleListForTemporaryAllocations, -1, "-1: default, 0: disabled, 0: enabled. If enabled, use single list, instead of per CSR for tracking temporary allocations")
+DECLARE_DEBUG_VARIABLE(int32_t, OverrideMaxMemAllocSizeMb, -1, "-1: default, >=0 override reported max mem alloc size in MB")
 DECLARE_DEBUG_VARIABLE(int32_t, DetectIncorrectPointersOnSetArgCalls, -1, "-1: default do not detect, 0: do not detect, 1: detect incorrect pointers and return error")
 
 /*LOGGING FLAGS*/
@@ -326,6 +326,7 @@ DECLARE_DEBUG_VARIABLE(bool, PrintExecutionBuffer, false, "print execution buffe
 DECLARE_DEBUG_VARIABLE(bool, PrintBOsForSubmit, false, "print all BOs passed to submission")
 DECLARE_DEBUG_SCOPED_V(bool, PrintDebugSettings, false, S_RT | S_OCLOC, "Dump all debug variables settings to text file. Print to stdout if value is different than default.")
 DECLARE_DEBUG_VARIABLE(bool, PrintDebugMessages, false, "when enabled, some debug messages will be propagated to console")
+DECLARE_DEBUG_VARIABLE(int32_t, DebugMessagesBitmask, 0, "Bitmask: 1 - print debug messages with PID, 2 - with Timestamp, 3 - both")
 DECLARE_DEBUG_VARIABLE(bool, PrintXeLogs, false, "when enabled, xe logs will be propagated to console")
 DECLARE_DEBUG_VARIABLE(bool, DumpZEBin, false, "Enables dumping zebin (elf) to a binary file (.elf extension)")
 DECLARE_DEBUG_VARIABLE(bool, DumpKernels, false, "Enables dumping kernels' program source code to text files and program from binary to bin file")
@@ -370,6 +371,7 @@ DECLARE_DEBUG_VARIABLE(bool, PrintCpuFlags, false, "Print CPU Flags and properti
 DECLARE_DEBUG_VARIABLE(int32_t, PrintL0MetricLogs, 0, "L0 Metrics logs mask. 0 - Disabled, 1 - ERROR, 3 - INFO, 7 - DEBUG")
 DECLARE_DEBUG_VARIABLE(bool, PrintL0SetKernelArg, false, "Print L0 Set Kernel Arg data")
 DECLARE_DEBUG_VARIABLE(bool, LogIndirectDetectionKernelDetails, false, "Log information for indirect detection for each kernel")
+DECLARE_DEBUG_VARIABLE(bool, PrintMclData, false, "Print all parameters used for MCL");
 
 /*PERFORMANCE FLAGS*/
 DECLARE_DEBUG_VARIABLE(bool, DisableZeroCopyForBuffers, false, "When active all buffer allocations will not share memory with CPU.")
@@ -414,6 +416,9 @@ DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsSize, -1, "-1: default, >=0: Size to app
 DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsMask, 0, "0: default, >0: bitmask: indicates bcs engines for split")
 DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsMaskH2D, 0, "0: default, >0: bitmask: indicates bcs engines for H2D split")
 DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsMaskD2H, 0, "0: default, >0: bitmask: indicates bcs engines for D2H split")
+DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsRequiredTileCount, -1, "-1: default, >=1: required tile count on given device to enable bcs split")
+DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsRequiredEnginesCount, -1, "-1: default, >=1: required copy engines count in given configuration to enable bcs split")
+DECLARE_DEBUG_VARIABLE(int32_t, SplitBcsAggregatedEventsMode, -1, "-1: default, 0: disabled, 1: enabled. If enabled, use Aggregated CB Events for all Split operations")
 DECLARE_DEBUG_VARIABLE(int32_t, ReuseKernelBinaries, -1, "-1: default, 0:disabled, 1: enabled. If enabled, driver reuses kernel binaries.")
 DECLARE_DEBUG_VARIABLE(int32_t, SetAmountOfReusableAllocations, -1, "-1: default, 0:disabled, > 1: enabled. If enabled, driver will fill reusable allocation lists with given amount of command buffers and heaps at initialization of immediate command list.")
 DECLARE_DEBUG_VARIABLE(int32_t, SetAmountOfReusableAllocationsPerCmdQueue, -1, "-1: default, 0:disabled, > 1: enabled. If enabled, driver will fill reusable allocation lists with given amount of command buffers for each initialized opencl command queue.")
@@ -422,7 +427,7 @@ DECLARE_DEBUG_VARIABLE(int32_t, UseHighAlignmentForHeapExtended, -1, "-1: defaul
 DECLARE_DEBUG_VARIABLE(int32_t, DispatchCmdlistCmdBufferPrimary, -1, "-1: default, 0: dispatch command buffers as secondary, 1: dispatch command buffers as primary and chain")
 DECLARE_DEBUG_VARIABLE(int32_t, UseImmediateFlushTask, -1, "-1: default, 0: use regular flush task, 1: use immediate flush task")
 DECLARE_DEBUG_VARIABLE(int32_t, SkipDcFlushOnBarrierWithoutEvents, -1, "-1: default (enabled), 0: disabled, 1: enabled")
-DECLARE_DEBUG_VARIABLE(int32_t, ForceL3FlushAfterPostSync, -1, "-1: default, 0: disabled, 1: enabled. If enabled flush L3 after post sync operation")
+DECLARE_DEBUG_VARIABLE(int32_t, EnableL3FlushAfterPostSync, -1, "-1: default, 0: disabled, 1: enabled. If enabled flush L3 after post sync operation")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDeviceUsmAllocationPool, -1, "-1: default (enabled, 2MB), 0: disabled, >=1: enabled, size in MB")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableHostUsmAllocationPool, -1, "-1: default (enabled, 2MB), 0: disabled, >=1: enabled, size in MB")
 DECLARE_DEBUG_VARIABLE(int32_t, UseLocalPreferredForCacheableBuffers, -1, "Use localPreferred for cacheable buffers")
@@ -432,7 +437,8 @@ DECLARE_DEBUG_VARIABLE(int32_t, ForcePostSyncL1Flush, -1, "-1: default (do nothi
 DECLARE_DEBUG_VARIABLE(int32_t, AllowNotZeroForCompressedOnWddm, -1, "-1: default (do nothing), 0: do not set AllowNotZeroed for compressed resources, 1: set AllowNotZeroed for compressed resources");
 DECLARE_DEBUG_VARIABLE(int32_t, ForceWddmHugeChunkSizeMB, -1, "-1: default (do nothing), >0: set given huge chunk size in MegaBytes for WDDM");
 DECLARE_DEBUG_VARIABLE(int64_t, ForceGmmSystemMemoryBufferForAllocations, 0, "0: default, >0: (bitmask) for given Allocation Types, force GMM_RESOURCE_USAGE_OCL_SYSTEM_MEMORY_BUFFER gmm resource type");
-DECLARE_DEBUG_VARIABLE(int32_t, ForceLowLatencyHint, -1, "Force passing low latency hint during xe_exec_queue creation. -1: default, 0: disabled, 1: enabled");
+DECLARE_DEBUG_VARIABLE(int32_t, EmitMemAdvisePriorToCopyForNonUsm, -1, "Enable Memadvise to system memory for copy/fill with shared system input: -1: default, 0: disabled, 1: enabled")
+DECLARE_DEBUG_VARIABLE(int32_t, TreatNonUsmForTransfersAsSharedSystem, -1, "-1: default, 0: import non-usm as external host ptr on copy/fill (legacy mode), 1: treat non usm on copy/fill as shared system usm")
 
 /*DIRECT SUBMISSION FLAGS*/
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDirectSubmission, -1, "-1: default (disabled), 0: disable, 1:enable. Enables direct submission of command buffers bypassing KMD")
@@ -549,7 +555,6 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideSystolicInComputeWalker, -1, "set SYSTOL
 DECLARE_DEBUG_VARIABLE(int32_t, EnableDrmCompletionFence, -1, "Enables DRM completion fence, -1:default (disabled), 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, UseDrmCompletionFenceForAllAllocations, -1, "Uses DRM completion fence for all allocations, -1:default (disabled), 0:disable, 1:enable")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableChipsetUniqueUUID, -1, "Enables retrieving chipset unique UUID using telemetry, -1:default (enabled), 0:disable, 1:enable")
-DECLARE_DEBUG_VARIABLE(int32_t, EnableFlushTaskSubmission, -1, "Driver uses csr flushTask for immediate commandlist submissions, -1:default (enabled), 0:disabled, 1:enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableImmediateCmdListHeapSharing, -1, "Immediate command lists using flush task use current csr heap instead private cmd list heap, -1:default (disabled), 0:disabled, 1:enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, UsePipeControlMultiKernelEventSync, -1, "Use single PIPE_CONTROL for event signal of multi-kernel append operations instead multi-packet POSTSYNC_DATA from each COMPUTE_WALKER, -1: default , 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, CompactL3FlushEventPacket, -1, "Compact COMPUTE_WALKER event packet and L3 Flush signal packet into single event packet, -1: default , 0: disabled, 1: enabled")
@@ -561,7 +566,6 @@ DECLARE_DEBUG_VARIABLE(int32_t, OverrideHostAllocationMemPolicyMode, -1, "Overri
 DECLARE_DEBUG_VARIABLE(int32_t, EnableFtrTile64Optimization, 0, "Control feature Tile64 Optimization flag passed to gmmlib. -1: pass as-is, 0: disable flag(default due to NEO-10623), 1: enable flag");
 DECLARE_DEBUG_VARIABLE(int32_t, ForceTheMaximumNumberOfOutstandingRayqueriesPerSs, -1, "Set the maximum number of outstanding RayQueries per SS, -1: default, 0: 128, 1: 256, 2: 512, 3: 1024")
 DECLARE_DEBUG_VARIABLE(int32_t, ForceDispatchTimeoutCounter, -1, "Set timeout for Synchronous Ray Tracing, -1: default, 0: 64, 1: 128, 2: 192, 3: 256, 4: 512, 5: 1024, 6: 2048, 7: 4096")
-DECLARE_DEBUG_VARIABLE(int32_t, Enable10ThreadsPerEu, -1, "Enable 10 threads per EU  HSD-18022695913, -1: default, 0: disabled, 1: enabled")
 DECLARE_DEBUG_VARIABLE(int32_t, OverrideNumThreadsPerEu, -1, "-1: default, >0: force number of threads per EU")
 DECLARE_DEBUG_VARIABLE(int32_t, Enable64bAddressingForRayTracing, -1, "-1: default, 0: disabled, 1: enabled. Enable support for 64 bit addressing for RayTracing HSD-14016042915")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableXe3VariableRegisterSizeAllocation, -1, "When enabled, use new Xe3 Variable Register per Thread (VRT) feature, -1: default, 0: disabled, 1: enabled")
@@ -621,7 +625,7 @@ DECLARE_DEBUG_VARIABLE(bool, EnableBOChunkingPrefetch, false, "Enables prefetchi
 DECLARE_DEBUG_VARIABLE(bool, EnableBOChunkingDevMemPrefetch, false, "Enables prefetching of Device Memory chunks")
 DECLARE_DEBUG_VARIABLE(bool, EnableBOChunkingPreferredLocationHint, false, "Enables preferred location advise on chunks")
 DECLARE_DEBUG_VARIABLE(bool, EnableCompatibilityMode, true, "Enables compatibility mode for platforms which can use precompiled base platform configuration")
-DECLARE_DEBUG_VARIABLE(bool, DisableFlushL3ForHostUsm, false, "Disables L3 flush for host usm")
+DECLARE_DEBUG_VARIABLE(bool, RedirectFlushL3HostUsmToExternal, true, "If L3 flush for host usm is needed it will be rerouted to folllow the external allocation flush logic")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableBOChunking, -1, "Enables use of chunking of BOs in the KMD, mask: -1 = default, 0 = no chunking, 1 = shared allocations only, 2 = multi-tile device allocations only, 3 = shared and multi-tile device allocations .")
 DECLARE_DEBUG_VARIABLE(int32_t, DestroyAllocationsViaGmm, -1, "Use DeAllocate2 wrapper instead of raw GDI destroy allocations")
 DECLARE_DEBUG_VARIABLE(int32_t, NumberOfBOChunks, 2, "Number of chunks to use")
@@ -675,6 +679,7 @@ DECLARE_DEBUG_VARIABLE(int64_t, ReadOnlyAllocationsTypeMask, 0, "0: default,  >0
 DECLARE_DEBUG_VARIABLE(bool, IgnoreZebinUnknownAttributes, false, "enable to treat unknown zebin attributes as warning instead of error")
 DECLARE_DEBUG_VARIABLE(std::string, FinalizerInputType, std::string("unk"), "unk: default (N/A), input type for finalizer")
 DECLARE_DEBUG_VARIABLE(std::string, FinalizerLibraryName, std::string("unk"), "Library name for finalizer")
+DECLARE_DEBUG_VARIABLE(std::string, IgcLibraryName, std::string("unk"), "Library name for igc")
 DECLARE_DEBUG_SCOPED_V(int32_t, UseIgcAsFcl, 0, S_RT | S_OCLOC, "0: platform default, 1: force use IGC, 2: force use FCL")
 DECLARE_DEBUG_VARIABLE(int32_t, EnableGlobalTimestampViaSubmission, -1, "-1: OS Interface, 0: OS Interface, 1: Submission. This flag sets the type of method to get timestamp for getGlobalTimestamps");
 

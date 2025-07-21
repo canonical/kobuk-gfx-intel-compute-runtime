@@ -19,11 +19,13 @@
 #include "shared/source/unified_memory/unified_memory.h"
 #include "shared/source/utilities/stackvec.h"
 
-#include "level_zero/core/source/cmdlist/cmdlist_launch_params.h"
+#include "level_zero/core/source/cmdlist/command_to_patch.h"
 #include "level_zero/core/source/helpers/api_handle_helper.h"
 #include "level_zero/include/level_zero/ze_intel_gpu.h"
 #include <level_zero/ze_api.h>
 #include <level_zero/zet_api.h>
+
+#include "copy_offload_mode.h"
 
 #include <map>
 #include <optional>
@@ -35,6 +37,7 @@ static_assert(IsCompliantWithDdiHandlesExt<_ze_command_list_handle_t>);
 
 namespace NEO {
 class ScratchSpaceController;
+class TagNodeBase;
 struct EncodeDispatchKernelArgs;
 } // namespace NEO
 
@@ -44,6 +47,8 @@ struct EventPool;
 struct Event;
 struct Kernel;
 struct CommandQueue;
+struct CmdListKernelLaunchParams;
+struct CmdListMemoryCopyParams;
 
 struct CmdListReturnPoint {
     NEO::StreamProperties configSnapshot;
@@ -229,20 +234,14 @@ struct CommandList : _ze_command_list_handle_t {
     }
 
     void setAdditionalDispatchKernelArgsFromLaunchParams(NEO::EncodeDispatchKernelArgs &dispatchKernelArgs, const CmdListKernelLaunchParams &launchParams) const;
-    ze_result_t validateLaunchParams(const CmdListKernelLaunchParams &launchParams) const;
+    void setAdditionalDispatchKernelArgsFromKernel(NEO::EncodeDispatchKernelArgs &dispatchKernelArgs, const Kernel *kernel) const;
+
+    ze_result_t validateLaunchParams(const Kernel &kernel, const CmdListKernelLaunchParams &launchParams) const;
 
     void setOrdinal(uint32_t ord) { ordinal = ord; }
     void setCommandListPerThreadScratchSize(uint32_t slotId, uint32_t size) {
         UNRECOVERABLE_IF(slotId > 1);
         commandListPerThreadScratchSize[slotId] = size;
-    }
-
-    uint64_t getCurrentScratchPatchAddress() const {
-        return currentScratchPatchAddress;
-    }
-
-    void setCurrentScratchPatchAddress(uint64_t scratchPatchAddress) {
-        currentScratchPatchAddress = scratchPatchAddress;
     }
 
     NEO::ScratchSpaceController *getCommandListUsedScratchController() const {
@@ -281,6 +280,7 @@ struct CommandList : _ze_command_list_handle_t {
     void removeDeallocationContainerData();
     void removeHostPtrAllocations();
     void removeMemoryPrefetchAllocations();
+    void storeFillPatternResourcesForReuse();
     void eraseDeallocationContainerEntry(NEO::GraphicsAllocation *allocation);
     void eraseResidencyContainerEntry(NEO::GraphicsAllocation *allocation);
     bool isCopyOnly(bool copyOffloadOperation) const {
@@ -298,16 +298,12 @@ struct CommandList : _ze_command_list_handle_t {
     bool isMemoryPrefetchRequested() const {
         return performMemoryPrefetch;
     }
-    bool storeExternalPtrAsTemporary() const {
-        return isImmediateType() && (this->isFlushTaskSubmissionEnabled || isCopyOnly(false));
-    }
 
     enum class CommandListType : uint32_t {
         typeRegular = 0u,
         typeImmediate = 1u
     };
 
-    virtual ze_result_t executeCommandListImmediate(bool performMigration) = 0;
     virtual ze_result_t initialize(Device *device, NEO::EngineGroupType engineGroupType, ze_command_list_flags_t flags) = 0;
     virtual ~CommandList();
 
@@ -378,10 +374,6 @@ struct CommandList : _ze_command_list_handle_t {
         return requiresQueueUncachedMocs;
     }
 
-    bool flushTaskSubmissionEnabled() const {
-        return isFlushTaskSubmissionEnabled;
-    }
-
     Device *getDevice() const {
         return this->device;
     }
@@ -450,6 +442,7 @@ struct CommandList : _ze_command_list_handle_t {
     bool isClosed() const {
         return closedCmdList;
     }
+    ze_result_t obtainLaunchParamsFromExtensions(const ze_base_desc_t *desc, CmdListKernelLaunchParams &launchParams, ze_kernel_handle_t kernelHandle) const;
 
   protected:
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize, bool copyOffload);
@@ -467,6 +460,7 @@ struct CommandList : _ze_command_list_handle_t {
     std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
     NEO::PrivateAllocsToReuseContainer ownedPrivateAllocations;
     std::vector<NEO::GraphicsAllocation *> patternAllocations;
+    std::vector<NEO::TagNodeBase *> patternTags;
     std::vector<std::weak_ptr<Kernel>> printfKernelContainer;
 
     NEO::CommandContainer commandContainer;
@@ -485,8 +479,6 @@ struct CommandList : _ze_command_list_handle_t {
     int64_t currentDynamicStateBaseAddress = NEO::StreamProperty64::initValue;
     int64_t currentIndirectObjectBaseAddress = NEO::StreamProperty64::initValue;
     int64_t currentBindingTablePoolBaseAddress = NEO::StreamProperty64::initValue;
-
-    uint64_t currentScratchPatchAddress = 0;
 
     ze_context_handle_t hContext = nullptr;
     CommandQueue *cmdQImmediate = nullptr;
@@ -513,7 +505,6 @@ struct CommandList : _ze_command_list_handle_t {
     int32_t defaultPipelinedThreadArbitrationPolicy = NEO::ThreadArbitrationPolicy::NotPresent;
     uint32_t maxLocalSubRegionSize = 0;
 
-    bool isFlushTaskSubmissionEnabled = false;
     bool isSyncModeQueue = false;
     bool isTbxMode = false;
     bool commandListSLMEnabled = false;

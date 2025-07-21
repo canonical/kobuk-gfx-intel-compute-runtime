@@ -301,7 +301,9 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
     if (this->svmAllocsManager == nullptr) {
         return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
     }
-    this->svmAllocsManager->initUsmAllocationsCaches(*this->devices[0]->getNEODevice());
+    if (this->devices.size() == 1) {
+        this->svmAllocsManager->initUsmAllocationsCaches(*this->devices[0]->getNEODevice());
+    }
     this->initHostUsmAllocPool();
     for (auto &device : this->devices) {
         this->initDeviceUsmAllocPool(*device->getNEODevice());
@@ -355,6 +357,10 @@ DriverHandle *DriverHandle::create(std::vector<std::unique_ptr<NEO::Device>> dev
 
 void DriverHandleImp::initHostUsmAllocPool() {
     auto usmHostAllocPoolingEnabled = NEO::ApiSpecificConfig::isHostUsmPoolingEnabled();
+    for (auto device : this->devices) {
+        usmHostAllocPoolingEnabled &= device->getNEODevice()->getProductHelper().isHostUsmPoolAllocatorSupported() &&
+                                      nullptr == device->getL0Debugger();
+    }
     auto poolSize = 2 * MemoryConstants::megaByte;
     if (NEO::debugManager.flags.EnableHostUsmAllocationPool.get() != -1) {
         usmHostAllocPoolingEnabled = NEO::debugManager.flags.EnableHostUsmAllocationPool.get() > 0;
@@ -370,7 +376,9 @@ void DriverHandleImp::initHostUsmAllocPool() {
 void DriverHandleImp::initDeviceUsmAllocPool(NEO::Device &device) {
     const uint64_t minServicedSize = 0u;
     const uint64_t maxServicedSize = 1 * MemoryConstants::megaByte;
-    bool enabled = NEO::ApiSpecificConfig::isDeviceUsmPoolingEnabled() && device.getProductHelper().isDeviceUsmPoolAllocatorSupported();
+    bool enabled = NEO::ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
+                   device.getProductHelper().isDeviceUsmPoolAllocatorSupported() &&
+                   nullptr == device.getL0Debugger();
     uint64_t poolSize = 2 * MemoryConstants::megaByte;
 
     if (NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() != -1) {

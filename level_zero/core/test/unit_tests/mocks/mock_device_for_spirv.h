@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2023 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -11,7 +11,14 @@
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/module/module.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_device.h"
+
+namespace NEO {
+class Device;
+} // namespace NEO
+
 namespace L0 {
+struct DriverHandleImp;
+
 namespace ult {
 
 template <bool useImagesBuiltins, bool isStateless>
@@ -23,7 +30,7 @@ class MockDeviceForSpv : public MockDeviceImp {
     std::unique_ptr<L0::Module> mockModulePtr;
 
   public:
-    MockDeviceForSpv(NEO::Device *device, NEO::ExecutionEnvironment *ex, L0::DriverHandleImp *driverHandle) : MockDeviceImp(device, ex) {
+    MockDeviceForSpv(NEO::Device *device, L0::DriverHandleImp *driverHandle) : MockDeviceImp(device) {
         this->driverHandle = driverHandle;
         wasModuleCreated = false;
     }

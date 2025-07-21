@@ -53,7 +53,15 @@ using namespace NEO;
 TEST(MemoryManagerTest, WhenCallingSetSharedSystemMemAdviseThenReturnTrue) {
     MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
     OsAgnosticMemoryManager memoryManager(executionEnvironment);
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, MemAdvise::invalidAdvise, 0u));
+    auto subDeviceId = SubDeviceIdsVec{0};
+    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, MemAdvise::invalidAdvise, subDeviceId, 0u));
+}
+
+TEST(MemoryManagerTest, WhenCallingSetSharedSystemAtomicAccessThenReturnTrue) {
+    MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
+    OsAgnosticMemoryManager memoryManager(executionEnvironment);
+    auto subDeviceId = SubDeviceIdsVec{0};
+    EXPECT_TRUE(memoryManager.setSharedSystemAtomicAccess(nullptr, 0u, AtomicAccessMode::none, subDeviceId, 0u));
 }
 
 TEST(MemoryManagerTest, WhenCallingHasPageFaultsEnabledThenReturnFalse) {
@@ -1588,6 +1596,35 @@ TEST(OsAgnosticMemoryManager, givenForcedSystemMemoryForIsaAndEnabledLocalMemory
     memoryManager.freeGraphicsMemory(allocation);
 }
 
+TEST(OsAgnosticMemoryManager, givenDifferentIsaPaddingIncludedFlagValuesWhenAllocatingGraphicsMemoryForIsaThenUnderlyingBufferSizeMatchesExpectation) {
+    DebugManagerStateRestore dbgRestore;
+    debugManager.flags.ForceSystemMemoryPlacement.set(1 << (static_cast<uint32_t>(AllocationType::kernelIsa) - 1));
+    MockExecutionEnvironment executionEnvironment(defaultHwInfo.get());
+    auto hwInfo = executionEnvironment.rootDeviceEnvironments[0]->getMutableHardwareInfo();
+    hwInfo->featureTable.flags.ftrLocalMemory = true;
+    auto &gfxCoreHelper = executionEnvironment.rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>();
+    const auto isaPadding = gfxCoreHelper.getPaddingForISAAllocation();
+
+    MockMemoryManager memoryManager(false, true, executionEnvironment);
+
+    size_t kernelIsaSize = 4096;
+    AllocationProperties allocProperties = {0, kernelIsaSize, AllocationType::kernelIsa, 1};
+
+    for (auto isaPaddingIncluded : {false, true}) {
+        allocProperties.isaPaddingIncluded = isaPaddingIncluded;
+        auto allocation = memoryManager.allocateGraphicsMemoryWithProperties(allocProperties);
+        ASSERT_NE(nullptr, allocation);
+
+        if (isaPaddingIncluded) {
+            EXPECT_EQ(kernelIsaSize, allocation->getUnderlyingBufferSize());
+        } else {
+            EXPECT_EQ(kernelIsaSize + isaPadding, allocation->getUnderlyingBufferSize());
+        }
+
+        memoryManager.freeGraphicsMemory(allocation);
+    }
+}
+
 class MemoryManagerWithAsyncDeleterTest : public ::testing::Test {
   public:
     MemoryManagerWithAsyncDeleterTest() : memoryManager(false, false){};
@@ -1885,42 +1922,9 @@ TEST(OsAgnosticMemoryManager, givenOsAgnosticMemoryManagerWhenOsEnabled64kbPages
     OsAgnosticMemoryManager memoryManager(executionEnvironment);
     auto hwInfo = *defaultHwInfo;
     OSInterface::osEnabled64kbPages = false;
-    hwInfo.capabilityTable.ftr64KBpages = true;
     EXPECT_TRUE(memoryManager.is64kbPagesEnabled(&hwInfo));
     OSInterface::osEnabled64kbPages = true;
     EXPECT_TRUE(memoryManager.is64kbPagesEnabled(&hwInfo));
-}
-
-TEST(OsAgnosticMemoryManager, givenOsAgnosticMemoryManagerWhenCheckIs64kbPagesEnabledThenOsEnabled64PkbPagesIsNotAffectedReturnedValue) {
-    MockExecutionEnvironment executionEnvironment;
-    VariableBackup<bool> osEnabled64kbPagesBackup(&OSInterface::osEnabled64kbPages);
-    OsAgnosticMemoryManager memoryManager(executionEnvironment);
-    auto hwInfo = *defaultHwInfo;
-    OSInterface::osEnabled64kbPages = true;
-    hwInfo.capabilityTable.ftr64KBpages = true;
-    EXPECT_TRUE(memoryManager.is64kbPagesEnabled(&hwInfo));
-    hwInfo.capabilityTable.ftr64KBpages = false;
-    EXPECT_FALSE(memoryManager.is64kbPagesEnabled(&hwInfo));
-}
-
-TEST(OsAgnosticMemoryManager, givenOsAgnosticMemoryManagerWithFlagEnable64kbpagesWhenCheckIs64kbPagesEnabledThenProperValueIsReturned) {
-    DebugManagerStateRestore dbgRestore;
-
-    MockExecutionEnvironment executionEnvironment;
-    OsAgnosticMemoryManager memoryManager(executionEnvironment);
-    auto hwInfo = *defaultHwInfo;
-    debugManager.flags.Enable64kbpages.set(true);
-    hwInfo.capabilityTable.ftr64KBpages = true;
-    EXPECT_TRUE(memoryManager.is64kbPagesEnabled(&hwInfo));
-    debugManager.flags.Enable64kbpages.set(true);
-    hwInfo.capabilityTable.ftr64KBpages = false;
-    EXPECT_FALSE(memoryManager.is64kbPagesEnabled(&hwInfo));
-    debugManager.flags.Enable64kbpages.set(false);
-    hwInfo.capabilityTable.ftr64KBpages = false;
-    EXPECT_FALSE(memoryManager.is64kbPagesEnabled(&hwInfo));
-    debugManager.flags.Enable64kbpages.set(false);
-    hwInfo.capabilityTable.ftr64KBpages = true;
-    EXPECT_FALSE(memoryManager.is64kbPagesEnabled(&hwInfo));
 }
 
 TEST(OsAgnosticMemoryManager, givenStartAddressAndSizeWhenReservingCpuAddressThenPageAlignedAddressRangeIsReturned) {

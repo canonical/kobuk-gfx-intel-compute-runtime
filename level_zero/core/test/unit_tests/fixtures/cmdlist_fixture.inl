@@ -80,7 +80,7 @@ void validateTimestampRegisters(GenCmdList &cmdList,
     } else {
         ASSERT_NE(cmdList.end(), itor);
         auto cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
-        EXPECT_EQ(RegisterOffsets::globalTimestampUn, cmdMem->getRegisterAddress());
+        EXPECT_EQ(firstLoadRegisterRegSrcAddress, cmdMem->getRegisterAddress());
         EXPECT_EQ(firstStoreRegMemAddress, cmdMem->getMemoryAddress());
         if (workloadPartition) {
             EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
@@ -89,7 +89,7 @@ void validateTimestampRegisters(GenCmdList &cmdList,
         }
     }
 
-    itor++;
+    itor = useMask ? find<MI_LOAD_REGISTER_REG *>(itor, cmdList.end()) : find<MI_STORE_REGISTER_MEM *>(startIt, cmdList.end());
     if (useMask) {
         {
             ASSERT_NE(cmdList.end(), itor);
@@ -128,7 +128,7 @@ void validateTimestampRegisters(GenCmdList &cmdList,
     } else {
         ASSERT_NE(cmdList.end(), itor);
         auto cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
-        EXPECT_EQ(RegisterOffsets::gpThreadTimeRegAddressOffsetHigh, cmdMem->getRegisterAddress());
+        EXPECT_EQ(secondLoadRegisterRegSrcAddress, cmdMem->getRegisterAddress());
         EXPECT_EQ(secondStoreRegMemAddress, cmdMem->getMemoryAddress());
         if (workloadPartition) {
             EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
@@ -137,6 +137,145 @@ void validateTimestampRegisters(GenCmdList &cmdList,
         }
     }
 
+    itor++;
+    startIt = itor;
+}
+
+template <typename FamilyType>
+void validateTimestampLongRegisters(GenCmdList &cmdList,
+                                    GenCmdList::iterator &startIt,
+                                    uint32_t firstLoadRegisterRegSrcAddress,
+                                    uint64_t firstStoreRegMemAddress,
+                                    uint32_t secondLoadRegisterRegSrcAddress,
+                                    uint64_t secondStoreRegMemAddress,
+                                    uint32_t thirdLoadRegisterRegSrcAddress,
+                                    uint64_t thirdStoreRegMemAddress,
+                                    uint32_t fourthLoadRegisterRegSrcAddress,
+                                    uint64_t fourthStoreRegMemAddress,
+                                    bool workloadPartition,
+                                    bool useMask) {
+    using MI_LOAD_REGISTER_REG = typename FamilyType::MI_LOAD_REGISTER_REG;
+    using MI_LOAD_REGISTER_IMM = typename FamilyType::MI_LOAD_REGISTER_IMM;
+    using MI_MATH = typename FamilyType::MI_MATH;
+    using MI_STORE_REGISTER_MEM = typename FamilyType::MI_STORE_REGISTER_MEM;
+
+    constexpr uint32_t mask = 0xfffffffe;
+
+    auto itor = useMask ? find<MI_LOAD_REGISTER_REG *>(startIt, cmdList.end()) : find<MI_STORE_REGISTER_MEM *>(startIt, cmdList.end());
+    if (useMask) {
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdLoadReg = genCmdCast<MI_LOAD_REGISTER_REG *>(*itor);
+            EXPECT_EQ(firstLoadRegisterRegSrcAddress, cmdLoadReg->getSourceRegisterAddress());
+            EXPECT_EQ(RegisterOffsets::csGprR13, cmdLoadReg->getDestinationRegisterAddress());
+        }
+
+        itor++;
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdLoadImm = genCmdCast<MI_LOAD_REGISTER_IMM *>(*itor);
+            EXPECT_EQ(RegisterOffsets::csGprR14, cmdLoadImm->getRegisterOffset());
+            EXPECT_EQ(mask, cmdLoadImm->getDataDword());
+        }
+
+        itor++;
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdMath = genCmdCast<MI_MATH *>(*itor);
+            EXPECT_EQ(3u, cmdMath->DW0.BitField.DwordLength);
+        }
+
+        itor++;
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
+            EXPECT_EQ(RegisterOffsets::csGprR12, cmdMem->getRegisterAddress());
+            EXPECT_EQ(firstStoreRegMemAddress, cmdMem->getMemoryAddress());
+            if (workloadPartition) {
+                EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+            } else {
+                EXPECT_FALSE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+            }
+        }
+    } else {
+        ASSERT_NE(cmdList.end(), itor);
+        auto cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
+        EXPECT_EQ(firstLoadRegisterRegSrcAddress, cmdMem->getRegisterAddress());
+        EXPECT_EQ(firstStoreRegMemAddress, cmdMem->getMemoryAddress());
+        if (workloadPartition) {
+            EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+        } else {
+            EXPECT_FALSE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+        }
+    }
+    itor++;
+    ASSERT_NE(cmdList.end(), itor);
+    auto cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
+    EXPECT_EQ(secondLoadRegisterRegSrcAddress, cmdMem->getRegisterAddress());
+    EXPECT_EQ(secondStoreRegMemAddress, cmdMem->getMemoryAddress());
+    if (workloadPartition) {
+        EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+    } else {
+        EXPECT_FALSE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+    }
+
+    itor = useMask ? find<MI_LOAD_REGISTER_REG *>(itor, cmdList.end()) : find<MI_STORE_REGISTER_MEM *>(startIt, cmdList.end());
+    if (useMask) {
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdLoadReg = genCmdCast<MI_LOAD_REGISTER_REG *>(*itor);
+            EXPECT_EQ(thirdLoadRegisterRegSrcAddress, cmdLoadReg->getSourceRegisterAddress());
+            EXPECT_EQ(RegisterOffsets::csGprR13, cmdLoadReg->getDestinationRegisterAddress());
+        }
+
+        itor++;
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdLoadImm = genCmdCast<MI_LOAD_REGISTER_IMM *>(*itor);
+            EXPECT_EQ(RegisterOffsets::csGprR14, cmdLoadImm->getRegisterOffset());
+            EXPECT_EQ(mask, cmdLoadImm->getDataDword());
+        }
+
+        itor++;
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            auto cmdMath = genCmdCast<MI_MATH *>(*itor);
+            EXPECT_EQ(3u, cmdMath->DW0.BitField.DwordLength);
+        }
+
+        itor++;
+        {
+            ASSERT_NE(cmdList.end(), itor);
+            cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
+            EXPECT_EQ(RegisterOffsets::csGprR12, cmdMem->getRegisterAddress());
+            EXPECT_EQ(thirdStoreRegMemAddress, cmdMem->getMemoryAddress());
+            if (workloadPartition) {
+                EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+            } else {
+                EXPECT_FALSE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+            }
+        }
+    } else {
+        ASSERT_NE(cmdList.end(), itor);
+        cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
+        EXPECT_EQ(thirdLoadRegisterRegSrcAddress, cmdMem->getRegisterAddress());
+        EXPECT_EQ(thirdStoreRegMemAddress, cmdMem->getMemoryAddress());
+        if (workloadPartition) {
+            EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+        } else {
+            EXPECT_FALSE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+        }
+    }
+    itor++;
+    ASSERT_NE(cmdList.end(), itor);
+    cmdMem = genCmdCast<MI_STORE_REGISTER_MEM *>(*itor);
+    EXPECT_EQ(fourthLoadRegisterRegSrcAddress, cmdMem->getRegisterAddress());
+    EXPECT_EQ(fourthStoreRegMemAddress, cmdMem->getMemoryAddress());
+    if (workloadPartition) {
+        EXPECT_TRUE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+    } else {
+        EXPECT_FALSE(UnitTestHelper<FamilyType>::getWorkloadPartitionForStoreRegisterMemCmd(*cmdMem));
+    }
     itor++;
     startIt = itor;
 }
@@ -1351,8 +1490,6 @@ void CmdListLargeGrfFixture::testBody() {
 
 template <typename FamilyType>
 void TbxImmediateCommandListFixture::setUpT() {
-    NEO::debugManager.flags.EnableFlushTaskSubmission.set(1);
-
     ModuleImmutableDataFixture::setUp();
 
     device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->memoryOperationsInterface =
@@ -1561,9 +1698,13 @@ void CommandListScratchPatchFixtureInit::testScratchGrowingPatching() {
     auto scratchAddress = scratchController->getScratchPatchAddress();
     auto fullScratchAddress = surfaceHeapGpuBase + scratchAddress;
 
+    auto patchIndex = launchParams.scratchAddressPatchIndex;
+    ASSERT_TRUE(commandList->commandsToPatch.size() > patchIndex);
+
+    auto currentScratchPatchAddress = commandList->commandsToPatch[patchIndex].scratchAddressAfterPatch;
     auto expectedScratchPatchAddress = getExpectedScratchPatchAddress(scratchAddress);
 
-    EXPECT_EQ(expectedScratchPatchAddress, commandList->getCurrentScratchPatchAddress());
+    EXPECT_EQ(expectedScratchPatchAddress, currentScratchPatchAddress);
     EXPECT_EQ(scratchController, commandList->getCommandListUsedScratchController());
 
     uint64_t scratchInlineValue = 0;
@@ -1574,7 +1715,6 @@ void CommandListScratchPatchFixtureInit::testScratchGrowingPatching() {
 
     commandList->reset();
 
-    EXPECT_EQ(0u, commandList->getCurrentScratchPatchAddress());
     EXPECT_EQ(nullptr, commandList->getCommandListUsedScratchController());
 
     mockKernelImmData->kernelDescriptor->kernelAttributes.perThreadScratchSize[1] = 0x40;
@@ -1603,9 +1743,13 @@ void CommandListScratchPatchFixtureInit::testScratchGrowingPatching() {
     scratchAddress = scratchController->getScratchPatchAddress();
     auto fullScratchSlot1Address = surfaceHeapGpuBase + scratchAddress;
 
+    patchIndex = launchParams.scratchAddressPatchIndex;
+    ASSERT_TRUE(commandList->commandsToPatch.size() > patchIndex);
+
+    currentScratchPatchAddress = commandList->commandsToPatch[patchIndex].scratchAddressAfterPatch;
     expectedScratchPatchAddress = getExpectedScratchPatchAddress(scratchAddress);
 
-    EXPECT_EQ(expectedScratchPatchAddress, commandList->getCurrentScratchPatchAddress());
+    EXPECT_EQ(expectedScratchPatchAddress, currentScratchPatchAddress);
     EXPECT_EQ(scratchController, commandList->getCommandListUsedScratchController());
 
     scratchInlinePtr = ptrOffset(walkerPtrWithSlot1Scratch, (inlineOffset + scratchInlineOffset));
@@ -1635,6 +1779,7 @@ void CommandListScratchPatchFixtureInit::testScratchSameNotPatching() {
 
     const ze_group_count_t groupCount{1, 1, 1};
     CmdListKernelLaunchParams launchParams = {};
+    EXPECT_TRUE(NEO::isUndefined(launchParams.scratchAddressPatchIndex));
 
     auto result = ZE_RESULT_SUCCESS;
     size_t usedBefore = cmdListStream->getUsed();
@@ -1657,18 +1802,33 @@ void CommandListScratchPatchFixtureInit::testScratchSameNotPatching() {
     result = commandList->close();
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
+    const CommandToPatch *scratchCmd = nullptr;
+    size_t scratchCmdIndex = 0;
+    for (const auto &cmdToPatch : commandList->getCommandsToPatch()) {
+        if (cmdToPatch.type == CommandToPatch::CommandType::ComputeWalkerInlineDataScratch) {
+            scratchCmd = &cmdToPatch;
+            break;
+        }
+        scratchCmdIndex += 1;
+    }
+    ASSERT_NE(scratchCmd, nullptr);
+    EXPECT_EQ(scratchCmd->scratchAddressAfterPatch, 0u);
+    EXPECT_EQ(scratchCmdIndex, launchParams.scratchAddressPatchIndex);
+
     auto commandListHandle = commandList->toHandle();
     result = commandQueue->executeCommandLists(1, &commandListHandle, nullptr, false, nullptr, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto scratchAddress = scratchController->getScratchPatchAddress();
     auto fullScratchAddress = surfaceHeapGpuBase + scratchAddress;
+    auto expectedSavedScratchAddress = fixtureGlobalStatelessMode ? fullScratchAddress : scratchAddress;
 
     uint64_t scratchInlineValue = 0;
 
     void *scratchInlinePtr = ptrOffset(walkerPtrWithScratch, (inlineOffset + scratchInlineOffset));
     std::memcpy(&scratchInlineValue, scratchInlinePtr, sizeof(scratchInlineValue));
     EXPECT_EQ(fullScratchAddress, scratchInlineValue);
+    EXPECT_EQ(expectedSavedScratchAddress, scratchCmd->scratchAddressAfterPatch);
 
     memset(scratchInlinePtr, 0, scratchInlinePointerSize);
 
@@ -1677,6 +1837,7 @@ void CommandListScratchPatchFixtureInit::testScratchSameNotPatching() {
 
     std::memcpy(&scratchInlineValue, scratchInlinePtr, sizeof(scratchInlineValue));
     EXPECT_EQ(0u, scratchInlineValue);
+    EXPECT_EQ(expectedSavedScratchAddress, scratchCmd->scratchAddressAfterPatch);
 }
 
 template <typename FamilyType>
@@ -1773,9 +1934,13 @@ void CommandListScratchPatchFixtureInit::testScratchChangedControllerPatching() 
     auto scratchAddress = scratchControllerInitial->getScratchPatchAddress();
     auto fullScratchAddress = surfaceHeapGpuBase + scratchAddress;
 
+    auto patchIndex = launchParams.scratchAddressPatchIndex;
+    ASSERT_TRUE(commandList->commandsToPatch.size() > patchIndex);
+
+    auto currentScratchPatchAddress = commandList->commandsToPatch[patchIndex].scratchAddressAfterPatch;
     auto expectedScratchPatchAddress = getExpectedScratchPatchAddress(scratchAddress);
 
-    EXPECT_EQ(expectedScratchPatchAddress, commandList->getCurrentScratchPatchAddress());
+    EXPECT_EQ(expectedScratchPatchAddress, currentScratchPatchAddress);
     EXPECT_EQ(scratchControllerInitial, commandList->getCommandListUsedScratchController());
 
     uint64_t scratchInlineValue = 0;
@@ -1797,8 +1962,9 @@ void CommandListScratchPatchFixtureInit::testScratchChangedControllerPatching() 
     fullScratchAddress = surfaceHeapGpuBase + scratchAddress;
 
     expectedScratchPatchAddress = getExpectedScratchPatchAddress(scratchAddress);
+    currentScratchPatchAddress = commandList->commandsToPatch[patchIndex].scratchAddressAfterPatch;
 
-    EXPECT_EQ(expectedScratchPatchAddress, commandList->getCurrentScratchPatchAddress());
+    EXPECT_EQ(expectedScratchPatchAddress, currentScratchPatchAddress);
     EXPECT_EQ(scratchControllerSecond, commandList->getCommandListUsedScratchController());
 
     scratchInlinePtr = ptrOffset(walkerPtrWithScratch, (inlineOffset + scratchInlineOffset));
@@ -1898,9 +2064,13 @@ void CommandListScratchPatchFixtureInit::testExternalScratchPatching() {
     auto scratchAddress = scratchController->getScratchPatchAddress();
     auto fullScratchAddress = surfaceHeapGpuBase + scratchAddress;
 
+    auto patchIndex = launchParams.scratchAddressPatchIndex;
+    ASSERT_TRUE(commandList->commandsToPatch.size() > patchIndex);
+
+    auto currentScratchPatchAddress = commandList->commandsToPatch[patchIndex].scratchAddressAfterPatch;
     auto expectedScratchPatchAddress = getExpectedScratchPatchAddress(scratchAddress);
 
-    EXPECT_EQ(expectedScratchPatchAddress, commandList->getCurrentScratchPatchAddress());
+    EXPECT_EQ(expectedScratchPatchAddress, currentScratchPatchAddress);
     EXPECT_EQ(scratchController, commandList->getCommandListUsedScratchController());
 
     uint64_t scratchInlineValue = 0;
@@ -1911,7 +2081,7 @@ void CommandListScratchPatchFixtureInit::testExternalScratchPatching() {
 }
 
 template <typename FamilyType>
-void CommandListScratchPatchFixtureInit::testScratchUndefinedNoPatching() {
+void CommandListScratchPatchFixtureInit::testScratchUndefinedPatching() {
     const ze_group_count_t groupCount{1, 1, 1};
     CmdListKernelLaunchParams launchParams = {};
     auto result = ZE_RESULT_SUCCESS;
@@ -1932,16 +2102,21 @@ void CommandListScratchPatchFixtureInit::testScratchUndefinedNoPatching() {
         result = commandList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
         EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
-        const auto &cmdsToPatch = commandList->getCommandsToPatch();
         bool foundScratchPatchCmd = false;
-
+        const auto &cmdsToPatch = commandList->getCommandsToPatch();
         for (const auto &cmdToPatch : cmdsToPatch) {
             if (cmdToPatch.type == CommandToPatch::CommandType::ComputeWalkerInlineDataScratch) {
                 foundScratchPatchCmd = true;
+                if (isUndefined(testParam.pointerSize)) {
+                    EXPECT_TRUE(isUndefined(cmdToPatch.patchSize));
+                }
+                if (isUndefined(testParam.offset)) {
+                    EXPECT_TRUE(isUndefined(cmdToPatch.offset));
+                }
                 break;
             }
         }
-        EXPECT_FALSE(foundScratchPatchCmd);
+        EXPECT_TRUE(foundScratchPatchCmd);
 
         result = commandList->reset();
         ASSERT_EQ(ZE_RESULT_SUCCESS, result);

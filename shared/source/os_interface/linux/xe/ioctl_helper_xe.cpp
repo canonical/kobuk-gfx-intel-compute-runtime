@@ -211,17 +211,8 @@ bool IoctlHelperXe::initialize() {
 
     xeLog("DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY\t\t%#llx\n",
           config->info[DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY]);
-    xeLog("  DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY\t%s\n",
-          config->info[DRM_XE_QUERY_CONFIG_FLAGS] &
-                  DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY
-              ? "ON"
-              : "OFF");
 
     maxExecQueuePriority = config->info[DRM_XE_QUERY_CONFIG_MAX_EXEC_QUEUE_PRIORITY] & 0xffff;
-    isLowLatencyHintAvailable = config->info[DRM_XE_QUERY_CONFIG_FLAGS] & DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY;
-    if (debugManager.flags.ForceLowLatencyHint.get() != -1) {
-        isLowLatencyHintAvailable = !!debugManager.flags.ForceLowLatencyHint.get();
-    }
 
     memset(&queryConfig, 0, sizeof(queryConfig));
     queryConfig.query = DRM_XE_DEVICE_QUERY_HWCONFIG;
@@ -513,9 +504,6 @@ bool IoctlHelperXe::setGpuCpuTimes(TimeStampData *pGpuCpuTime, OSTime *osTime) {
     ret = IoctlHelper::ioctl(DrmIoctl::query, &deviceQuery);
 
     auto nValidBits = queryEngineCycles->width;
-    if (osTime->getDeviceTimestampWidth() != 0) {
-        nValidBits = osTime->getDeviceTimestampWidth();
-    }
     auto gpuTimestampValidBits = maxNBitValue(nValidBits);
     auto gpuCycles = queryEngineCycles->engine_cycles & gpuTimestampValidBits;
 
@@ -857,8 +845,20 @@ bool IoctlHelperXe::setVmBoAdvise(int32_t handle, uint32_t attribute, void *regi
     return true;
 }
 
-bool IoctlHelperXe::setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) {
-    xeLog(" -> IoctlHelperXe::%s h=0x%llx s=0x%llx vmid=0x%x\n", __FUNCTION__, handle, size, vmId);
+bool IoctlHelperXe::setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const std::vector<uint32_t> &vmIds) {
+    std::string vmIdsStr = "[";
+    for (size_t i = 0; i < vmIds.size(); ++i) {
+        {
+            std::stringstream ss;
+            ss << std::hex << vmIds[i];
+            vmIdsStr += "0x" + ss.str();
+        }
+        if (i != vmIds.size() - 1) {
+            vmIdsStr += ", ";
+        }
+    }
+    vmIdsStr += "]";
+    xeLog(" -> IoctlHelperXe::%s h=0x%x s=0x%lx vmids=%s\n", __FUNCTION__, handle, size, vmIdsStr.c_str());
     // There is no vmAdvise attribute in Xe, so return success
     return true;
 }
@@ -1342,6 +1342,26 @@ int IoctlHelperXe::ioctl(DrmIoctl request, void *arg) {
         xeLog(" ->PrimeHandleToFd h=0x%x f=0x%x d=0x%x r=%d\n",
               prime->handle, prime->flags, prime->fileDescriptor, ret);
     } break;
+    case DrmIoctl::syncObjFdToHandle: {
+        ret = IoctlHelper::ioctl(request, arg);
+        xeLog(" -> IoctlHelperXe::ioctl SyncObjFdToHandle r=%d\n", ret);
+    } break;
+    case DrmIoctl::syncObjTimelineWait: {
+        ret = IoctlHelper::ioctl(request, arg);
+        xeLog(" -> IoctlHelperXe::ioctl SyncObjTimelineWait r=%d\n", ret);
+    } break;
+    case DrmIoctl::syncObjWait: {
+        ret = IoctlHelper::ioctl(request, arg);
+        xeLog(" -> IoctlHelperXe::ioctl SyncObjWait r=%d\n", ret);
+    } break;
+    case DrmIoctl::syncObjSignal: {
+        ret = IoctlHelper::ioctl(request, arg);
+        xeLog(" -> IoctlHelperXe::ioctl SyncObjSignal r=%d\n", ret);
+    } break;
+    case DrmIoctl::syncObjTimelineSignal: {
+        ret = IoctlHelper::ioctl(request, arg);
+        xeLog(" -> IoctlHelperXe::ioctl SyncObjTimelineSignal r=%d\n", ret);
+    } break;
     case DrmIoctl::gemCreate: {
         drm_xe_gem_create *gemCreate = static_cast<drm_xe_gem_create *>(arg);
         ret = IoctlHelper::ioctl(request, arg);
@@ -1379,12 +1399,6 @@ void IoctlHelperXe::xeShowBindTable() {
                   bindInfo[i].userptr,
                   bindInfo[i].addr);
         }
-    }
-}
-
-void IoctlHelperXe::applyContextFlags(void *execQueueCreate, bool allocateInterrupt) {
-    if (this->isLowLatencyHintAvailable) {
-        reinterpret_cast<drm_xe_exec_queue_create *>(execQueueCreate)->flags |= DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT;
     }
 }
 

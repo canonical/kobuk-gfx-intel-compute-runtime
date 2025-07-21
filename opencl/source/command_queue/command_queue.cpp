@@ -135,8 +135,8 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
 
         this->heaplessModeEnabled = compilerProductHelper.isHeaplessModeEnabled(hwInfo);
         this->heaplessStateInitEnabled = compilerProductHelper.isHeaplessStateInitEnabled(this->heaplessModeEnabled);
-
         this->isForceStateless = compilerProductHelper.isForceToStatelessRequired();
+        this->l3FlushAfterPostSyncEnabled = productHelper.isL3FlushAfterPostSyncRequired(this->heaplessModeEnabled);
     }
 }
 
@@ -584,7 +584,7 @@ TaskCountType CommandQueue::getTaskLevelFromWaitList(TaskCountType taskLevel,
                                                      cl_uint numEventsInWaitList,
                                                      const cl_event *eventWaitList) {
     for (auto iEvent = 0u; iEvent < numEventsInWaitList; ++iEvent) {
-        auto pEvent = (Event *)(eventWaitList[iEvent]);
+        auto pEvent = static_cast<const Event *>(eventWaitList[iEvent]);
         TaskCountType eventTaskLevel = pEvent->peekTaskLevel();
         taskLevel = std::max(taskLevel, eventTaskLevel);
     }
@@ -976,11 +976,10 @@ TaskCountType CommandQueue::peekBcsTaskCount(aub_stream::EngineType bcsEngineTyp
 
 bool CommandQueue::isTextureCacheFlushNeeded(uint32_t commandType) const {
     auto isDirectSubmissionEnabled = getGpgpuCommandStreamReceiver().isDirectSubmissionEnabled();
-    switch (commandType) {
-    case CL_COMMAND_COPY_IMAGE:
-    case CL_COMMAND_WRITE_IMAGE:
-    case CL_COMMAND_FILL_IMAGE:
+    if (this->isImageWriteOperation(commandType)) {
         return isDirectSubmissionEnabled;
+    }
+    switch (commandType) {
     case CL_COMMAND_READ_IMAGE:
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER:
         return isDirectSubmissionEnabled && getDevice().getGfxCoreHelper().isCacheFlushPriorImageReadRequired();

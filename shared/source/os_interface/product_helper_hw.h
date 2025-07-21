@@ -76,13 +76,12 @@ class ProductHelperHw : public ProductHelper {
     bool isDcFlushAllowed() const override;
     uint32_t computeMaxNeededSubSliceSpace(const HardwareInfo &hwInfo) const override;
     bool getUuid(NEO::DriverModel *driverModel, uint32_t subDeviceCount, uint32_t deviceIndex, std::array<uint8_t, ProductHelper::uuidSize> &uuid) const override;
-    bool isFlushTaskAllowed() const override;
     bool isSystolicModeConfigurable(const HardwareInfo &hwInfo) const override;
     bool isInitBuiltinAsyncSupported(const HardwareInfo &hwInfo) const override;
     bool isCopyEngineSelectorEnabled(const HardwareInfo &hwInfo) const override;
-    bool isGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const override;
+    bool isReleaseGlobalFenceInCommandStreamRequired(const HardwareInfo &hwInfo) const override;
     bool isGlobalFenceInPostSyncRequired(const HardwareInfo &hwInfo) const override;
-    bool isGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const override;
+    bool isAcquireGlobalFenceInDirectSubmissionRequired(const HardwareInfo &hwInfo) const override;
     bool isTimestampWaitSupportedForQueues(bool heaplessEnabled) const override;
     uint32_t getThreadEuRatioForScratch(const HardwareInfo &hwInfo) const override;
     void adjustScratchSize(size_t &requiredScratchSize) const override;
@@ -97,7 +96,7 @@ class ProductHelperHw : public ProductHelper {
     bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const override;
     bool isTimestampWaitSupportedForEvents() const override;
     bool isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const override;
-    bool isBlitSplitEnqueueWARequired(const HardwareInfo &hwInfo) const override;
+    BcsSplitSettings getBcsSplitSettings() const override;
     bool isInitDeviceWithFirstSubmissionRequired(const HardwareInfo &hwInfo) const override;
     bool allowMemoryPrefetch(const HardwareInfo &hwInfo) const override;
     bool isBcsReportWaRequired(const HardwareInfo &hwInfo) const override;
@@ -133,7 +132,7 @@ class ProductHelperHw : public ProductHelper {
     uint32_t getInternalHeapsPreallocated() const override;
     bool overrideAllocationCpuCacheable(const AllocationData &allocationData) const override;
     bool is2MBLocalMemAlignmentEnabled() const override;
-    bool isPostImageWriteFlushRequired() const override;
+    bool isPackedCopyFormatSupported() const override;
 
     bool getFrontEndPropertyScratchSizeSupport() const override;
     bool getFrontEndPropertyPrivateScratchSizeSupport() const override;
@@ -194,12 +193,12 @@ class ProductHelperHw : public ProductHelper {
     bool supports2DBlockStore() const override;
     bool supports2DBlockLoad() const override;
     uint32_t getNumCacheRegions() const override;
-    uint32_t adjustMaxThreadsPerThreadGroup(uint32_t maxThreadsPerThreadGroup, uint32_t simt, uint32_t totalWorkItems, uint32_t grfCount, bool isHwLocalIdGeneration, bool isHeaplessModeEnabled) const override;
+    uint32_t adjustMaxThreadsPerThreadGroup(uint32_t maxThreadsPerThreadGroup, uint32_t simt, uint32_t grfCount, bool isHeaplessModeEnabled) const override;
     uint64_t getPatIndex(CacheRegion cacheRegion, CachePolicy cachePolicy) const override;
     uint32_t getGmmResourceUsageOverride(uint32_t usageType) const override;
     bool isSharingWith3dOrMediaAllowed() const override;
     bool isL3FlushAfterPostSyncRequired(bool heaplessEnabled) const override;
-    void overrideDirectSubmissionTimeouts(std::chrono::microseconds &timeout, std::chrono::microseconds &maxTimeout) const override;
+    void overrideDirectSubmissionTimeouts(uint64_t &timeoutUs, uint64_t &maxTimeoutUs) const override;
     bool isMisalignedUserPtr2WayCoherent() const override;
     bool isSvmHeapReservationSupported() const override;
     void setRenderCompressedFlags(HardwareInfo &hwInfo) const override;
@@ -208,6 +207,10 @@ class ProductHelperHw : public ProductHelper {
     bool useAdditionalBlitProperties() const override;
     bool isNonCoherentTimestampsModeEnabled() const override;
     bool getStorageInfoLocalOnlyFlag(LocalMemAllocationMode usmDeviceAllocationMode, bool defaultValue) const override;
+    bool isPidFdOrSocketForIpcSupported() const override;
+    void adjustRTDispatchGlobals(RTDispatchGlobals &rtDispatchGlobals, const HardwareInfo &hwInfo) const override;
+    uint32_t getSyncNumRTStacksPerDss(const HardwareInfo &hwInfo) const override;
+    uint32_t getNumRtStacksPerDSSForAllocation(const HardwareInfo &hwInfo) const override;
 
     ~ProductHelperHw() override = default;
 

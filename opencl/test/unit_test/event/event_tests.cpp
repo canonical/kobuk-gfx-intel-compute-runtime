@@ -10,13 +10,12 @@
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/hw_info.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
-#include "shared/source/os_interface/os_interface.h"
 #include "shared/source/utilities/hw_timestamps.h"
 #include "shared/source/utilities/perf_counter.h"
 #include "shared/source/utilities/tag_allocator.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
-#include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_device.h"
 #include "shared/test/common/mocks/mock_host_ptr_manager.h"
 #include "shared/test/common/mocks/mock_memory_manager.h"
@@ -24,7 +23,6 @@
 #include "shared/test/common/test_macros/test.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 
-#include "opencl/source/command_queue/command_queue_hw.h"
 #include "opencl/source/helpers/task_information.h"
 #include "opencl/source/memory_manager/mem_obj_surface.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
@@ -35,7 +33,6 @@
 #include "opencl/test/unit_test/mocks/mock_mdi.h"
 #include "opencl/test/unit_test/mocks/mock_platform.h"
 #include "opencl/test/unit_test/mocks/mock_printf_handler.h"
-#include "opencl/test/unit_test/mocks/mock_program.h"
 #include "opencl/test/unit_test/os_interface/mock_performance_counters.h"
 
 #include "event_fixture.h"
@@ -43,6 +40,12 @@
 #include <cmath>
 #include <memory>
 #include <type_traits>
+
+namespace NEO {
+class Kernel;
+} // namespace NEO
+template <typename GfxFamily>
+class MockCsr;
 
 using namespace NEO;
 
@@ -563,7 +566,8 @@ TEST_F(InternalsEventTest, GivenSubmitCommandTrueWhenSubmittingCommandsThenRefAp
 TEST_F(InternalsEventTest, givenBlockedKernelWithPrintfWhenSubmittedThenPrintOutput) {
     MockCommandQueue mockCmdQueue(mockContext, pClDevice, nullptr, false);
 
-    testing::internal::CaptureStdout();
+    StreamCapture capture;
+    capture.captureStdout();
     MockEvent<Event> event(&mockCmdQueue, CL_COMMAND_NDRANGE_KERNEL, 0, 0);
 
     auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, AllocationType::commandBuffer, pDevice->getDeviceBitfield()}));
@@ -606,7 +610,7 @@ TEST_F(InternalsEventTest, givenBlockedKernelWithPrintfWhenSubmittedThenPrintOut
 
     EXPECT_EQ(mockCmdQueue.getHeaplessStateInitEnabled() ? 2u : 1u, mockCmdQueue.latestTaskCountWaited);
 
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
     EXPECT_STREQ("test", output.c_str());
     EXPECT_FALSE(surface->isResident(pDevice->getDefaultEngine().osContext->getContextId()));
 }
@@ -615,7 +619,8 @@ TEST_F(InternalsEventTest, givenGpuHangOnCmdQueueWaitFunctionAndBlockedKernelWit
     MockCommandQueue mockCmdQueue(mockContext, pClDevice, nullptr, false);
     mockCmdQueue.waitUntilCompleteReturnValue = WaitStatus::gpuHang;
 
-    testing::internal::CaptureStdout();
+    StreamCapture capture;
+    capture.captureStdout();
     MockEvent<Event> event(&mockCmdQueue, CL_COMMAND_NDRANGE_KERNEL, 0, 0);
 
     auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, AllocationType::commandBuffer, pDevice->getDeviceBitfield()}));
@@ -657,14 +662,15 @@ TEST_F(InternalsEventTest, givenGpuHangOnCmdQueueWaitFunctionAndBlockedKernelWit
     event.submitCommand(false);
     EXPECT_EQ(Event::executionAbortedDueToGpuHang, event.peekExecutionStatus());
 
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
     EXPECT_STREQ("test", output.c_str());
 }
 
 TEST_F(InternalsEventTest, givenGpuHangOnPrintingEnqueueOutputAndBlockedKernelWithPrintfWhenSubmittedThenEventIsAbortedAndHangIsReported) {
     MockCommandQueue mockCmdQueue(mockContext, pClDevice, nullptr, false);
 
-    testing::internal::CaptureStdout();
+    StreamCapture capture;
+    capture.captureStdout();
     MockEvent<Event> event(&mockCmdQueue, CL_COMMAND_NDRANGE_KERNEL, 0, 0);
 
     auto cmdStream = new LinearStream(pDevice->getMemoryManager()->allocateGraphicsMemoryWithProperties({pDevice->getRootDeviceIndex(), 4096, AllocationType::commandBuffer, pDevice->getDeviceBitfield()}));
@@ -706,7 +712,7 @@ TEST_F(InternalsEventTest, givenGpuHangOnPrintingEnqueueOutputAndBlockedKernelWi
     event.submitCommand(false);
     EXPECT_EQ(Event::executionAbortedDueToGpuHang, event.peekExecutionStatus());
 
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
     EXPECT_TRUE(output.empty());
 }
 
@@ -1310,7 +1316,7 @@ HWTEST_F(EventTest, givenVirtualEventWhenSubmitCommandEventNotReadyAndEventWitho
     EXPECT_EQ(pDevice->getUltCommandStreamReceiver<FamilyType>().recursiveLockCounter, currLockCounter + 1);
 }
 
-HWTEST_F(InternalsEventTest, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThenFlushPreviousTasksBeforeMappingOrUnmapping) {
+HWTEST_TEMPLATED_F(InternalsEventTestWithMockCsr, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThenFlushPreviousTasksBeforeMappingOrUnmapping) {
     struct MockNonZeroCopyBuff : UnalignedBuffer {
         MockNonZeroCopyBuff(int32_t &executionStamp)
             : executionStamp(executionStamp) {
@@ -1331,42 +1337,40 @@ HWTEST_F(InternalsEventTest, GivenBufferWithoutZeroCopyWhenMappingOrUnmappingThe
         int32_t dataTransferedStamp = -1;
     };
 
-    int32_t executionStamp = 0;
-    auto csr = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    pDevice->resetCommandStreamReceiver(csr);
+    auto csr = static_cast<MockCsr<FamilyType> *>(&pDevice->getGpgpuCommandStreamReceiver());
 
     const cl_queue_properties props[3] = {CL_QUEUE_PROPERTIES, 0, 0};
     auto pCmdQ = makeReleaseable<MockCommandQueue>(mockContext, pClDevice, props, false);
 
-    MockNonZeroCopyBuff buffer(executionStamp);
+    MockNonZeroCopyBuff buffer(csr->defaultExecStamp);
 
     MemObjSizeArray size = {{4, 1, 1}};
     MemObjOffsetArray offset = {{0, 0, 0}};
     auto commandMap = std::unique_ptr<Command>(new CommandMapUnmap(MapOperationType::map, buffer, size, offset, false, *pCmdQ));
-    EXPECT_EQ(0, executionStamp);
+    EXPECT_EQ(0, csr->defaultExecStamp);
     EXPECT_EQ(-1, csr->flushTaskStamp);
     EXPECT_EQ(-1, buffer.dataTransferedStamp);
 
     auto latestSentFlushTaskCount = csr->peekLatestSentTaskCount();
 
     commandMap->submit(0, false);
-    EXPECT_EQ(1, executionStamp);
+    EXPECT_EQ(1, csr->defaultExecStamp);
     EXPECT_EQ(0, csr->flushTaskStamp);
     EXPECT_EQ(1, buffer.dataTransferedStamp);
     auto latestSentFlushTaskCountAfterSubmit = csr->peekLatestSentTaskCount();
     EXPECT_GT(latestSentFlushTaskCountAfterSubmit, latestSentFlushTaskCount);
 
-    executionStamp = 0;
+    csr->defaultExecStamp = 0;
     csr->flushTaskStamp = -1;
     buffer.dataTransferedStamp = -1;
     buffer.swapCopyDirection();
 
     auto commandUnMap = std::unique_ptr<Command>(new CommandMapUnmap(MapOperationType::unmap, buffer, size, offset, false, *pCmdQ));
-    EXPECT_EQ(0, executionStamp);
+    EXPECT_EQ(0, csr->defaultExecStamp);
     EXPECT_EQ(-1, csr->flushTaskStamp);
     EXPECT_EQ(-1, buffer.dataTransferedStamp);
     commandUnMap->submit(0, false);
-    EXPECT_EQ(1, executionStamp);
+    EXPECT_EQ(1, csr->defaultExecStamp);
     EXPECT_EQ(0, csr->flushTaskStamp);
     EXPECT_EQ(1, buffer.dataTransferedStamp);
     EXPECT_EQ(nullptr, commandUnMap->getCommandStream());
@@ -1632,7 +1636,7 @@ TEST_F(EventTest, givenCmdQueueWithoutProfilingWhenIsCpuProfilingIsCalledThenFal
 }
 
 TEST_F(EventTest, givenOutEventWhenBlockingEnqueueHandledOnCpuThenUpdateTaskCountAndFlushStampFromCmdQ) {
-    std::unique_ptr<Image> image(ImageHelper<Image1dDefaults>::create(&mockContext));
+    std::unique_ptr<Image> image(ImageHelperUlt<Image1dDefaults>::create(&mockContext));
     EXPECT_TRUE(image->mappingOnCpuAllowed());
 
     pCmdQ->flushStamp->setStamp(10);

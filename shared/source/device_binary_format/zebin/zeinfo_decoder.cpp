@@ -690,6 +690,8 @@ DecodeError readZeInfoExecutionEnvironment(const Yaml::YamlParser &parser, const
             validExecEnv &= readZeInfoValueChecked(parser, execEnvMetadataNd, outExecEnv.requireImplicitArgBuffer, context, outErrReason);
         } else if (Tags::Kernel::ExecutionEnv::actualKernelStartOffset == key) {
             // ignore intentionally - deprecated and redundant key
+        } else if (Tags::Kernel::ExecutionEnv::hasLscStoresWithNonDefaultL1CacheControls == key) {
+            validExecEnv &= readZeInfoValueChecked(parser, execEnvMetadataNd, outExecEnv.hasLscStoresWithNonDefaultL1CacheControls, context, outErrReason);
         } else {
             readZeInfoValueCheckedExtra(parser, execEnvMetadataNd, outExecEnv, context, key, outErrReason, outWarning, validExecEnv, err);
         }
@@ -1318,6 +1320,7 @@ DecodeError populateKernelPayloadArgument(NEO::KernelDescriptor &dst, const Kern
                 dst.kernelAttributes.numArgsStateful++;
             } else if (dst.payloadMappings.explicitArgs[src.argIndex].is<NEO::ArgDescriptor::argTImage>()) {
                 dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescImage>(false).bindless = src.offset;
+                dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescImage>(false).size = src.size;
                 dst.kernelAttributes.numArgsStateful++;
             } else {
                 dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescSampler>(false).bindless = src.offset;

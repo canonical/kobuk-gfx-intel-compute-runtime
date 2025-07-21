@@ -10,6 +10,7 @@
 
 #include "level_zero/core/source/cmdlist/cmdlist_hw.h"
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
+#include "level_zero/core/source/cmdlist/cmdlist_launch_params.h"
 #include "level_zero/core/source/kernel/kernel.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_device.h"
 #include "level_zero/core/test/unit_tests/white_box.h"
@@ -22,8 +23,11 @@ class GraphicsAllocation;
 
 namespace L0 {
 struct Device;
+enum class Builtin : uint32_t;
+struct Event;
 
 namespace ult {
+struct Device;
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
@@ -31,7 +35,6 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using BaseClass = ::L0::CommandListCoreFamily<gfxCoreFamily>;
     using BaseClass::addCmdForPatching;
-    using BaseClass::addFlushRequiredCommand;
     using BaseClass::addPatchScratchAddressInImplicitArgs;
     using BaseClass::allocateOrReuseKernelPrivateMemoryIfNeeded;
     using BaseClass::allowCbWaitEventsNoopDispatch;
@@ -72,6 +75,7 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::disablePatching;
     using BaseClass::dispatchCmdListBatchBufferAsPrimary;
     using BaseClass::doubleSbaWa;
+    using BaseClass::duplicatedInOrderCounterStorageEnabled;
     using BaseClass::enablePatching;
     using BaseClass::engineGroupType;
     using BaseClass::estimateBufferSizeMultiTileBarrier;
@@ -96,7 +100,6 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::internalUsage;
     using BaseClass::interruptEvents;
     using BaseClass::isAllocationImported;
-    using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isInOrderNonWalkerSignalingRequired;
     using BaseClass::isQwordInOrderCounter;
     using BaseClass::isRelaxedOrderingDispatchAllowed;
@@ -109,6 +112,7 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::obtainKernelPreemptionMode;
     using BaseClass::partitionCount;
     using BaseClass::patternAllocations;
+    using BaseClass::patternTags;
     using BaseClass::pipeControlMultiKernelEventSync;
     using BaseClass::pipelineSelectStateTracking;
     using BaseClass::requiredStreamState;
@@ -124,8 +128,6 @@ struct WhiteBox<::L0::CommandListCoreFamily<gfxCoreFamily>>
     using BaseClass::unifiedMemoryControls;
     using BaseClass::updateInOrderExecInfo;
     using BaseClass::updateStreamProperties;
-    using BaseClass::updateStreamPropertiesForFlushTaskDispatchFlags;
-    using BaseClass::updateStreamPropertiesForRegularCommandLists;
     using BaseClass::useAdditionalBlitProperties;
 
     WhiteBox() : ::L0::CommandListCoreFamily<gfxCoreFamily>(BaseClass::defaultNumIddsPerBlock) {}
@@ -227,7 +229,6 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::internalUsage;
     using BaseClass::interruptEvents;
     using BaseClass::isBcsSplitNeeded;
-    using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isInOrderNonWalkerSignalingRequired;
     using BaseClass::isQwordInOrderCounter;
     using BaseClass::isSyncModeQueue;
@@ -275,7 +276,6 @@ struct MockCommandListImmediate : public CommandListCoreFamilyImmediate<gfxCoreF
     using BaseClass::immediateCmdListHeapSharing;
     using BaseClass::indirectAllocationsAllowed;
     using BaseClass::internalUsage;
-    using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
     using BaseClass::partitionCount;
@@ -303,6 +303,7 @@ struct WhiteBox<::L0::CommandListImp> : public ::L0::CommandListImp {
     using BaseClass::currentDynamicStateBaseAddress;
     using BaseClass::currentIndirectObjectBaseAddress;
     using BaseClass::currentSurfaceStateBaseAddress;
+    using BaseClass::dcFlushSupport;
     using BaseClass::device;
     using BaseClass::dispatchCmdListBatchBufferAsPrimary;
     using BaseClass::doubleSbaWa;
@@ -315,7 +316,6 @@ struct WhiteBox<::L0::CommandListImp> : public ::L0::CommandListImp {
     using BaseClass::initialize;
     using BaseClass::inOrderExecInfo;
     using BaseClass::interruptEvents;
-    using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
     using BaseClass::l3FlushAfterPostSyncRequired;
@@ -352,6 +352,8 @@ struct MockCommandList : public CommandList {
     ADDMETHOD_NOBASE(close, ze_result_t, ZE_RESULT_SUCCESS, ());
     ADDMETHOD_NOBASE(destroy, ze_result_t, ZE_RESULT_SUCCESS, ());
     ADDMETHOD_NOBASE_VOIDRETURN(patchInOrderCmds, (void));
+
+    ADDMETHOD_CONST_NOBASE(kernelMemoryPrefetchEnabled, bool, false, (void));
 
     ADDMETHOD_NOBASE(appendLaunchKernel, ze_result_t, ZE_RESULT_SUCCESS,
                      (ze_kernel_handle_t kernelHandle,
@@ -609,9 +611,6 @@ struct MockCommandList : public CommandList {
                      (void *desc, void *ptr,
                       uint64_t data));
 
-    ADDMETHOD_NOBASE(executeCommandListImmediate, ze_result_t, ZE_RESULT_SUCCESS,
-                     (bool perforMigration));
-
     ADDMETHOD_NOBASE(initialize, ze_result_t, ZE_RESULT_SUCCESS,
                      (L0::Device * device,
                       NEO::EngineGroupType engineGroupType,
@@ -641,6 +640,7 @@ class MockCommandListCoreFamily : public CommandListCoreFamily<gfxCoreFamily> {
     using BaseClass::enableInOrderExecution;
     using BaseClass::encodeMiFlush;
     using BaseClass::getDeviceCounterAllocForResidency;
+    using BaseClass::isKernelUncachedMocsRequired;
     using BaseClass::ownedPrivateAllocations;
     using BaseClass::setAdditionalBlitProperties;
     using BaseClass::taskCountUpdateFenceRequired;
@@ -684,8 +684,8 @@ class MockCommandListCoreFamily : public CommandListCoreFamily<gfxCoreFamily> {
                           uint32_t sizePerHwThread),
                          (kernel, sizePerHwThread));
 
-    AlignedAllocationData getAlignedAllocationData(L0::Device *device, const void *buffer, uint64_t bufferSize, bool allowHostCopy, bool copyOffload) override {
-        return L0::CommandListCoreFamily<gfxCoreFamily>::getAlignedAllocationData(device, buffer, bufferSize, allowHostCopy, copyOffload);
+    AlignedAllocationData getAlignedAllocationData(L0::Device *device, bool sharedSystemEnabled, const void *buffer, uint64_t bufferSize, bool allowHostCopy, bool copyOffload) override {
+        return L0::CommandListCoreFamily<gfxCoreFamily>::getAlignedAllocationData(device, sharedSystemEnabled, buffer, bufferSize, allowHostCopy, copyOffload);
     }
 
     ze_result_t appendMemoryCopyKernel2d(AlignedAllocationData *dstAlignedAllocation, AlignedAllocationData *srcAlignedAllocation,
@@ -748,18 +748,9 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
     using BaseClass::dependenciesPresent;
     using BaseClass::dummyBlitWa;
     using BaseClass::internalUsage;
-    using BaseClass::isFlushTaskSubmissionEnabled;
     using BaseClass::isSyncModeQueue;
     using BaseClass::isTbxMode;
     using BaseClass::setupFillKernelArguments;
-
-    ze_result_t executeCommandListImmediate(bool performMigration) override {
-        ++executeCommandListImmediateCalledCount;
-        if (callBaseExecute) {
-            return BaseClass::executeCommandListImmediate(performMigration);
-        }
-        return executeCommandListImmediateReturnValue;
-    }
 
     ze_result_t executeCommandListImmediateWithFlushTask(bool performMigration, bool hasStallingCmds, bool hasRelaxedOrderingDependencies, NEO::AppendOperations appendOperation,
                                                          bool copyOffloadSubmission, bool requireTaskCountUpdate,
@@ -801,9 +792,6 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
 
     uint32_t checkAssertCalled = 0;
     bool callBaseExecute = false;
-
-    ze_result_t executeCommandListImmediateReturnValue = ZE_RESULT_SUCCESS;
-    uint32_t executeCommandListImmediateCalledCount = 0;
 
     ze_result_t executeCommandListImmediateWithFlushTaskReturnValue = ZE_RESULT_SUCCESS;
     uint32_t executeCommandListImmediateWithFlushTaskCalledCount = 0;

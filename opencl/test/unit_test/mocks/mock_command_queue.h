@@ -306,8 +306,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
     using BaseClass::heaplessModeEnabled;
     using BaseClass::heaplessStateInitEnabled;
     using BaseClass::isBlitAuxTranslationRequired;
+    using BaseClass::isCacheFlushOnNextBcsWriteRequired;
     using BaseClass::isCompleted;
     using BaseClass::isGpgpuSubmissionForBcsRequired;
+    using BaseClass::l3FlushAfterPostSyncEnabled;
+    using BaseClass::l3FlushedAfterCpuRead;
     using BaseClass::latestSentEnqueueType;
     using BaseClass::minimalSizeForBcsSplit;
     using BaseClass::obtainCommandStream;
@@ -512,11 +515,11 @@ class MockCommandQueueHw : public CommandQueueHw<GfxFamily> {
         }
         return BaseClass::isQueueBlocked();
     }
-    bool isGpgpuSubmissionForBcsRequired(bool queueBlocked, TimestampPacketDependencies &timestampPacketDependencies, bool containsCrossEngineDependency) const override {
+    bool isGpgpuSubmissionForBcsRequired(bool queueBlocked, TimestampPacketDependencies &timestampPacketDependencies, bool containsCrossEngineDependency, bool textureCacheFlushRequired) const override {
         if (forceGpgpuSubmissionForBcsRequired != -1) {
             return forceGpgpuSubmissionForBcsRequired;
         }
-        return BaseClass::isGpgpuSubmissionForBcsRequired(queueBlocked, timestampPacketDependencies, containsCrossEngineDependency);
+        return BaseClass::isGpgpuSubmissionForBcsRequired(queueBlocked, timestampPacketDependencies, containsCrossEngineDependency, textureCacheFlushRequired);
     }
 
     bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, WaitStatus &status, TimestampPacketContainer *mainContainer, TimestampPacketContainer *deferredContainer) override {

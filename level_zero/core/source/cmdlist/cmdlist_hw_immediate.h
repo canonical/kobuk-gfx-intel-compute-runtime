@@ -46,9 +46,9 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFamily> {
     using GfxFamily = typename NEO::GfxFamilyMapper<gfxCoreFamily>::GfxFamily;
     using BaseClass = CommandListCoreFamily<gfxCoreFamily>;
+    using BaseClass::assignInOrderExecInfoToEvent;
     using BaseClass::BaseClass;
     using BaseClass::copyThroughLockedPtrEnabled;
-    using BaseClass::executeCommandListImmediate;
     using BaseClass::getCopyOffloadModeForOperation;
     using BaseClass::getCsr;
     using BaseClass::isCopyOffloadEnabled;
@@ -57,6 +57,7 @@ struct CommandListCoreFamilyImmediate : public CommandListCoreFamily<gfxCoreFami
     using BaseClass::isInOrderExecutionEnabled;
     using BaseClass::isSkippingInOrderBarrierAllowed;
     using BaseClass::isTbxMode;
+    using BaseClass::patternAllocations;
 
     using ComputeFlushMethodType = NEO::CompletionStamp (CommandListCoreFamilyImmediate<gfxCoreFamily>::*)(NEO::LinearStream &, size_t, bool, bool, NEO::AppendOperations, bool);
 

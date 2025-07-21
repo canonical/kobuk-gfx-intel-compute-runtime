@@ -9,12 +9,20 @@
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/helpers/options.h"
 #include "shared/source/helpers/string.h"
+#include "shared/source/helpers/timestamp.h"
 #include "shared/source/utilities/io_functions.h"
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <type_traits>
+
+#if defined(_WIN32)
+#include <process.h>
+#pragma warning(disable : 4996)
+#else
+#include <unistd.h>
+#endif
 
 enum class DebugFunctionalityLevel {
     none,   // Debug functionality disabled
@@ -30,9 +38,11 @@ constexpr DebugFunctionalityLevel globalDebugFunctionalityLevel = DebugFunctiona
 constexpr DebugFunctionalityLevel globalDebugFunctionalityLevel = DebugFunctionalityLevel::none;
 #endif
 
-#define PRINT_DEBUG_STRING(flag, ...) \
-    if (flag)                         \
-        NEO::printDebugString(flag, __VA_ARGS__);
+#define PRINT_DEBUG_STRING(flag, stream, ...) \
+    if (flag)                                 \
+        NEO::printDebugString(flag, stream, __VA_ARGS__);
+
+#define EMIT_WARNING(flag, stream, ...) PRINT_DEBUG_STRING(flag, stream, __VA_ARGS__)
 
 namespace NEO {
 template <DebugFunctionalityLevel debugLevel>
@@ -42,14 +52,6 @@ extern FileLogger<globalDebugFunctionalityLevel> &fileLoggerInstance();
 template <typename StreamT, typename... Args>
 void flushDebugStream(StreamT stream, Args &&...args) {
     IoFunctions::fflushPtr(stream);
-}
-
-template <typename... Args>
-void printDebugString(bool showDebugLogs, Args... args) {
-    if (showDebugLogs) {
-        IoFunctions::fprintf(args...);
-        flushDebugStream(args...);
-    }
 }
 
 void logDebugString(std::string_view debugString);
@@ -196,7 +198,10 @@ class DebugSettingsManager : NEO::NonCopyableAndNonMovableClass {
         auto setCsr = flags.SetCommandStreamReceiver.get();
         auto isTbxMode = (setCsr == static_cast<int32_t>(CommandStreamReceiverType::tbx)) ||
                          (setCsr == static_cast<int32_t>(CommandStreamReceiverType::tbxWithAub));
-        auto isFaultManagerEnabledInEnvVars = flags.EnableTbxPageFaultManager.get();
+        auto isFaultManagerEnabledInEnvVars = true;
+        if (flags.EnableTbxPageFaultManager.get() == 0) {
+            isFaultManagerEnabledInEnvVars = false;
+        }
         return isFaultManagerEnabledInEnvVars && isTbxMode;
     }
 
@@ -219,6 +224,25 @@ static_assert(NEO::NonCopyableAndNonMovable<DebugSettingsManager<DebugFunctional
 static_assert(NEO::NonCopyableAndNonMovable<DebugSettingsManager<DebugFunctionalityLevel::regKeys>>);
 
 extern DebugSettingsManager<globalDebugFunctionalityLevel> debugManager;
+
+struct DebugMessagesBitmask {
+    constexpr static int32_t withPid = 1 << 0;
+    constexpr static int32_t withTimestamp = 1 << 1;
+};
+
+template <typename... Args>
+void printDebugString(bool showDebugLogs, FILE *stream, Args... args) {
+    if (showDebugLogs) {
+        if (NEO::debugManager.flags.DebugMessagesBitmask.get() & DebugMessagesBitmask::withPid) {
+            IoFunctions::fprintf(stream, "[PID: %d] ", getpid());
+        }
+        if (NEO::debugManager.flags.DebugMessagesBitmask.get() & DebugMessagesBitmask::withTimestamp) {
+            IoFunctions::fprintf(stream, "%s", TimestampHelper::getTimestamp().c_str());
+        }
+        IoFunctions::fprintf(stream, args...);
+        flushDebugStream(stream, args...);
+    }
+}
 
 class DurationLog {
     DurationLog() = delete;

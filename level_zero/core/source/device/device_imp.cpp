@@ -43,6 +43,7 @@
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
 #include "level_zero/core/source/cache/cache_reservation.h"
 #include "level_zero/core/source/cmdlist/cmdlist.h"
+#include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/context/context_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
@@ -54,6 +55,7 @@
 #include "level_zero/core/source/image/image.h"
 #include "level_zero/core/source/module/module.h"
 #include "level_zero/core/source/module/module_build_log.h"
+#include "level_zero/core/source/mutable_cmdlist/mutable_cmdlist.h"
 #include "level_zero/core/source/printf_handler/printf_handler.h"
 #include "level_zero/core/source/sampler/sampler.h"
 #include "level_zero/driver_experimental/zex_module.h"
@@ -93,11 +95,8 @@ ze_result_t DeviceImp::getStatus() {
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t DeviceImp::submitCopyForP2P(ze_device_handle_t hPeerDevice, ze_bool_t *value) {
-    DeviceImp *pPeerDevice = static_cast<DeviceImp *>(Device::fromHandle(hPeerDevice));
-    uint32_t peerRootDeviceIndex = pPeerDevice->getNEODevice()->getRootDeviceIndex();
-    *value = false;
-
+bool DeviceImp::submitCopyForP2P(DeviceImp *peerDevice, ze_result_t &ret) {
+    auto canAccessPeer = false;
     ze_command_list_handle_t commandList = nullptr;
     ze_command_list_desc_t listDescriptor = {};
     listDescriptor.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
@@ -115,7 +114,7 @@ ze_result_t DeviceImp::submitCopyForP2P(ze_device_handle_t hPeerDevice, ze_bool_
     queueDescriptor.ordinal = 0;
     queueDescriptor.index = 0;
 
-    auto ret = this->createInternalCommandList(&listDescriptor, &commandList);
+    ret = this->createInternalCommandList(&listDescriptor, &commandList);
     UNRECOVERABLE_IF(ret != ZE_RESULT_SUCCESS);
     ret = this->createInternalCommandQueue(&queueDescriptor, &commandQueue);
     UNRECOVERABLE_IF(ret != ZE_RESULT_SUCCESS);
@@ -145,7 +144,7 @@ ze_result_t DeviceImp::submitCopyForP2P(ze_device_handle_t hPeerDevice, ze_bool_
     peerDeviceDesc.pNext = nullptr;
 
     contextImp->allocDeviceMem(this->toHandle(), &deviceDesc, 8, 1, &memory);
-    contextImp->allocDeviceMem(hPeerDevice, &peerDeviceDesc, 8, 1, &peerMemory);
+    contextImp->allocDeviceMem(peerDevice->toHandle(), &peerDeviceDesc, 8, 1, &peerMemory);
 
     CmdListMemoryCopyParams memoryCopyParams = {};
     ret = L0::CommandList::fromHandle(commandList)->appendMemoryCopy(peerMemory, memory, 8, nullptr, 0, nullptr, memoryCopyParams);
@@ -154,12 +153,10 @@ ze_result_t DeviceImp::submitCopyForP2P(ze_device_handle_t hPeerDevice, ze_bool_
     if (ret == ZE_RESULT_SUCCESS) {
         ret = L0::CommandQueue::fromHandle(commandQueue)->executeCommandLists(1, &commandList, nullptr, true, nullptr, nullptr);
         if (ret == ZE_RESULT_SUCCESS) {
-            this->crossAccessEnabledDevices[peerRootDeviceIndex] = true;
-            pPeerDevice->crossAccessEnabledDevices[this->getNEODevice()->getRootDeviceIndex()] = true;
 
             ret = L0::CommandQueue::fromHandle(commandQueue)->synchronize(std::numeric_limits<uint64_t>::max());
             if (ret == ZE_RESULT_SUCCESS) {
-                *value = true;
+                canAccessPeer = true;
             }
         }
     }
@@ -171,43 +168,57 @@ ze_result_t DeviceImp::submitCopyForP2P(ze_device_handle_t hPeerDevice, ze_bool_
     L0::CommandQueue::fromHandle(commandQueue)->destroy();
     L0::Context::fromHandle(context)->destroy();
 
-    if (ret == ZE_RESULT_ERROR_DEVICE_LOST) {
-        return ZE_RESULT_ERROR_DEVICE_LOST;
+    if (ret != ZE_RESULT_ERROR_DEVICE_LOST) {
+        ret = ZE_RESULT_SUCCESS;
     }
 
-    return ZE_RESULT_SUCCESS;
+    return canAccessPeer;
 }
 
 ze_result_t DeviceImp::canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *value) {
-    *value = false;
-
     DeviceImp *pPeerDevice = static_cast<DeviceImp *>(Device::fromHandle(hPeerDevice));
     uint32_t peerRootDeviceIndex = pPeerDevice->getNEODevice()->getRootDeviceIndex();
+    auto rootDeviceIndex = getRootDeviceIndex();
+
+    auto retVal = ZE_RESULT_SUCCESS;
 
     if (NEO::debugManager.flags.ForceZeDeviceCanAccessPerReturnValue.get() != -1) {
         *value = !!NEO::debugManager.flags.ForceZeDeviceCanAccessPerReturnValue.get();
-        return ZE_RESULT_SUCCESS;
+        return retVal;
     }
 
-    if (this->crossAccessEnabledDevices.find(peerRootDeviceIndex) != this->crossAccessEnabledDevices.end()) {
-        *value = this->crossAccessEnabledDevices[peerRootDeviceIndex];
-        return ZE_RESULT_SUCCESS;
-    }
-
-    if (this->getNEODevice()->getRootDeviceIndex() == peerRootDeviceIndex) {
+    if (rootDeviceIndex == peerRootDeviceIndex) {
         *value = true;
-        return ZE_RESULT_SUCCESS;
+        return retVal;
     }
+
+    auto lock = static_cast<DriverHandleImp *>(driverHandle)->obtainPeerAccessQueryLock();
+    if (this->crossAccessEnabledDevices.find(peerRootDeviceIndex) == this->crossAccessEnabledDevices.end()) {
+        retVal = queryPeerAccess(pPeerDevice);
+    }
+    *value = this->crossAccessEnabledDevices[peerRootDeviceIndex];
+    return retVal;
+}
+
+ze_result_t DeviceImp::queryPeerAccess(DeviceImp *peerDevice) {
+    auto retVal = ZE_RESULT_SUCCESS;
+    auto rootDeviceIndex = getRootDeviceIndex();
+    auto peerRootDeviceIndex = peerDevice->getRootDeviceIndex();
+
+    auto setPeerAccess = [&](bool value) {
+        this->crossAccessEnabledDevices[peerRootDeviceIndex] = value;
+        peerDevice->crossAccessEnabledDevices[rootDeviceIndex] = value;
+    };
 
     uint32_t latency = std::numeric_limits<uint32_t>::max();
     uint32_t bandwidth = 0;
-    ze_result_t res = queryFabricStats(pPeerDevice, latency, bandwidth);
+    ze_result_t res = queryFabricStats(peerDevice, latency, bandwidth);
     if (res == ZE_RESULT_ERROR_UNSUPPORTED_FEATURE || bandwidth == 0) {
-        return submitCopyForP2P(hPeerDevice, value);
+        setPeerAccess(submitCopyForP2P(peerDevice, retVal));
+    } else {
+        setPeerAccess(true);
     }
-
-    *value = true;
-    return ZE_RESULT_SUCCESS;
+    return retVal;
 }
 
 ze_result_t DeviceImp::createCommandList(const ze_command_list_desc_t *desc,
@@ -650,19 +661,17 @@ ze_result_t DeviceImp::getP2PProperties(ze_device_handle_t hPeerDevice,
                                         ze_device_p2p_properties_t *pP2PProperties) {
 
     DeviceImp *peerDevice = static_cast<DeviceImp *>(Device::fromHandle(hPeerDevice));
-    if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported &&
-        peerDevice->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported) {
-        pP2PProperties->flags = ZE_DEVICE_P2P_PROPERTY_FLAG_ACCESS;
-        if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAtomicAccessSupported &&
-            peerDevice->getNEODevice()->getHardwareInfo().capabilityTable.p2pAtomicAccessSupported) {
-            if (this->getNEODevice()->getRootDeviceIndex() == peerDevice->getNEODevice()->getRootDeviceIndex()) {
+    if (this->getNEODevice()->getRootDeviceIndex() == peerDevice->getNEODevice()->getRootDeviceIndex()) {
+        pP2PProperties->flags = ZE_DEVICE_P2P_PROPERTY_FLAG_ACCESS | ZE_DEVICE_P2P_PROPERTY_FLAG_ATOMICS;
+    } else {
+        ze_bool_t peerAccessAvaiable = false;
+        canAccessPeer(hPeerDevice, &peerAccessAvaiable);
+        if (peerAccessAvaiable) {
+            pP2PProperties->flags = ZE_DEVICE_P2P_PROPERTY_FLAG_ACCESS;
+            ze_device_p2p_bandwidth_exp_properties_t p2pBandwidthProperties{};
+            getP2PPropertiesDirectFabricConnection(peerDevice, &p2pBandwidthProperties);
+            if (std::max(p2pBandwidthProperties.physicalBandwidth, p2pBandwidthProperties.logicalBandwidth) > 0u) {
                 pP2PProperties->flags |= ZE_DEVICE_P2P_PROPERTY_FLAG_ATOMICS;
-            } else {
-                ze_device_p2p_bandwidth_exp_properties_t p2pBandwidthProperties{};
-                getP2PPropertiesDirectFabricConnection(peerDevice, &p2pBandwidthProperties);
-                if (std::max(p2pBandwidthProperties.physicalBandwidth, p2pBandwidthProperties.logicalBandwidth) > 0u) {
-                    pP2PProperties->flags |= ZE_DEVICE_P2P_PROPERTY_FLAG_ATOMICS;
-                }
             }
         }
     }
@@ -718,10 +727,26 @@ ze_result_t DeviceImp::getPciProperties(ze_pci_ext_properties_t *pPciProperties)
     return ZE_RESULT_SUCCESS;
 }
 
-const char *DeviceImp::getDeviceMemoryName() {
-    constexpr std::array<uint32_t, 4> hbmTypeIds = {2, 3, 5, 8};
+static const std::map<uint32_t, const char *> memoryTypeNames = {
+    {0, "DDR"},
+    {1, "DDR"},
+    {2, "HBM"},
+    {3, "HBM"},
+    {4, "DDR"},
+    {5, "HBM"},
+    {6, "DDR"},
+    {7, "DDR"},
+    {8, "HBM"},
+    {9, "HBM"},
+};
 
-    return std::find(hbmTypeIds.begin(), hbmTypeIds.end(), getHwInfo().gtSystemInfo.MemoryType) != hbmTypeIds.end() ? "HBM" : "DDR";
+const char *DeviceImp::getDeviceMemoryName() {
+    auto it = memoryTypeNames.find(getHwInfo().gtSystemInfo.MemoryType);
+    if (it != memoryTypeNames.end()) {
+        return it->second;
+    }
+    UNRECOVERABLE_IF(true);
+    return "unknown memory type";
 }
 
 ze_result_t DeviceImp::getMemoryProperties(uint32_t *pCount, ze_device_memory_properties_t *pMemProperties) {
@@ -762,14 +787,20 @@ ze_result_t DeviceImp::getMemoryProperties(uint32_t *pCount, ze_device_memory_pr
             auto extendedProperties = reinterpret_cast<ze_device_memory_ext_properties_t *>(pNext);
 
             // GT_MEMORY_TYPES map to ze_device_memory_ext_type_t
-            const std::array<ze_device_memory_ext_type_t, 5> sysInfoMemType = {
+            const std::array<ze_device_memory_ext_type_t, 10> sysInfoMemType = {
                 ZE_DEVICE_MEMORY_EXT_TYPE_LPDDR4,
                 ZE_DEVICE_MEMORY_EXT_TYPE_LPDDR5,
                 ZE_DEVICE_MEMORY_EXT_TYPE_HBM2,
                 ZE_DEVICE_MEMORY_EXT_TYPE_HBM2,
                 ZE_DEVICE_MEMORY_EXT_TYPE_GDDR6,
+                ZE_DEVICE_MEMORY_EXT_TYPE_HBM2,
+                ZE_DEVICE_MEMORY_EXT_TYPE_DDR5,
+                ZE_DEVICE_MEMORY_EXT_TYPE_GDDR7,
+                ZE_DEVICE_MEMORY_EXT_TYPE_HBM2,
+                ZE_DEVICE_MEMORY_EXT_TYPE_HBM2,
             };
 
+            UNRECOVERABLE_IF(hwInfo.gtSystemInfo.MemoryType >= sizeof(sysInfoMemType));
             extendedProperties->type = sysInfoMemType[hwInfo.gtSystemInfo.MemoryType];
 
             uint32_t enabledSubDeviceCount = 1;
@@ -806,18 +837,17 @@ ze_result_t DeviceImp::getMemoryAccessProperties(ze_device_memory_access_propert
     pMemAccessProperties->sharedSingleDeviceAllocCapabilities =
         static_cast<ze_memory_access_cap_flags_t>(productHelper.getSingleDeviceSharedMemCapabilities(isKmdMigrationAvailable));
 
-    pMemAccessProperties->sharedCrossDeviceAllocCapabilities = {};
-    if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAccessSupported) {
-        pMemAccessProperties->sharedCrossDeviceAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW;
+    auto defaultContext = static_cast<ContextImp *>(getDriverHandle()->getDefaultContext());
+    auto multiDeviceWithSingleRoot = defaultContext->rootDeviceIndices.size() == 1 && (defaultContext->getNumDevices() > 1 || isSubdevice);
 
-        if (isKmdMigrationAvailable &&
-            memoryManager->hasPageFaultsEnabled(*this->getNEODevice()) &&
-            NEO::debugManager.flags.EnableConcurrentSharedCrossP2PDeviceAccess.get() == 1) {
-            pMemAccessProperties->sharedCrossDeviceAllocCapabilities |= ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT;
-            if (this->getNEODevice()->getHardwareInfo().capabilityTable.p2pAtomicAccessSupported) {
-                pMemAccessProperties->sharedCrossDeviceAllocCapabilities |= ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;
-            }
-        }
+    pMemAccessProperties->sharedCrossDeviceAllocCapabilities = {};
+    if (multiDeviceWithSingleRoot || (isKmdMigrationAvailable &&
+                                      memoryManager->hasPageFaultsEnabled(*this->getNEODevice()) &&
+                                      NEO::debugManager.flags.EnableConcurrentSharedCrossP2PDeviceAccess.get() == 1)) {
+        pMemAccessProperties->sharedCrossDeviceAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW |
+                                                                   ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT |
+                                                                   ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC |
+                                                                   ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;
     }
 
     pMemAccessProperties->sharedSystemAllocCapabilities =
@@ -974,6 +1004,36 @@ ze_result_t DeviceImp::getKernelProperties(ze_device_module_properties_t *pKerne
     return ZE_RESULT_SUCCESS;
 }
 
+ze_result_t DeviceImp::getVectorWidthPropertiesExt(uint32_t *pCount, ze_device_vector_width_properties_ext_t *pVectorWidthProperties) {
+    if (*pCount == 0) {
+        *pCount = 1;
+        return ZE_RESULT_SUCCESS;
+    }
+    if (pVectorWidthProperties == nullptr) {
+        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+    if (*pCount > 1) {
+        *pCount = 1;
+    }
+    auto &gfxCoreHelper = this->neoDevice->getGfxCoreHelper();
+    auto vectorWidthSize = gfxCoreHelper.getMinimalSIMDSize();
+    pVectorWidthProperties[0].vector_width_size = vectorWidthSize;
+    pVectorWidthProperties[0].preferred_vector_width_char = gfxCoreHelper.getPreferredVectorWidthChar(vectorWidthSize);
+    pVectorWidthProperties[0].preferred_vector_width_short = gfxCoreHelper.getPreferredVectorWidthShort(vectorWidthSize);
+    pVectorWidthProperties[0].preferred_vector_width_int = gfxCoreHelper.getPreferredVectorWidthInt(vectorWidthSize);
+    pVectorWidthProperties[0].preferred_vector_width_long = gfxCoreHelper.getPreferredVectorWidthLong(vectorWidthSize);
+    pVectorWidthProperties[0].preferred_vector_width_float = gfxCoreHelper.getPreferredVectorWidthFloat(vectorWidthSize);
+    pVectorWidthProperties[0].preferred_vector_width_half = gfxCoreHelper.getPreferredVectorWidthHalf(vectorWidthSize);
+    pVectorWidthProperties[0].native_vector_width_char = gfxCoreHelper.getNativeVectorWidthChar(vectorWidthSize);
+    pVectorWidthProperties[0].native_vector_width_short = gfxCoreHelper.getNativeVectorWidthShort(vectorWidthSize);
+    pVectorWidthProperties[0].native_vector_width_int = gfxCoreHelper.getNativeVectorWidthInt(vectorWidthSize);
+    pVectorWidthProperties[0].native_vector_width_long = gfxCoreHelper.getNativeVectorWidthLong(vectorWidthSize);
+    pVectorWidthProperties[0].native_vector_width_float = gfxCoreHelper.getNativeVectorWidthFloat(vectorWidthSize);
+    pVectorWidthProperties[0].native_vector_width_half = gfxCoreHelper.getNativeVectorWidthHalf(vectorWidthSize);
+
+    return ZE_RESULT_SUCCESS;
+}
+
 ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) {
     const auto &deviceInfo = this->neoDevice->getDeviceInfo();
     const auto &hardwareInfo = this->neoDevice->getHardwareInfo();
@@ -1120,6 +1180,10 @@ ze_result_t DeviceImp::getProperties(ze_device_properties_t *pDeviceProperties) 
                 supportMatrix |= getProductHelper().supports2DBlockLoad() ? ZE_INTEL_DEVICE_EXP_FLAG_2D_BLOCK_LOAD : 0;
                 auto blockTransposeProps = reinterpret_cast<ze_intel_device_block_array_exp_properties_t *>(extendedProperties);
                 blockTransposeProps->flags = supportMatrix;
+            } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_LIST_EXP_PROPERTIES) {
+                ze_mutable_command_list_exp_properties_t *mclProperties = reinterpret_cast<ze_mutable_command_list_exp_properties_t *>(extendedProperties);
+                mclProperties->mutableCommandListFlags = 0;
+                mclProperties->mutableCommandFlags = getL0GfxCoreHelper().getCmdListUpdateCapabilities(this->getNEODevice()->getRootDeviceEnvironment());
             }
             getAdditionalExtProperties(extendedProperties);
             extendedProperties = static_cast<ze_base_properties_t *>(extendedProperties->pNext);
@@ -1277,6 +1341,10 @@ ze_result_t DeviceImp::getCacheProperties(uint32_t *pCount, ze_device_cache_prop
             constexpr size_t cacheLevel{3U};
             auto cacheReservationProperties = reinterpret_cast<ze_cache_reservation_ext_desc_t *>(extendedProperties);
             cacheReservationProperties->maxCacheReservationSize = cacheReservation->getMaxCacheReservationSize(cacheLevel);
+        } else if (extendedProperties->stype == ZE_STRUCTURE_TYPE_DEVICE_CACHELINE_SIZE_EXT) {
+            auto cacheLineSizeProperties = reinterpret_cast<ze_device_cache_line_size_ext_t *>(extendedProperties);
+            auto &productHelper = neoDevice->getRootDeviceEnvironment().getHelper<NEO::ProductHelper>();
+            cacheLineSizeProperties->cacheLineSize = productHelper.getCacheLineSize();
         } else {
             return ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION;
         }
@@ -1439,8 +1507,6 @@ ze_result_t DeviceImp::activateMetricGroupsDeferred(uint32_t count,
     return status;
 }
 
-void *DeviceImp::getExecEnvironment() { return execEnvironment; }
-
 BuiltinFunctionsLib *DeviceImp::getBuiltinFunctionsLib() { return builtins.get(); }
 
 uint32_t DeviceImp::getMOCS(bool l3enabled, bool l1enabled) {
@@ -1519,7 +1585,6 @@ Device *Device::create(DriverHandle *driverHandle, NEO::Device *neoDevice, bool 
     auto &rootDeviceEnvironment = neoDevice->getRootDeviceEnvironment();
     auto &gfxCoreHelper = rootDeviceEnvironment.getHelper<NEO::GfxCoreHelper>();
 
-    device->execEnvironment = (void *)neoDevice->getExecutionEnvironment();
     device->allocationsForReuse = std::make_unique<NEO::AllocationsList>();
     bool platformImplicitScaling = gfxCoreHelper.platformSupportsImplicitScaling(rootDeviceEnvironment);
     device->implicitScalingCapable = NEO::ImplicitScalingHelper::isImplicitScalingEnabled(neoDevice->getDeviceBitfield(), platformImplicitScaling);
@@ -1693,6 +1758,7 @@ void DeviceImp::releaseResources() {
     deviceInOrderCounterAllocator.reset();
     hostInOrderCounterAllocator.reset();
     inOrderTimestampAllocator.reset();
+    fillPatternAllocator.reset();
 
     if (allocationsForReuse.get()) {
         allocationsForReuse->freeAllGraphicsAllocations(neoDevice);
@@ -2195,6 +2261,16 @@ ze_result_t DeviceImp::synchronize() {
     }
 
     return ZE_RESULT_SUCCESS;
+}
+
+DeviceImp::CmdListCreateFunPtrT DeviceImp::getCmdListCreateFunc(const ze_base_desc_t *desc) {
+    if (desc) {
+        if (desc->stype == ZE_STRUCTURE_TYPE_MUTABLE_COMMAND_LIST_EXP_DESC) {
+            return &MCL::MutableCommandList::create;
+        }
+    }
+
+    return nullptr;
 }
 
 } // namespace L0

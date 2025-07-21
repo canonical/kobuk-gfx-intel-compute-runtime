@@ -18,15 +18,23 @@ namespace L0 {
 extern L0::Sysman::pIgscIfrGetStatusExt L0::Sysman::deviceIfrGetStatusExt;
 extern L0::Sysman::pIgscIfrRunMemPPRTest L0::Sysman::deviceIfrRunMemPPRTest;
 extern L0::Sysman::pIgscGfspHeciCmd gfspHeciCmd;
+extern L0::Sysman::pIgscDeviceUpdateLateBindingConfig deviceUpdateLateBindingConfig;
 
 namespace Sysman {
 namespace ult {
 
 constexpr static uint32_t mockMaxTileCount = 2;
 static int mockMemoryHealthIndicator = IGSC_HEALTH_INDICATOR_HEALTHY;
-std::vector<uint32_t> mockSupportedHeciCmds = {GfspHeciConstants::Cmd::getEccConfigurationCmd16, GfspHeciConstants::Cmd::setEccConfigurationCmd15};
+static int mockGetFwVersion = IGSC_SUCCESS;
+static int mockGetOpromCodeVersion = IGSC_SUCCESS;
+static int mockGetOpromDataVersion = IGSC_SUCCESS;
+static int mockGetPscVersion = IGSC_SUCCESS;
+
+std::vector<uint32_t>
+    mockSupportedHeciCmds = {GfspHeciConstants::Cmd::getEccConfigurationCmd16, GfspHeciConstants::Cmd::setEccConfigurationCmd15};
 uint8_t mockEccCurrentState = 1;
 uint8_t mockEccPendingState = 1;
+uint8_t mockEccDefaultState = 1;
 uint8_t mockEccHeciCmd16Val = 1;
 
 void restoreEccMockVars() {
@@ -34,6 +42,7 @@ void restoreEccMockVars() {
     mockSupportedHeciCmds.insert(mockSupportedHeciCmds.end(), {GfspHeciConstants::Cmd::getEccConfigurationCmd16, GfspHeciConstants::Cmd::setEccConfigurationCmd15});
     mockEccCurrentState = 1;
     mockEccPendingState = 1;
+    mockEccDefaultState = 1;
     mockEccHeciCmd16Val = 1;
 }
 
@@ -119,10 +128,12 @@ static int mockGetEccConfig(struct igsc_device_handle *handle, uint32_t gfspCmd,
     case GfspHeciConstants::Cmd::getEccConfigurationCmd16:
         outBuffer[GfspHeciConstants::GetEccCmd16BytePostition::eccCurrentState] = mockEccCurrentState;
         outBuffer[GfspHeciConstants::GetEccCmd16BytePostition::eccPendingState] = mockEccPendingState;
+        outBuffer[GfspHeciConstants::GetEccCmd16BytePostition::eccDefaultState] = mockEccDefaultState;
         return IGSC_SUCCESS;
     case GfspHeciConstants::Cmd::getEccConfigurationCmd9:
         outBuffer[GfspHeciConstants::GetEccCmd9BytePostition::currentState] = mockEccCurrentState;
         outBuffer[GfspHeciConstants::GetEccCmd9BytePostition::pendingState] = mockEccPendingState;
+        outBuffer[GfspHeciConstants::GetEccCmd16BytePostition::eccDefaultState] = 0xff;
         return IGSC_SUCCESS;
     case GfspHeciConstants::Cmd::setEccConfigurationCmd15:
         outBuffer[GfspHeciConstants::SetEccCmd15BytePostition::response] = inBuffer[GfspHeciConstants::SetEccCmd15BytePostition::request];
@@ -134,6 +145,28 @@ static int mockGetEccConfig(struct igsc_device_handle *handle, uint32_t gfspCmd,
     default:
         return IGSC_ERROR_NOT_SUPPORTED;
     }
+}
+
+static int mockIgscDeviceFwVersion(struct igsc_device_handle *handle,
+                                   struct igsc_fw_version *version) {
+    return mockGetFwVersion;
+}
+
+static int mockIgscDeviceOpromVersion(struct igsc_device_handle *handle,
+                                      uint32_t opromType,
+                                      struct igsc_oprom_version *version) {
+    if (opromType == IGSC_OPROM_CODE) {
+        return mockGetOpromCodeVersion;
+    } else if (opromType == IGSC_OPROM_DATA) {
+        return mockGetOpromDataVersion;
+    } else {
+        return IGSC_ERROR_NOT_SUPPORTED;
+    }
+}
+
+static int mockIgscDevicePscVersion(struct igsc_device_handle *handle,
+                                    struct igsc_psc_version *version) {
+    return mockGetPscVersion;
 }
 
 TEST(FwStatusExtTest, GivenIFRWasSetWhenFirmwareUtilChecksIFRThenIFRStatusIsUpdated) {
@@ -264,8 +297,9 @@ TEST(FwEccTest, GivenFwEccConfigCallFailsWhenCallingFirmwareUtilSetAndGetEccThen
     pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new IgscEccMockOsLibrary());
     uint8_t currentState = 0;
     uint8_t pendingState = 0;
+    uint8_t defaultState = 0;
     uint8_t newState = 0;
-    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState);
+    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState, &defaultState);
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
     ret = pFwUtilImp->fwSetEccConfig(newState, &currentState, &pendingState);
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
@@ -305,8 +339,9 @@ TEST(LinuxFwEccTest, GivenValidFwUtilMethodWhenCallingFirmwareUtilSetAndGetEccTh
     pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new IgscEccMockOsLibrary());
     uint8_t currentState = 0;
     uint8_t pendingState = 0;
+    uint8_t defaultState = 0;
     uint8_t newState = 0;
-    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState);
+    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState, &defaultState);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
     ret = pFwUtilImp->fwSetEccConfig(newState, &currentState, &pendingState);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
@@ -325,8 +360,9 @@ TEST(LinuxFwEccTest, GivenGetProcAddrCallFailsWhenFirmwareUtilChecksEccGetAndSet
     pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new MockFwUtilOsLibrary());
     uint8_t currentState = 0;
     uint8_t pendingState = 0;
+    uint8_t defaultState = 0;
     uint8_t newState = 0;
-    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState);
+    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState, &defaultState);
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
     ret = pFwUtilImp->fwSetEccConfig(newState, &currentState, &pendingState);
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, ret);
@@ -734,12 +770,15 @@ TEST(LinuxFwEccTest, GivenHeciCmd16IsSupportedThenWhenCallingFwGetEccConfigSuces
     mockSupportedHeciCmds.push_back(GfspHeciConstants::Cmd::getEccConfigurationCmd16);
     mockEccCurrentState = 1;
     mockEccPendingState = 1;
+    mockEccDefaultState = 1;
 
     uint8_t currentState;
     uint8_t pendingState;
-    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState);
+    uint8_t defaultState;
+    auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState, &defaultState);
     EXPECT_EQ(currentState, mockEccCurrentState);
     EXPECT_EQ(pendingState, mockEccPendingState);
+    EXPECT_EQ(defaultState, mockEccDefaultState);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 
     delete pFwUtilImp->libraryHandle;
@@ -757,6 +796,7 @@ TEST(LinuxFwEccTest, GivenHeciCmd16IsNotSupportedBut9IsSupportedThenWhenCallingF
     mockSupportedHeciCmds.push_back(GfspHeciConstants::Cmd::getEccConfigurationCmd9);
     uint8_t currentState;
     uint8_t pendingState;
+    uint8_t defaultState;
 
     std::vector<uint8_t> possibleEccStates = {0, 1, 0xff};
 
@@ -765,9 +805,10 @@ TEST(LinuxFwEccTest, GivenHeciCmd16IsNotSupportedBut9IsSupportedThenWhenCallingF
             mockEccCurrentState = iterCurrentState;
             mockEccPendingState = iterPendingState;
 
-            auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState);
+            auto ret = pFwUtilImp->fwGetEccConfig(&currentState, &pendingState, &defaultState);
             EXPECT_EQ(currentState, mockEccCurrentState);
             EXPECT_EQ(pendingState, mockEccPendingState);
+            EXPECT_EQ(defaultState, 0xff);
             EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
         }
     }
@@ -791,7 +832,8 @@ TEST(LinuxFwEccTest, GivenUnavailableHeciFunctionPointersWhenCallingEccMethodsTh
 
     uint8_t currentState;
     uint8_t pendingState;
-    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, pFwUtilImp->fwGetEccConfig(&currentState, &pendingState));
+    uint8_t defaultState;
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, pFwUtilImp->fwGetEccConfig(&currentState, &pendingState, &defaultState));
 
     uint8_t newState = 1;
     EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, pFwUtilImp->fwSetEccConfig(newState, &currentState, &pendingState));
@@ -887,6 +929,149 @@ TEST(LinuxFwEccTest, GivenHeciCmd15IsNotSupportedButCmd8IsSupportedThenWhenCalli
     EXPECT_EQ(pendingState, newState);
     EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
 
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwGetSupportedFwTypesTest, GivenFirmwareUtilAndAllFwTypesSupportedWhenCallingGetSupportedFwTypesThenExpectValidFwTypes) {
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    MockFwUtilOsLibrary *osLibHandle = new MockFwUtilOsLibrary();
+    osLibHandle->funcMap["igsc_device_fw_version"] = reinterpret_cast<void *>(&mockIgscDeviceFwVersion);
+    osLibHandle->funcMap["igsc_device_oprom_version"] = reinterpret_cast<void *>(&mockIgscDeviceOpromVersion);
+    osLibHandle->funcMap["igsc_device_psc_version"] = reinterpret_cast<void *>(&mockIgscDevicePscVersion);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(osLibHandle);
+
+    mockGetFwVersion = IGSC_SUCCESS;
+    mockGetOpromCodeVersion = IGSC_SUCCESS;
+    mockGetOpromDataVersion = IGSC_SUCCESS;
+    mockGetPscVersion = IGSC_SUCCESS;
+
+    std::vector<std::string> fwTypes{};
+    pFwUtilImp->getDeviceSupportedFwTypes(fwTypes);
+    EXPECT_EQ(fwTypes.size(), 3u);
+
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwGetSupportedFwTypesTest, GivenFirmwareUtilAndAllFwTypesUnsupportedWhenCallingGetSupportedFwTypesThenExpectZeroFwTypes) {
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    MockFwUtilOsLibrary *osLibHandle = new MockFwUtilOsLibrary();
+    osLibHandle->funcMap["igsc_device_fw_version"] = reinterpret_cast<void *>(&mockIgscDeviceFwVersion);
+    osLibHandle->funcMap["igsc_device_oprom_version"] = reinterpret_cast<void *>(&mockIgscDeviceOpromVersion);
+    osLibHandle->funcMap["igsc_device_psc_version"] = reinterpret_cast<void *>(&mockIgscDevicePscVersion);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(osLibHandle);
+
+    mockGetFwVersion = IGSC_ERROR_NOT_SUPPORTED;
+    mockGetOpromCodeVersion = IGSC_ERROR_NOT_SUPPORTED;
+    mockGetOpromDataVersion = IGSC_ERROR_NOT_SUPPORTED;
+    mockGetPscVersion = IGSC_ERROR_NOT_SUPPORTED;
+
+    std::vector<std::string> fwTypes{};
+    pFwUtilImp->getDeviceSupportedFwTypes(fwTypes);
+    EXPECT_EQ(fwTypes.size(), 0u);
+
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwGetSupportedFwTypesTest, GivenFirmwareUtilAndOnlyOpromCodeSupportedWhenCallingGetSupportedFwTypesThenExpectOpromFwTypeIsUnsupported) {
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    MockFwUtilOsLibrary *osLibHandle = new MockFwUtilOsLibrary();
+    osLibHandle->funcMap["igsc_device_fw_version"] = reinterpret_cast<void *>(&mockIgscDeviceFwVersion);
+    osLibHandle->funcMap["igsc_device_oprom_version"] = reinterpret_cast<void *>(&mockIgscDeviceOpromVersion);
+    osLibHandle->funcMap["igsc_device_psc_version"] = reinterpret_cast<void *>(&mockIgscDevicePscVersion);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(osLibHandle);
+
+    mockGetFwVersion = IGSC_SUCCESS;
+    mockGetOpromCodeVersion = IGSC_SUCCESS;
+    mockGetOpromDataVersion = IGSC_ERROR_NOT_SUPPORTED;
+    mockGetPscVersion = IGSC_SUCCESS;
+
+    std::vector<std::string> fwTypes{};
+    pFwUtilImp->getDeviceSupportedFwTypes(fwTypes);
+    EXPECT_EQ(fwTypes.size(), 2u);
+
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwFlashLateBindingTest, GivenFirmwareUtilImpAndLateBindingIsSupportedWhenCallingFlashFirmwareThenCallSucceeds) {
+    VariableBackup<decltype(L0::Sysman::deviceUpdateLateBindingConfig)> mockDeviceUpdateLateBindingConfig(&L0::Sysman::deviceUpdateLateBindingConfig, [](struct igsc_device_handle *handle, uint32_t type, uint32_t flags, uint8_t *payload, size_t payloadSize, uint32_t *status) -> int {
+        *status = CSC_LATE_BINDING_STATUS_SUCCESS;
+        return IGSC_SUCCESS;
+    });
+
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    uint8_t testImage[ZES_STRING_PROPERTY_SIZE] = {};
+    memset(testImage, 0xA, ZES_STRING_PROPERTY_SIZE);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new MockFwUtilOsLibrary());
+
+    for (auto type : lateBindingFirmwareTypes) {
+        auto ret = pFwUtilImp->flashFirmware(type, (void *)testImage, ZES_STRING_PROPERTY_SIZE);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, ret);
+    }
+
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwFlashLateBindingTest, GivenFirmwareUtilImpAndLateBindingIsSupportedWhenCallingFlashFirmwareAndIgscIsBusyThenCallFailsWithProperReturnCode) {
+    VariableBackup<decltype(L0::Sysman::deviceUpdateLateBindingConfig)> mockDeviceUpdateLateBindingConfig(&L0::Sysman::deviceUpdateLateBindingConfig, [](struct igsc_device_handle *handle, uint32_t type, uint32_t flags, uint8_t *payload, size_t payloadSize, uint32_t *status) -> int {
+        *status = CSC_LATE_BINDING_STATUS_SUCCESS;
+        return IGSC_ERROR_BUSY;
+    });
+
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    uint8_t testImage[ZES_STRING_PROPERTY_SIZE] = {};
+    memset(testImage, 0xA, ZES_STRING_PROPERTY_SIZE);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new MockFwUtilOsLibrary());
+
+    for (auto type : lateBindingFirmwareTypes) {
+        auto ret = pFwUtilImp->flashFirmware(type, (void *)testImage, ZES_STRING_PROPERTY_SIZE);
+        EXPECT_EQ(ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE, ret);
+    }
+
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwFlashLateBindingTest, GivenFirmwareUtilImpAndLateBindingIsSupportedWhenCallingFlashFirmwareAndStatusRetunedIsInvalidThenCallFailsWithProperReturnCode) {
+    VariableBackup<decltype(L0::Sysman::deviceUpdateLateBindingConfig)> mockDeviceUpdateLateBindingConfig(&L0::Sysman::deviceUpdateLateBindingConfig, [](struct igsc_device_handle *handle, uint32_t type, uint32_t flags, uint8_t *payload, size_t payloadSize, uint32_t *status) -> int {
+        *status = CSC_LATE_BINDING_STATUS_TIMEOUT;
+        return IGSC_SUCCESS;
+    });
+
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    uint8_t testImage[ZES_STRING_PROPERTY_SIZE] = {};
+    memset(testImage, 0xA, ZES_STRING_PROPERTY_SIZE);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new MockFwUtilOsLibrary());
+
+    for (auto type : lateBindingFirmwareTypes) {
+        auto ret = pFwUtilImp->flashFirmware(type, (void *)testImage, ZES_STRING_PROPERTY_SIZE);
+        EXPECT_EQ(ZE_RESULT_ERROR_UNINITIALIZED, ret);
+    }
+
+    delete pFwUtilImp->libraryHandle;
+    pFwUtilImp->libraryHandle = nullptr;
+    delete pFwUtilImp;
+}
+
+TEST(FwFlashLateBindingTest, GivenFirmwareUtilImpAndLateBindingIsSupportedWhenCallingGetLateBindingSupportedFwTypesThenProperFwTypesAreReturned) {
+    L0::Sysman::FirmwareUtilImp *pFwUtilImp = new L0::Sysman::FirmwareUtilImp(0, 0, 0, 0);
+    pFwUtilImp->libraryHandle = static_cast<OsLibrary *>(new MockFwUtilOsLibrary());
+    std::vector<std ::string> deviceSupportedFwTypes = {};
+    pFwUtilImp->getLateBindingSupportedFwTypes(deviceSupportedFwTypes);
+    EXPECT_EQ(deviceSupportedFwTypes.size(), lateBindingFirmwareTypes.size());
+    for (auto type : deviceSupportedFwTypes) {
+        EXPECT_NE(std::find(lateBindingFirmwareTypes.begin(), lateBindingFirmwareTypes.end(), type), lateBindingFirmwareTypes.end());
+    }
     delete pFwUtilImp->libraryHandle;
     pFwUtilImp->libraryHandle = nullptr;
     delete pFwUtilImp;

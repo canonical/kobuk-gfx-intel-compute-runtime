@@ -1,11 +1,10 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
-#include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
 #include "shared/test/common/cmd_parse/hw_parse.h"
 #include "shared/test/common/test_macros/hw_test.h"
@@ -87,6 +86,7 @@ HWTEST_F(FinishTest, WhenFinishIsCalledThenPipeControlIsNotAddedToCqCommandStrea
     auto itorCmd = reverseFind<PIPE_CONTROL *>(cmdList.rbegin(), cmdList.rend());
     EXPECT_EQ(cmdList.rend(), itorCmd);
 }
+
 HWTEST_F(FinishTest, givenFreshQueueWhenFinishIsCalledThenCommandStreamIsNotAllocated) {
     MockContext contextWithMockCmdQ(pClDevice, true);
     MockCommandQueueHw<FamilyType> cmdQ(&contextWithMockCmdQ, pClDevice, 0);
@@ -95,4 +95,44 @@ HWTEST_F(FinishTest, givenFreshQueueWhenFinishIsCalledThenCommandStreamIsNotAllo
     ASSERT_EQ(CL_SUCCESS, retVal);
 
     EXPECT_EQ(nullptr, cmdQ.peekCommandStream());
+}
+
+HWTEST_F(FinishTest, givenL3FlushAfterPostSyncEnabledWhenFlushTagUpdateIsCalledThenPipeControlIsAddedWithDcFlushEnabled) {
+    using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
+
+    DebugManagerStateRestore dbgRestorer;
+    debugManager.flags.EnableL3FlushAfterPostSync.set(true);
+
+    auto &productHelper = pClDevice->getDevice().getProductHelper();
+    if (!productHelper.isL3FlushAfterPostSyncRequired(true)) {
+        GTEST_SKIP();
+    }
+
+    MockContext contextWithMockCmdQ(pClDevice, true);
+    MockCommandQueueHw<FamilyType> cmdQ(&contextWithMockCmdQ, pClDevice, 0);
+
+    cmdQ.l3FlushedAfterCpuRead = false;
+    cmdQ.l3FlushAfterPostSyncEnabled = true;
+
+    auto &csr = cmdQ.getUltCommandStreamReceiver();
+    auto used = csr.commandStream.getUsed();
+
+    auto taskCount = csr.taskCount.load();
+    auto retVal = cmdQ.finish();
+
+    EXPECT_EQ(taskCount + 1, csr.taskCount.load());
+    EXPECT_EQ(taskCount + 1, cmdQ.taskCount);
+
+    ASSERT_EQ(CL_SUCCESS, retVal);
+
+    HardwareParse hwParse;
+    hwParse.parseCommands<FamilyType>(csr.commandStream, used);
+    auto itorCmd = find<PIPE_CONTROL *>(hwParse.cmdList.begin(), hwParse.cmdList.end());
+
+    EXPECT_NE(hwParse.cmdList.end(), itorCmd);
+
+    // Verify DC flush is enabled
+    auto pipeControl = genCmdCast<PIPE_CONTROL *>(*itorCmd);
+    ASSERT_NE(nullptr, pipeControl);
+    EXPECT_EQ(csr.dcFlushSupport, pipeControl->getDcFlushEnable());
 }

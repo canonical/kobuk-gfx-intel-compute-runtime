@@ -9,7 +9,6 @@
 #include "shared/source/helpers/file_io.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
-#include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_gmm_resource_info.h"
 #include "shared/test/common/test_macros/test.h"
@@ -21,8 +20,6 @@
 #include "opencl/test/unit_test/mocks/mock_builtin_dispatch_info_builder.h"
 #include "opencl/test/unit_test/mocks/mock_cl_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
-
-#include <algorithm>
 
 using namespace NEO;
 
@@ -214,7 +211,7 @@ HWTEST_F(EnqueueCopyImageTest, WhenCopyingImageThenSurfaceStateIsCorrect) {
     EXPECT_EQ(dstImage->getGraphicsAllocation(pClDevice->getRootDeviceIndex())->getGpuAddress(), dstSurfaceState->getSurfaceBaseAddress());
 }
 
-HWTEST2_F(EnqueueCopyImageTest, WhenCopyingImageThenNumberOfPipelineSelectsIsOne, IsAtMostXeHpcCore) {
+HWTEST2_F(EnqueueCopyImageTest, WhenCopyingImageThenNumberOfPipelineSelectsIsOne, IsAtMostXeCore) {
     enqueueCopyImage<FamilyType>();
     int numCommands = getNumberOfPipelineSelectsThatEnablePipelineSelect<FamilyType>();
     EXPECT_EQ(1, numCommands);
@@ -275,25 +272,25 @@ HWTEST_P(MipMapCopyImageTest, GivenImagesWithNonZeroMipLevelsWhenCopyImageIsCall
     switch (srcImageType) {
     case CL_MEM_OBJECT_IMAGE1D:
         srcOrigin[1] = expectedSrcMipLevel;
-        srcImage = std::unique_ptr<Image>(ImageHelper<Image1dDefaults>::create(context, &srcImageDesc));
+        srcImage = std::unique_ptr<Image>(ImageHelperUlt<Image1dDefaults>::create(context, &srcImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE1D_ARRAY:
         srcImageDesc.image_array_size = 2;
         srcOrigin[2] = expectedSrcMipLevel;
-        srcImage = std::unique_ptr<Image>(ImageHelper<Image1dArrayDefaults>::create(context, &srcImageDesc));
+        srcImage = std::unique_ptr<Image>(ImageHelperUlt<Image1dArrayDefaults>::create(context, &srcImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE2D:
         srcOrigin[2] = expectedSrcMipLevel;
-        srcImage = std::unique_ptr<Image>(ImageHelper<Image2dDefaults>::create(context, &srcImageDesc));
+        srcImage = std::unique_ptr<Image>(ImageHelperUlt<Image2dDefaults>::create(context, &srcImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE2D_ARRAY:
         srcImageDesc.image_array_size = 2;
         srcOrigin[3] = expectedSrcMipLevel;
-        srcImage = std::unique_ptr<Image>(ImageHelper<Image2dArrayDefaults>::create(context, &srcImageDesc));
+        srcImage = std::unique_ptr<Image>(ImageHelperUlt<Image2dArrayDefaults>::create(context, &srcImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE3D:
         srcOrigin[3] = expectedSrcMipLevel;
-        srcImage = std::unique_ptr<Image>(ImageHelper<Image3dDefaults>::create(context, &srcImageDesc));
+        srcImage = std::unique_ptr<Image>(ImageHelperUlt<Image3dDefaults>::create(context, &srcImageDesc));
         break;
     }
 
@@ -302,24 +299,24 @@ HWTEST_P(MipMapCopyImageTest, GivenImagesWithNonZeroMipLevelsWhenCopyImageIsCall
     switch (dstImageType) {
     case CL_MEM_OBJECT_IMAGE1D:
         dstOrigin[1] = expectedDstMipLevel;
-        dstImage = std::unique_ptr<Image>(ImageHelper<Image1dDefaults>::create(context, &dstImageDesc));
+        dstImage = std::unique_ptr<Image>(ImageHelperUlt<Image1dDefaults>::create(context, &dstImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE1D_ARRAY:
         dstImageDesc.image_array_size = 2;
         dstOrigin[2] = expectedDstMipLevel;
-        dstImage = std::unique_ptr<Image>(ImageHelper<Image1dArrayDefaults>::create(context, &dstImageDesc));
+        dstImage = std::unique_ptr<Image>(ImageHelperUlt<Image1dArrayDefaults>::create(context, &dstImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE2D:
         dstOrigin[2] = expectedDstMipLevel;
-        dstImage = std::unique_ptr<Image>(ImageHelper<Image2dDefaults>::create(context, &dstImageDesc));
+        dstImage = std::unique_ptr<Image>(ImageHelperUlt<Image2dDefaults>::create(context, &dstImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE2D_ARRAY:
         dstOrigin[3] = expectedDstMipLevel;
-        dstImage = std::unique_ptr<Image>(ImageHelper<Image2dArrayDefaults>::create(context, &dstImageDesc));
+        dstImage = std::unique_ptr<Image>(ImageHelperUlt<Image2dArrayDefaults>::create(context, &dstImageDesc));
         break;
     case CL_MEM_OBJECT_IMAGE3D:
         dstOrigin[3] = expectedDstMipLevel;
-        dstImage = std::unique_ptr<Image>(ImageHelper<Image3dDefaults>::create(context, &dstImageDesc));
+        dstImage = std::unique_ptr<Image>(ImageHelperUlt<Image3dDefaults>::create(context, &dstImageDesc));
         break;
     }
 
@@ -385,10 +382,10 @@ HWTEST_F(EnqueueCopyImageTest, WhenCopyImage1dBufferToImage1dBufferThenCorrectBu
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
     VariableBackup<CommandQueue *> cmdQBackup(&pCmdQ, mockCmdQ.get());
     std::unique_ptr<Image> srcImage1dBuffer;
-    srcImage1dBuffer.reset(Image1dBufferHelper<>::create(context));
+    srcImage1dBuffer.reset(Image1dBufferHelperUlt<>::create(context));
     VariableBackup<Image *> srcImageBackup(&srcImage, srcImage1dBuffer.get());
     std::unique_ptr<Image> dstImage1dBuffer;
-    dstImage1dBuffer.reset(Image1dBufferHelper<>::create(context));
+    dstImage1dBuffer.reset(Image1dBufferHelperUlt<>::create(context));
     VariableBackup<Image *> dstImageBackup(&dstImage, dstImage1dBuffer.get());
     mockCmdQ->storeMultiDispatchInfo = true;
     EnqueueCopyImageHelper<>::enqueueCopyImage(pCmdQ, srcImage, dstImage);
@@ -400,7 +397,7 @@ HWTEST_F(EnqueueCopyImageTest, WhenCopyImage1dBufferToImageThenCorrectBuitInIsSe
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
     VariableBackup<CommandQueue *> cmdQBackup(&pCmdQ, mockCmdQ.get());
     std::unique_ptr<Image> srcImage1dBuffer;
-    srcImage1dBuffer.reset(Image1dBufferHelper<>::create(context));
+    srcImage1dBuffer.reset(Image1dBufferHelperUlt<>::create(context));
     VariableBackup<Image *> srcImageBackup(&srcImage, srcImage1dBuffer.get());
     mockCmdQ->storeMultiDispatchInfo = true;
     EnqueueCopyImageHelper<>::enqueueCopyImage(pCmdQ, srcImage, dstImage);
@@ -412,7 +409,7 @@ HWTEST_F(EnqueueCopyImageTest, WhenCopyImageToImage1dBufferThenCorrectBuitInIsSe
     auto mockCmdQ = std::make_unique<MockCommandQueueHw<FamilyType>>(context, pClDevice, nullptr);
     VariableBackup<CommandQueue *> cmdQBackup(&pCmdQ, mockCmdQ.get());
     std::unique_ptr<Image> dstImage1dBuffer;
-    dstImage1dBuffer.reset(Image1dBufferHelper<>::create(context));
+    dstImage1dBuffer.reset(Image1dBufferHelperUlt<>::create(context));
     VariableBackup<Image *> dstImageBackup(&dstImage, dstImage1dBuffer.get());
     mockCmdQ->storeMultiDispatchInfo = true;
     EnqueueCopyImageHelper<>::enqueueCopyImage(pCmdQ, srcImage, dstImage);

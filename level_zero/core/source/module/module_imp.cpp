@@ -427,7 +427,7 @@ ze_result_t ModuleTranslationUnit::processUnpackedBinary() {
     }
 
     for (auto &kernelInfo : this->programInfo.kernelInfos) {
-        deviceInfoConstants.maxWorkGroupSize = gfxCoreHelper.calculateMaxWorkGroupSize(kernelInfo->kernelDescriptor, static_cast<uint32_t>(device->getDeviceInfo().maxWorkGroupSize));
+        deviceInfoConstants.maxWorkGroupSize = gfxCoreHelper.calculateMaxWorkGroupSize(kernelInfo->kernelDescriptor, static_cast<uint32_t>(device->getDeviceInfo().maxWorkGroupSize), device->getNEODevice()->getRootDeviceEnvironment());
         kernelInfo->apply(deviceInfoConstants);
     }
 
@@ -905,7 +905,7 @@ const KernelImmutableData *ModuleImp::getKernelImmutableData(const char *kernelN
 }
 
 uint32_t ModuleImp::getMaxGroupSize(const NEO::KernelDescriptor &kernelDescriptor) const {
-    return this->device->getGfxCoreHelper().calculateMaxWorkGroupSize(kernelDescriptor, static_cast<uint32_t>(this->device->getDeviceInfo().maxWorkGroupSize));
+    return this->device->getGfxCoreHelper().calculateMaxWorkGroupSize(kernelDescriptor, static_cast<uint32_t>(this->device->getDeviceInfo().maxWorkGroupSize), device->getNEODevice()->getRootDeviceEnvironment());
 }
 
 void ModuleImp::createBuildOptions(const char *pBuildFlags, std::string &apiOptions, std::string &internalBuildOptions) {
@@ -1082,7 +1082,7 @@ bool ModuleImp::linkBinary() {
         isFullyLinked = true;
         return true;
     }
-    Linker linker(*linkerInput);
+    Linker linker(*linkerInput, type == ModuleType::user);
     Linker::SegmentInfo globals;
     Linker::SegmentInfo constants;
     Linker::SegmentInfo exportedFunctions;
@@ -1165,12 +1165,8 @@ bool ModuleImp::linkBinary() {
         }
         isFullyLinked = false;
         return LinkingStatus::linkedPartially == linkStatus;
-    } else if (type != ModuleType::builtin) {
-        copyPatchedSegments(isaSegmentsForPatching);
     } else {
-        for (auto &kernelDescriptor : kernelDescriptors) {
-            kernelDescriptor->kernelAttributes.flags.requiresImplicitArgs = false;
-        }
+        copyPatchedSegments(isaSegmentsForPatching);
     }
 
     DBG_LOG(PrintRelocations, NEO::constructRelocationsDebugMessage(this->symbols));

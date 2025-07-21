@@ -5,15 +5,11 @@
  *
  */
 
-#include "shared/source/memory_manager/unified_memory_manager.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
-#include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/unit_test_helper.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
-#include "shared/test/common/mocks/mock_builtins.h"
 #include "shared/test/common/mocks/mock_csr.h"
 #include "shared/test/common/mocks/mock_direct_submission_hw.h"
-#include "shared/test/common/mocks/mock_os_library.h"
 #include "shared/test/common/mocks/mock_timestamp_container.h"
 #include "shared/test/common/utilities/base_object_utils.h"
 
@@ -21,11 +17,20 @@
 #include "opencl/test/unit_test/command_queue/command_queue_fixture.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
-#include "opencl/test/unit_test/helpers/cl_hw_parse.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
 #include "opencl/test/unit_test/mocks/mock_event.h"
 #include "opencl/test/unit_test/mocks/mock_kernel.h"
 #include "opencl/test/unit_test/mocks/mock_sharing_handler.h"
+
+namespace NEO {
+class ClDevice;
+class Context;
+template <typename GfxFamily>
+class RenderDispatcher;
+template <typename GfxFamily>
+class UltCommandStreamReceiver;
+} // namespace NEO
+
 using namespace NEO;
 
 HWTEST_F(CommandQueueHwTest, givenNoTimestampPacketsWhenWaitForTimestampsThenNoWaitAndTagIsNotUpdated) {
@@ -75,14 +80,15 @@ HWTEST_F(CommandQueueHwTest, givenEnableTimestampWaitForQueuesWhenGpuHangDetecte
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableTimestampWaitForQueues.set(4);
 
+    EnvironmentWithCsrWrapper environment;
+    environment.setCsrType<MockCommandStreamReceiver>();
     ExecutionEnvironment *executionEnvironment = platform()->peekExecutionEnvironment();
     auto device = std::make_unique<MockClDevice>(MockDevice::create<MockDevice>(executionEnvironment, 0u));
     MockCommandQueueHw<FamilyType> cmdQ(context, device.get(), nullptr);
     auto status = WaitStatus::notReady;
 
-    auto mockCSR = new MockCommandStreamReceiver(*executionEnvironment, 0, device->getDeviceBitfield());
+    auto mockCSR = static_cast<MockCommandStreamReceiver *>(&device->getGpgpuCommandStreamReceiver());
     mockCSR->isGpuHangDetectedReturnValue = true;
-    device->resetCommandStreamReceiver(mockCSR);
     mockCSR->gpuHangCheckPeriod = {};
 
     auto mockTagAllocator = new MockTagAllocator<>(0, device->getMemoryManager());
@@ -195,10 +201,32 @@ HWTEST_F(CommandQueueHwTest, GivenCommandQueueWhenItIsCreatedThenInitDirectSubmi
     }
 }
 
-HWTEST_F(CommandQueueHwTest, givenCommandQueueWhenAskingForCacheFlushOnBcsThenReturnTrue) {
-    auto pHwQ = static_cast<CommandQueueHw<FamilyType> *>(pCmdQ);
+HWTEST_F(CommandQueueHwTest, givenCommandQueueWhenAskingForCacheFlushOnBcsThenReturnCorrectValue) {
+    auto clDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockContext context(clDevice.get());
 
-    EXPECT_TRUE(pHwQ->isCacheFlushForBcsRequired());
+    cl_int retVal = CL_SUCCESS;
+    auto commandQueue = std::unique_ptr<CommandQueue>(CommandQueue::create(&context, clDevice.get(), nullptr, false, retVal));
+    auto commandQueueHw = static_cast<CommandQueueHw<FamilyType> *>(commandQueue.get());
+
+    const auto &productHelper = clDevice->getProductHelper();
+    EXPECT_EQ(productHelper.isDcFlushAllowed(), commandQueueHw->isCacheFlushForBcsRequired());
+}
+
+HWTEST_F(CommandQueueHwTest, givenDebugFlagSetWhenCheckingBcsCacheFlushRequirementThenReturnCorrectValue) {
+    DebugManagerStateRestore restorer;
+    auto clDevice = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    MockContext context(clDevice.get());
+
+    cl_int retVal = CL_SUCCESS;
+    auto commandQueue = std::unique_ptr<CommandQueue>(CommandQueue::create(&context, clDevice.get(), nullptr, false, retVal));
+    auto commandQueueHw = static_cast<CommandQueueHw<FamilyType> *>(commandQueue.get());
+
+    debugManager.flags.ForceCacheFlushForBcs.set(0);
+    EXPECT_FALSE(commandQueueHw->isCacheFlushForBcsRequired());
+
+    debugManager.flags.ForceCacheFlushForBcs.set(1);
+    EXPECT_TRUE(commandQueueHw->isCacheFlushForBcsRequired());
 }
 
 HWTEST_F(CommandQueueHwTest, givenBlockedMapBufferCallWhenMemObjectIsPassedToCommandThenItsRefCountIsBeingIncreased) {
@@ -420,7 +448,7 @@ HWTEST_F(CommandQueueHwTest, GivenNonEmptyQueueOnBlockingWhenMappingBufferThenWi
     clReleaseEvent(gatingEvent);
 }
 
-HWTEST2_F(CommandQueueHwTest, GivenFillBufferBlockedOnUserEventWhenEventIsAbortedThenClearTimestamps, IsAtLeastXeHpCore) {
+HWTEST2_F(CommandQueueHwTest, GivenFillBufferBlockedOnUserEventWhenEventIsAbortedThenClearTimestamps, IsAtLeastXeCore) {
     CommandQueueHw<FamilyType> cmdQ(context, pCmdQ->getDevice().getSpecializedDevice<ClDevice>(), 0, false);
 
     auto buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, 20, nullptr, nullptr);
@@ -486,10 +514,10 @@ HWTEST_F(CommandQueueHwTest, GivenEventsWaitlistOnBlockingWhenMappingBufferThenW
     me->release();
 }
 
-HWTEST_F(CommandQueueHwTest, GivenNotCompleteUserEventPassedToEnqueueWhenEventIsUnblockedThenAllSurfacesForBlockedCommandsAreMadeResident) {
-    int32_t executionStamp = 0;
-    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-    pDevice->resetCommandStreamReceiver(mockCSR);
+using CommandQueueHwTestWithMockCsr = CommandQueueHwTestWithCsrT<MockCsr>;
+
+HWTEST_TEMPLATED_F(CommandQueueHwTestWithMockCsr, GivenNotCompleteUserEventPassedToEnqueueWhenEventIsUnblockedThenAllSurfacesForBlockedCommandsAreMadeResident) {
+    auto mockCSR = static_cast<MockCsr<FamilyType> *>(&pDevice->getGpgpuCommandStreamReceiver());
 
     auto userEvent = makeReleaseable<UserEvent>(context);
     KernelInfo kernelInfo;
@@ -972,13 +1000,10 @@ HWTEST_F(CommandQueueHwTest, givenBlockedEnqueueWhenEventIsPassedThenDontUpdateI
     eventObj->release();
 }
 
-HWTEST_F(CommandQueueHwTest, givenBlockedInOrderCmdQueueAndAsynchronouslyCompletedEventWhenEnqueueCompletesVirtualEventThenUpdatedTaskLevelIsPassedToEnqueueAndFlushTask) {
+HWTEST_TEMPLATED_F(CommandQueueHwTestWithMockCsr, givenBlockedInOrderCmdQueueAndAsynchronouslyCompletedEventWhenEnqueueCompletesVirtualEventThenUpdatedTaskLevelIsPassedToEnqueueAndFlushTask) {
     CommandQueueHw<FamilyType> *cmdQHw = static_cast<CommandQueueHw<FamilyType> *>(this->pCmdQ);
 
-    int32_t executionStamp = 0;
-    auto mockCSR = new MockCsr<FamilyType>(executionStamp, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
-
-    pDevice->resetCommandStreamReceiver(mockCSR);
+    auto mockCSR = static_cast<MockCsr<FamilyType> *>(&pDevice->getGpgpuCommandStreamReceiver());
 
     MockKernelWithInternals mockKernelWithInternals(*pClDevice);
     auto mockKernel = mockKernelWithInternals.mockKernel;
@@ -1480,7 +1505,7 @@ HWTEST_F(CommandQueueHwTest, givenDirectSubmissionAndSharedDisplayableImageWhenR
     auto directSubmission = new MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>(ultCsr);
     ultCsr.directSubmission.reset(directSubmission);
 
-    auto image = std::unique_ptr<Image>(ImageHelper<Image2dDefaults>::create(context));
+    auto image = std::unique_ptr<Image>(ImageHelperUlt<Image2dDefaults>::create(context));
     image->setSharingHandler(mockSharingHandler);
     image->getGraphicsAllocation(0u)->setAllocationType(AllocationType::sharedImage);
 

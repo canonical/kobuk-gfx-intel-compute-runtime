@@ -39,6 +39,14 @@ TEST_F(IoctlHelperXeTest, whenGettingIfImmediateVmBindIsRequiredThenTrueIsReturn
     EXPECT_TRUE(ioctlHelper.isImmediateVmBindRequired());
 }
 
+TEST_F(IoctlHelperXeTest, whenGettingIfSmallBarConfigIsAllowedThenFalseIsReturned) {
+    MockExecutionEnvironment executionEnvironment{};
+    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
+    IoctlHelperXe ioctlHelper{*drm};
+
+    EXPECT_FALSE(ioctlHelper.isSmallBarConfigAllowed());
+}
+
 TEST_F(IoctlHelperXeTest, givenXeDrmWhenGetPciBarrierMmapThenReturnsNullptr) {
     MockExecutionEnvironment executionEnvironment{};
     std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
@@ -393,7 +401,8 @@ TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingAnyMethodThenDummyValueIs
 
     EXPECT_TRUE(xeIoctlHelper->setVmBoAdvise(0, 0, nullptr));
 
-    EXPECT_TRUE(xeIoctlHelper->setVmSharedSystemMemAdvise(0, 0, 0, 0, 0));
+    EXPECT_TRUE(xeIoctlHelper->setVmSharedSystemMemAdvise(0, 0, 0, 0, {0}));
+    EXPECT_TRUE(xeIoctlHelper->setVmSharedSystemMemAdvise(0, 0, 0, 0, {0, 0}));
 
     EXPECT_TRUE(xeIoctlHelper->setVmBoAdviseForChunking(0, 0, 0, 0, nullptr));
 
@@ -754,6 +763,52 @@ TEST_F(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
         ret = mockXeIoctlHelper->ioctl(DrmIoctl::primeHandleToFd, &test);
         EXPECT_EQ(0, ret);
         EXPECT_EQ(static_cast<int>(test.fileDescriptor), testValuePrime);
+    }
+    {
+        SyncObjHandle test = {};
+        test.fd = 0;
+        test.flags = 0;
+        test.handle = 0;
+        ret = mockXeIoctlHelper->ioctl(DrmIoctl::syncObjFdToHandle, &test);
+        EXPECT_EQ(0, ret);
+    }
+    {
+        SyncObjWait test = {};
+        test.handles = static_cast<uintptr_t>(0x1234);
+        test.timeoutNs = 0;
+        test.countHandles = 1u;
+        test.flags = 0;
+
+        ret = mockXeIoctlHelper->ioctl(DrmIoctl::syncObjWait, &test);
+        EXPECT_EQ(0, ret);
+    }
+    {
+        SyncObjTimelineWait test = {};
+        test.handles = static_cast<uintptr_t>(0x1234);
+        test.points = static_cast<uintptr_t>(0x1234);
+        test.timeoutNs = 0;
+        test.countHandles = 1u;
+        test.flags = 0;
+
+        ret = mockXeIoctlHelper->ioctl(DrmIoctl::syncObjTimelineWait, &test);
+        EXPECT_EQ(0, ret);
+    }
+    {
+        SyncObjArray test = {};
+        test.handles = static_cast<uintptr_t>(0x1234);
+        test.countHandles = 1u;
+
+        ret = mockXeIoctlHelper->ioctl(DrmIoctl::syncObjSignal, &test);
+        EXPECT_EQ(0, ret);
+    }
+    {
+        SyncObjTimelineArray test = {};
+        test.handles = static_cast<uintptr_t>(0x1234);
+        test.points = static_cast<uintptr_t>(0x1234);
+        test.countHandles = 1u;
+
+        ret = mockXeIoctlHelper->ioctl(DrmIoctl::syncObjTimelineSignal, &test);
+        EXPECT_EQ(0, ret);
     }
     {
         drm_xe_gem_create test = {};
@@ -1948,36 +2003,6 @@ TEST_F(IoctlHelperXeTest, givenIoctlFailureWhenSetGpuCpuTimesIsCalledThenProperV
     EXPECT_EQ(pGpuCpuTime.cpuTimeinNS, expectedTimestamp);
 }
 
-TEST_F(IoctlHelperXeTest, whenDeviceTimestampWidthSetThenProperValuesAreSet) {
-    DebugManagerStateRestore restorer;
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto &rootDeviceEnvironment = *executionEnvironment->rootDeviceEnvironments[0];
-    rootDeviceEnvironment.osInterface = std::make_unique<OSInterface>();
-    rootDeviceEnvironment.osInterface->setDriverModel(std::make_unique<DrmMockTime>(mockFd, rootDeviceEnvironment));
-    auto drm = DrmMockXe::create(rootDeviceEnvironment);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    xeIoctlHelper->initialize();
-    auto engineInfo = xeIoctlHelper->createEngineInfo(false);
-    ASSERT_NE(nullptr, engineInfo);
-
-    uint64_t expectedCycles = maxNBitValue(64);
-    auto xeQueryEngineCycles = reinterpret_cast<drm_xe_query_engine_cycles *>(drm->queryEngineCycles);
-    xeQueryEngineCycles->width = 32;
-    xeQueryEngineCycles->engine_cycles = expectedCycles;
-    xeQueryEngineCycles->cpu_timestamp = 100;
-
-    TimeStampData pGpuCpuTime{};
-    std::unique_ptr<MockOSTimeLinux> osTime = MockOSTimeLinux::create(*rootDeviceEnvironment.osInterface);
-    auto ret = xeIoctlHelper->setGpuCpuTimes(&pGpuCpuTime, osTime.get());
-    EXPECT_EQ(true, ret);
-
-    EXPECT_EQ(pGpuCpuTime.gpuTimeStamp, expectedCycles & maxNBitValue(32));
-    osTime->setDeviceTimestampWidth(64);
-    ret = xeIoctlHelper->setGpuCpuTimes(&pGpuCpuTime, osTime.get());
-    EXPECT_EQ(true, ret);
-    EXPECT_EQ(pGpuCpuTime.gpuTimeStamp, expectedCycles);
-}
-
 TEST_F(IoctlHelperXeTest, whenSetDefaultEngineIsCalledThenProperEngineIsSet) {
     NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>(&hwInfo);
@@ -2580,6 +2605,14 @@ TEST_F(IoctlHelperXeTest, givenIoctlWhenQueryDeviceParamsIsCalledThenFalseIsRetu
     EXPECT_FALSE(xeIoctlHelper->queryDeviceParams(&moduleId, &serverType));
 }
 
+TEST_F(IoctlHelperXeTest, givenPrelimWhenQueryDeviceCapsIsCalledThenNullptrIsReturned) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+
+    EXPECT_EQ(xeIoctlHelper->queryDeviceCaps(), nullptr);
+}
+
 TEST_F(IoctlHelperXeTest, givenIoctlHelperXeWhenCallingSetVmPrefetchThenVmBindIsCalled) {
     DebugManagerStateRestore restorer;
     debugManager.flags.EnableLocalMemory.set(1);
@@ -2880,75 +2913,4 @@ TEST_F(IoctlHelperXeTest, givenXeIoctlHelperAndDeferBackingFlagSetToTrueWhenMake
     DrmMock drm{*executionEnvironment->rootDeviceEnvironments[0]};
     auto xeIoctlHelper = std::make_unique<IoctlHelperXe>(drm);
     EXPECT_TRUE(xeIoctlHelper->makeResidentBeforeLockNeeded());
-}
-
-TEST_F(IoctlHelperXeTest, givenXeIoctlHelperWhenCreateDrmContextAndLowLatencyHintNotAvailableThenNoFlagIsSet) {
-    class MockLinuxOsContext : public OsContextLinux {
-      public:
-        using OsContextLinux::initializeContext;
-        using OsContextLinux::OsContextLinux;
-    };
-
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    xeIoctlHelper->contextParamEngine.push_back(drm_xe_engine_class_instance{});
-    MockLinuxOsContext osContext(*drm, 0, 5u, NEO::EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_CCS, EngineUsage::regular}));
-
-    osContext.initializeContext(false);
-    EXPECT_EQ(0u, drm->latestExecQueueCreate.flags);
-}
-
-TEST_F(IoctlHelperXeTest, givenXeIoctlHelperWhenCreateDrmContextAndLowLatencyHintAvailableThenFlagIsSet) {
-    class MockLinuxOsContext : public OsContextLinux {
-      public:
-        using OsContextLinux::initializeContext;
-        using OsContextLinux::OsContextLinux;
-    };
-
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-    xeIoctlHelper->contextParamEngine.push_back(drm_xe_engine_class_instance{});
-    MockLinuxOsContext osContext(*drm, 0, 5u, NEO::EngineDescriptorHelper::getDefaultDescriptor({aub_stream::ENGINE_CCS, EngineUsage::regular}));
-
-    xeIoctlHelper->isLowLatencyHintAvailable = true;
-    osContext.initializeContext(false);
-    EXPECT_EQ(static_cast<uint32_t>(DRM_XE_EXEC_QUEUE_LOW_LATENCY_HINT), drm->latestExecQueueCreate.flags);
-}
-
-TEST_F(IoctlHelperXeTest, whenInitializeIoctlHelperAndLowLatencyNotAvailableThenFlagNotSet) {
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-
-    auto xeQueryConfig = reinterpret_cast<drm_xe_query_config *>(drm->queryConfig);
-    xeQueryConfig->info[DRM_XE_QUERY_CONFIG_FLAGS] = 0;
-    xeIoctlHelper->initialize();
-    EXPECT_FALSE(static_cast<MockIoctlHelperXe *>(xeIoctlHelper)->isLowLatencyHintAvailable);
-}
-
-TEST_F(IoctlHelperXeTest, whenInitializeIoctlHelperAndLowLatencyAvailableThenFlagSet) {
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-
-    auto xeQueryConfig = reinterpret_cast<drm_xe_query_config *>(drm->queryConfig);
-    xeQueryConfig->info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY;
-    xeIoctlHelper->initialize();
-    EXPECT_TRUE(static_cast<MockIoctlHelperXe *>(xeIoctlHelper)->isLowLatencyHintAvailable);
-}
-
-TEST_F(IoctlHelperXeTest, whenInitializeIoctlHelperAndLowLatencyAvailableButDebugFlagEnabledThenFlagNotSet) {
-    DebugManagerStateRestore restorer{};
-    debugManager.flags.ForceLowLatencyHint.set(0);
-
-    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
-    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
-    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
-
-    auto xeQueryConfig = reinterpret_cast<drm_xe_query_config *>(drm->queryConfig);
-    xeQueryConfig->info[DRM_XE_QUERY_CONFIG_FLAGS] = DRM_XE_QUERY_CONFIG_FLAG_HAS_LOW_LATENCY;
-    xeIoctlHelper->initialize();
-    EXPECT_FALSE(static_cast<MockIoctlHelperXe *>(xeIoctlHelper)->isLowLatencyHintAvailable);
 }

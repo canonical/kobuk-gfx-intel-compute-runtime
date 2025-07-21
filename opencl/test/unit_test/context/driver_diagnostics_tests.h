@@ -6,6 +6,7 @@
  */
 
 #pragma once
+
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/mocks/mock_device.h"
@@ -174,8 +175,8 @@ struct PerformanceHintEnqueueImageTest : public PerformanceHintEnqueueTest {
 
         PerformanceHintEnqueueTest::SetUp();
         address = alignedMalloc(2 * MemoryConstants::cacheLineSize, MemoryConstants::cacheLineSize);
-        image = ImageHelper<ImageUseHostPtr<Image1dDefaults>>::create(context);
-        zeroCopyImage.reset(ImageHelper<Image1dDefaults>::create(context));
+        image = ImageHelperUlt<ImageUseHostPtr<Image1dDefaults>>::create(context);
+        zeroCopyImage.reset(ImageHelperUlt<Image1dDefaults>::create(context));
     }
 
     void TearDown() override {

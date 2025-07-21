@@ -22,6 +22,7 @@
 #include "shared/source/release_helper/release_helper.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/mocks/linux/mock_drm_allocation.h"
 #include "shared/test/common/mocks/linux/mock_drm_command_stream_receiver.h"
 #include "shared/test/common/mocks/linux/mock_drm_memory_manager.h"
@@ -101,23 +102,24 @@ HWTEST_TEMPLATED_F(DrmMemoryManagerTest, givenDebugFlagSetWhenUsingMmapFunctions
 
     MockDrmMemoryManager memoryManager(GemCloseWorkerMode::gemCloseWorkerInactive, false, false, *executionEnvironment);
 
-    testing::internal::CaptureStdout();
+    StreamCapture capture;
+    capture.captureStdout();
     size_t len = 2;
     off_t offset = 6;
     void *ptr = reinterpret_cast<void *>(0x1234);
     void *retPtr = memoryManager.mmapFunction(ptr, len, 3, 4, 5, offset);
 
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
     char expected1[256] = {};
 
     sprintf(expected1, "mmap(%p, %zu, %d, %d, %d, %ld) = %p, errno: %d \n", ptr, len, 3, 4, 5, offset, retPtr, errno);
 
     EXPECT_NE(std::string::npos, output.find(expected1));
 
-    testing::internal::CaptureStdout();
+    capture.captureStdout();
     int retVal = memoryManager.munmapFunction(retPtr, len);
 
-    output = testing::internal::GetCapturedStdout();
+    output = capture.getCapturedStdout();
     char expected2[256] = {};
 
     sprintf(expected2, "munmap(%p, %zu) = %d, errno: %d \n", retPtr, len, retVal, errno);
@@ -1138,12 +1140,13 @@ HWTEST_TEMPLATED_F(DrmMemoryManagerTest, whenPrintBOCreateDestroyResultIsSetAndA
     mock->ioctlExpected.gemUserptr = 1;
     mock->ioctlExpected.gemClose = 1;
 
-    testing::internal::CaptureStdout();
+    StreamCapture capture;
+    capture.captureStdout();
     BufferObject *bo = memoryManager->allocUserptr(0, (size_t)1024, AllocationType::externalHostPtr, rootDeviceIndex);
     ASSERT_NE(nullptr, bo);
 
     debugManager.flags.PrintBOCreateDestroyResult.set(false);
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
     size_t idx = output.find("Created new BO with GEM_USERPTR, handle: BO-");
     size_t expectedValue = 0;
     EXPECT_EQ(expectedValue, idx);
@@ -4281,7 +4284,8 @@ TEST(DrmMemoryManagerFreeGraphicsMemoryUnreferenceTest,
     AllocationProperties properties(rootDeviceIndex, false, MemoryConstants::pageSize, AllocationType::sharedBuffer, false, {});
 
     debugManager.flags.PrintBOCreateDestroyResult.set(true);
-    testing::internal::CaptureStdout();
+    StreamCapture capture;
+    capture.captureStdout();
     auto allocation = memoryManger.createGraphicsAllocationFromSharedHandle(osHandleData, properties, false, false, false, nullptr);
     ASSERT_NE(nullptr, allocation);
 
@@ -4294,7 +4298,7 @@ TEST(DrmMemoryManagerFreeGraphicsMemoryUnreferenceTest,
 
     memoryManger.freeGraphicsMemory(allocation);
 
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
 
     EXPECT_EQ(expectedOutput.str(), output);
 }
@@ -4663,10 +4667,11 @@ TEST_F(DrmAllocationTests, givenResourceRegistrationNotEnabledWhenRegisteringBin
     EXPECT_EQ(DrmResourceClass::maxSize, drm.registeredClass);
 }
 
-TEST(DrmMemoryManager, givenTrackedAllocationTypeAndDisabledRegistrationInDrmWhenAllocatingThenRegisterBoBindExtHandleIsNotCalled) {
+TEST(DrmMemoryManager, givenTrackedAllocationTypeAndDebuggingDisabledWhenAllocatingThenRegisterBoBindExtHandleIsNotCalled) {
     const uint32_t rootDeviceIndex = 0u;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->initGmm();
+    executionEnvironment->setDebuggingMode(DebuggingMode::disabled);
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
     executionEnvironment->rootDeviceEnvironments[rootDeviceIndex]->osInterface = std::make_unique<OSInterface>();
@@ -4689,6 +4694,7 @@ TEST(DrmMemoryManager, givenResourceRegistrationEnabledAndAllocTypeToCaptureWhen
     const uint32_t rootDeviceIndex = 0u;
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    executionEnvironment->setDebuggingMode(DebuggingMode::online);
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
@@ -4717,6 +4723,7 @@ TEST(DrmMemoryManager, givenResourceRegistrationEnabledAndAllocTypeToCaptureWhen
 TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenAllocatingThenAllocationIsRegistered) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    executionEnvironment->setDebuggingMode(DebuggingMode::online);
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
@@ -4751,6 +4758,7 @@ TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenAllocatingThenAllocationIsR
 TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenFreeingThenRegisteredHandlesAreUnregistered) {
     auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    executionEnvironment->setDebuggingMode(DebuggingMode::online);
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
@@ -4784,6 +4792,7 @@ TEST(DrmMemoryManager, givenTrackedAllocationTypeWhenFreeingThenRegisteredHandle
 TEST(DrmMemoryManager, givenEnabledResourceRegistrationWhenSshIsAllocatedThenItIsMarkedForCapture) {
     auto executionEnvironment = new MockExecutionEnvironment();
     executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    executionEnvironment->setDebuggingMode(DebuggingMode::online);
 
     auto mockDrm = new DrmMockResources(*executionEnvironment->rootDeviceEnvironments[0]);
     executionEnvironment->rootDeviceEnvironments[0]->osInterface = std::make_unique<OSInterface>();
@@ -5944,7 +5953,7 @@ HWTEST_TEMPLATED_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSetSharedSyste
         using MockIoctlHelper::MockIoctlHelper;
 
       public:
-        bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) override {
+        bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const std::vector<uint32_t> &vmIds) override {
             setVmSharedSystemMemAdviseCalled++;
             return true;
         }
@@ -5956,49 +5965,67 @@ HWTEST_TEMPLATED_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSetSharedSyste
     auto &drm = static_cast<DrmMockCustom &>(memoryManager.getDrm(mockRootDeviceIndex));
     drm.ioctlHelper.reset(mockIoctlHelper);
 
+    auto subDeviceIds = NEO::SubDeviceIdsVec{0};
     MemAdvise memAdviseOp = MemAdvise::setPreferredLocation;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
+    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, subDeviceIds, 0u));
     EXPECT_EQ(1u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
 
     memAdviseOp = MemAdvise::clearPreferredLocation;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
+    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, subDeviceIds, 0u));
     EXPECT_EQ(2u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
 
     memAdviseOp = MemAdvise::setSystemMemoryPreferredLocation;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
+    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, subDeviceIds, 0u));
     EXPECT_EQ(3u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
 
     memAdviseOp = MemAdvise::clearSystemMemoryPreferredLocation;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
+    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, subDeviceIds, 0u));
     EXPECT_EQ(4u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
 
-    memAdviseOp = MemAdvise::setAtomicDevice;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(5u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
-
-    memAdviseOp = MemAdvise::clearAtomicDevice;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(6u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
-
-    memAdviseOp = MemAdvise::setAtomicGlobal;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(7u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
-
-    memAdviseOp = MemAdvise::clearAtomicGlobal;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(8u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
-
-    memAdviseOp = MemAdvise::setAtomicCpu;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(9u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
-
-    memAdviseOp = MemAdvise::clearAtomicCpu;
-    EXPECT_TRUE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(10u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
-
     memAdviseOp = MemAdvise::invalidAdvise;
-    EXPECT_FALSE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, 0u));
-    EXPECT_EQ(10u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
+    EXPECT_FALSE(memoryManager.setSharedSystemMemAdvise(nullptr, 0u, memAdviseOp, subDeviceIds, 0u));
+    EXPECT_EQ(4u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
+}
+
+HWTEST_TEMPLATED_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSetSharedSystemAtomicAccessIsCalledThenAdviceSentToIoctlHelper) {
+    TestedDrmMemoryManager memoryManager(false, false, false, *executionEnvironment);
+
+    class MyMockIoctlHelper : public MockIoctlHelper {
+        using MockIoctlHelper::MockIoctlHelper;
+
+      public:
+        bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const std::vector<uint32_t> &vmIds) override {
+            setVmSharedSystemMemAdviseCalled++;
+            return true;
+        }
+        uint32_t setVmSharedSystemMemAdviseCalled = 0;
+    };
+
+    auto mockIoctlHelper = new MyMockIoctlHelper(*mock);
+
+    auto &drm = static_cast<DrmMockCustom &>(memoryManager.getDrm(mockRootDeviceIndex));
+    drm.ioctlHelper.reset(mockIoctlHelper);
+
+    auto subDeviceIds = NEO::SubDeviceIdsVec{0};
+    AtomicAccessMode mode = AtomicAccessMode::device;
+    EXPECT_TRUE(memoryManager.setSharedSystemAtomicAccess(nullptr, 0u, mode, subDeviceIds, 0u));
+    EXPECT_EQ(1u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
+
+    mode = AtomicAccessMode::system;
+    EXPECT_TRUE(memoryManager.setSharedSystemAtomicAccess(nullptr, 0u, mode, subDeviceIds, 0u));
+    EXPECT_EQ(2u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
+
+    mode = AtomicAccessMode::host;
+    EXPECT_TRUE(memoryManager.setSharedSystemAtomicAccess(nullptr, 0u, mode, subDeviceIds, 0u));
+    EXPECT_EQ(3u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
+
+    mode = AtomicAccessMode::none;
+    EXPECT_TRUE(memoryManager.setSharedSystemAtomicAccess(nullptr, 0u, mode, subDeviceIds, 0u));
+    EXPECT_EQ(4u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
+
+    mode = AtomicAccessMode::invalid;
+    EXPECT_FALSE(memoryManager.setSharedSystemAtomicAccess(nullptr, 0u, mode, subDeviceIds, 0u));
+    EXPECT_EQ(4u, mockIoctlHelper->setVmSharedSystemMemAdviseCalled);
 }
 
 HWTEST_TEMPLATED_F(DrmMemoryManagerTest, givenDrmMemoryManagerWhenSetAtomicAccessIsCalledThenTrueReturned) {

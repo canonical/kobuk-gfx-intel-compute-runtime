@@ -15,13 +15,19 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_module.h"
 
 namespace L0 {
+template <GFXCORE_FAMILY gfxCoreFamily>
+struct CommandListCoreFamily;
+
 namespace ult {
+template <typename Type>
+struct WhiteBox;
 
 struct LocalMemoryModuleFixture : public ModuleFixture {
     void setUp() {
@@ -1301,7 +1307,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
 
 using CreateCommandListXeHpcTest = Test<DeviceFixture>;
 
-HWTEST2_F(CreateCommandListXeHpcTest, givenXeHpcPlatformsWhenImmediateCommandListCreatedThenHeapSharingEnabledWithFlushTask, IsXeHpcCore) {
+HWTEST2_F(CreateCommandListXeHpcTest, givenXeHpcPlatformsWhenImmediateCommandListCreatedThenHeapSharingEnabled, IsXeHpcCore) {
     std::unique_ptr<L0::ult::CommandList> commandListImmediate;
 
     auto &hwInfo = device->getHwInfo();
@@ -1317,8 +1323,7 @@ HWTEST2_F(CreateCommandListXeHpcTest, givenXeHpcPlatformsWhenImmediateCommandLis
     ze_result_t returnValue;
     commandListImmediate.reset(CommandList::whiteboxCast(CommandList::createImmediate(productFamily, device, &queueDesc, false, engineGroupType, returnValue)));
     EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
-    EXPECT_TRUE(commandListImmediate->isFlushTaskSubmissionEnabled);
-    EXPECT_EQ(commandListImmediate->isFlushTaskSubmissionEnabled, commandListImmediate->immediateCmdListHeapSharing);
+    EXPECT_TRUE(commandListImmediate->immediateCmdListHeapSharing);
 }
 
 HWTEST2_F(CreateCommandListXeHpcTest, whenDestroyImmediateCommandListThenGlobalAllocationListFilledWithCommandBuffer, IsXeHpcCore) {

@@ -12,11 +12,10 @@
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/xe_hpc_core/hw_info.h"
 
-#include "igfxfmid.h"
+#include "neo_igfxfmid.h"
 
 #include <cstring>
 #include <type_traits>
-#include <variant>
 
 template <class T>
 struct CmdParse;
@@ -91,6 +90,7 @@ struct XeHpcCoreFamily : public XeHpcCore {
     using XY_COLOR_BLT = typename GfxFamily::XY_FAST_COLOR_BLT;
     using MI_STORE_REGISTER_MEM_CMD = typename GfxFamily::MI_STORE_REGISTER_MEM;
     using TimestampPacketType = uint32_t;
+    using StallingBarrierType = PIPE_CONTROL;
     static const COMPUTE_WALKER cmdInitGpgpuWalker;
     static const CFE_STATE cmdInitCfeState;
     static const INTERFACE_DESCRIPTOR_DATA cmdInitInterfaceDescriptorData;
@@ -171,8 +171,6 @@ struct XeHpcCoreFamily : public XeHpcCore {
     static constexpr auto getPostSyncType() {
         return std::decay_t<POSTSYNC_DATA>{};
     }
-
-    using WalkerVariant = std::variant<COMPUTE_WALKER *>;
 };
 
 } // namespace NEO

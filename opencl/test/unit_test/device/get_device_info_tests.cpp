@@ -11,12 +11,9 @@
 #include "shared/test/common/helpers/raii_gfx_core_helper.h"
 #include "shared/test/common/mocks/mock_driver_info.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
-#include "shared/test/common/mocks/mock_os_context.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
-#include "opencl/source/cl_device/cl_device_info_map.h"
 #include "opencl/source/helpers/cl_gfx_core_helper.h"
-#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/device_info_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_cl_execution_environment.h"
 #include "opencl/test/unit_test/mocks/mock_command_queue.h"
@@ -542,7 +539,7 @@ TEST(GetDeviceInfo, GivenPreferredInteropsWhenGettingDeviceInfoThenCorrectValueI
 TEST(GetDeviceInfo, WhenQueryingIlsWithVersionThenProperValueIsReturned) {
     auto device = std::make_unique<MockClDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
 
-    constexpr auto ilCount = 4;
+    constexpr auto ilCount = 6;
     cl_name_version ilsWithVersion[ilCount];
     size_t paramRetSize;
 
@@ -551,8 +548,9 @@ TEST(GetDeviceInfo, WhenQueryingIlsWithVersionThenProperValueIsReturned) {
     EXPECT_EQ(CL_SUCCESS, retVal);
     EXPECT_EQ(sizeof(cl_name_version) * ilCount, paramRetSize);
     for (int i = 0; i < ilCount; i++) {
+        const unsigned minor = ilCount - i - 1;
         EXPECT_EQ(1u, CL_VERSION_MAJOR(ilsWithVersion[i].version));
-        EXPECT_GT(4u, CL_VERSION_MINOR(ilsWithVersion[i].version));
+        EXPECT_EQ(minor, CL_VERSION_MINOR(ilsWithVersion[i].version));
         EXPECT_EQ(0u, CL_VERSION_PATCH(ilsWithVersion[i].version));
         EXPECT_STREQ("SPIR-V", ilsWithVersion[i].name);
     }

@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/aub_mem_dump/page_table_entry_bits.h"
+#include "shared/source/command_stream/aub_command_stream_receiver.h"
 #include "shared/source/command_stream/aub_command_stream_receiver_hw.h"
 #include "shared/source/helpers/address_patch.h"
 #include "shared/source/helpers/flat_batch_buffer_helper.h"
@@ -19,7 +20,6 @@
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
 #include "shared/test/common/mocks/mock_aub_center.h"
 #include "shared/test/common/mocks/mock_aub_csr.h"
-#include "shared/test/common/mocks/mock_aub_file_stream.h"
 #include "shared/test/common/mocks/mock_aub_manager.h"
 #include "shared/test/common/mocks/mock_aub_subcapture_manager.h"
 #include "shared/test/common/mocks/mock_execution_environment.h"
@@ -222,35 +222,6 @@ HWTEST_F(AubFileStreamWithoutAubStreamTests, givenAubCommandStreamReceiverWhenCa
     EXPECT_TRUE(aubCsr->pollForCompletionCalled);
 }
 
-HWTEST_F(AubFileStreamWithoutAubStreamTests, givenNoNewTasksSinceLastPollWhenCallingPollForCompletionThenDontCallRegisterPoll) {
-    auto aubStream = std::make_unique<MockAubFileStream>();
-    auto aubExecutionEnvironment = getEnvironment<MockAubCsr<FamilyType>>(true, true, true);
-    auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
-    aubCsr->stream = aubStream.get();
-
-    aubCsr->latestSentTaskCount = 50;
-    aubCsr->pollForCompletionTaskCount = 50;
-    ASSERT_FALSE(aubStream->registerPollCalled);
-
-    aubCsr->pollForCompletion();
-    EXPECT_FALSE(aubStream->registerPollCalled);
-    EXPECT_EQ(50u, aubCsr->pollForCompletionTaskCount);
-}
-
-HWTEST_F(AubFileStreamWithoutAubStreamTests, givenNoNewTaskSinceLastPollWhenDeletingAubCsrThenDontCallRegisterPoll) {
-    auto aubStream = std::make_unique<MockAubFileStream>();
-    auto aubExecutionEnvironment = getEnvironment<MockAubCsr<FamilyType>>(true, true, true);
-    auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
-    aubCsr->stream = aubStream.get();
-
-    aubCsr->latestSentTaskCount = 50;
-    aubCsr->pollForCompletionTaskCount = 50;
-    ASSERT_FALSE(aubStream->registerPollCalled);
-
-    aubExecutionEnvironment->commandStreamReceiver.reset();
-    EXPECT_FALSE(aubStream->registerPollCalled);
-}
-
 HWTEST_F(AubCsrTests, givenNewTasksAndHardwareContextPresentWhenCallingPollForCompletionThenCallPollForCompletion) {
     MockAubCsr<FamilyType> aubCsr("", true, *pDevice->executionEnvironment, pDevice->getRootDeviceIndex(), pDevice->getDeviceBitfield());
     MockOsContext osContext(0, EngineDescriptorHelper::getDefaultDescriptor());
@@ -277,29 +248,6 @@ HWTEST_F(AubCsrTests, givenNoNewTasksAndHardwareContextPresentWhenCallingPollFor
 
     aubCsr.pollForCompletion();
     EXPECT_FALSE(hardwareContext->pollForCompletionCalled);
-}
-
-HWTEST_F(AubFileStreamWithoutAubStreamTests, givenAubCommandStreamReceiverInSubCaptureModeWhenPollForCompletionIsCalledButSubCaptureIsDisabledThenItShouldntCallRegisterPoll) {
-    DebugManagerStateRestore stateRestore;
-    AubSubCaptureCommon aubSubCaptureCommon;
-    auto aubSubCaptureManagerMock = new AubSubCaptureManagerMock("", aubSubCaptureCommon);
-    auto aubStream = std::make_unique<MockAubFileStream>();
-    auto aubExecutionEnvironment = getEnvironment<MockAubCsr<FamilyType>>(true, true, true);
-    auto aubCsr = aubExecutionEnvironment->template getCsr<MockAubCsr<FamilyType>>();
-    aubCsr->stream = aubStream.get();
-
-    aubSubCaptureCommon.subCaptureMode = AubSubCaptureManager::SubCaptureMode::toggle;
-    aubSubCaptureManagerMock->disableSubCapture();
-    aubCsr->subCaptureManager = std::unique_ptr<AubSubCaptureManagerMock>(aubSubCaptureManagerMock);
-    ASSERT_FALSE(aubCsr->subCaptureManager->isSubCaptureEnabled());
-
-    aubCsr->latestSentTaskCount = 50;
-    aubCsr->pollForCompletionTaskCount = 49;
-    ASSERT_FALSE(aubStream->registerPollCalled);
-
-    aubCsr->pollForCompletion();
-
-    EXPECT_FALSE(aubStream->registerPollCalled);
 }
 
 HWTEST_F(AubCsrTests, givenAubCommandStreamReceiverWithHardwareContextInSubCaptureModeWhenPollForCompletionIsCalledAndSubCaptureIsEnabledThenItShouldCallPollForCompletionOnHwContext) {
@@ -484,7 +432,7 @@ HWTEST_F(AubFileStreamTests, givenAubCommandStreamReceiverWithAubManagerWhenInit
     aubCsr->aubManager = nullptr;
 }
 
-HWTEST2_F(AubFileStreamTests, givenAubCommandStreamReceiverWhenCreateFullFilePathIsCalledForMultipleDevicesThenFileNameIsExtendedWithSuffixToIndicateMultipleDevices, IsAtMostXeHpcCore) {
+HWTEST2_F(AubFileStreamTests, givenAubCommandStreamReceiverWhenCreateFullFilePathIsCalledForMultipleDevicesThenFileNameIsExtendedWithSuffixToIndicateMultipleDevices, IsAtMostXeCore) {
     DebugManagerStateRestore stateRestore;
 
     debugManager.flags.CreateMultipleSubDevices.set(1);

@@ -28,7 +28,7 @@
 
 namespace NEO {
 
-static const char *spirvWithVersion = "SPIR-V_1.3 SPIR-V_1.2 SPIR-V_1.1 SPIR-V_1.0 ";
+static const char *spirvWithVersion = "SPIR-V_1.5 SPIR-V_1.4 SPIR-V_1.3 SPIR-V_1.2 SPIR-V_1.1 SPIR-V_1.0 ";
 
 size_t Device::getMaxParameterSizeFromIGC() const {
     CompilerInterface *compilerInterface = getCompilerInterface();
@@ -101,6 +101,10 @@ void Device::initializeCaps() {
         driverModelMaxMemAlloc = this->executionEnvironment->rootDeviceEnvironments[0]->osInterface->getDriverModel()->getMaxMemAllocSize();
     }
     deviceInfo.maxMemAllocSize = std::min<std::uint64_t>(driverModelMaxMemAlloc, deviceInfo.maxMemAllocSize);
+
+    if (debugManager.flags.OverrideMaxMemAllocSizeMb.get() != -1) {
+        deviceInfo.maxMemAllocSize = static_cast<uint64_t>(debugManager.flags.OverrideMaxMemAllocSizeMb.get()) * MemoryConstants::megaByte;
+    }
 
     deviceInfo.profilingTimerResolution = getProfilingTimerResolution();
     if (debugManager.flags.OverrideProfilingTimerResolution.get() != -1) {

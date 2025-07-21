@@ -36,6 +36,14 @@ static std::map<std::string, std::map<std::string, uint64_t>> guidToKeyOffsetMap
       {"XTAL_COUNT", 1024},
       {"VCCGT_ENERGY_ACCUMULATOR", 1628},
       {"VCCDDR_ENERGY_ACCUMULATOR", 1640}}},
+    {"0x1e2f8202", // BMG PUNIT rev 3
+     {{"XTAL_CLK_FREQUENCY", 4},
+      {"ACCUM_PACKAGE_ENERGY", 48},
+      {"ACCUM_PSYS_ENERGY", 52},
+      {"VRAM_BANDWIDTH", 56},
+      {"XTAL_COUNT", 1024},
+      {"VCCGT_ENERGY_ACCUMULATOR", 1628},
+      {"VCCDDR_ENERGY_ACCUMULATOR", 1640}}},
     {"0x5e2f8210", // BMG OOBMSM Rev 15
      {{"PACKAGE_ENERGY_STATUS_SKU_0_0_0_PCU", 136},
       {"PLATFORM_ENERGY_STATUS", 140},
@@ -50,8 +58,8 @@ static std::map<std::string, std::map<std::string, uint64_t>> guidToKeyOffsetMap
       {"reg_PCIESS_tx_pktcount_lsb", 304},
       {"reg_PCIESS_tx_pktcount_msb", 300},
       {"MSU_BITMASK", 3688},
-      {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", 368},
-      {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", 372},
+      {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", 372},
+      {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", 368},
       {"GDDR0_CH0_GT_32B_RD_REQ_UPPER", 376},
       {"GDDR0_CH0_GT_32B_RD_REQ_LOWER", 380},
       {"GDDR1_CH0_GT_32B_RD_REQ_UPPER", 536},
@@ -774,27 +782,6 @@ static ze_result_t getMemoryMaxBandwidth(const std::map<std::string, uint64_t> &
     return ZE_RESULT_SUCCESS;
 }
 
-static ze_result_t getMemoryBandwidthTimestamp(const std::map<std::string, uint64_t> &keyOffsetMap, std::unordered_map<std::string, std::string> &keyTelemInfoMap,
-                                               zes_mem_bandwidth_t *pBandwidth) {
-    uint32_t timeStampH = 0;
-    uint32_t timeStampL = 0;
-    pBandwidth->timestamp = 0;
-
-    std::string key = "GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER";
-    if (!PlatformMonitoringTech::readValue(keyOffsetMap, keyTelemInfoMap[key], key, 0, timeStampH)) {
-        return ZE_RESULT_ERROR_NOT_AVAILABLE;
-    }
-
-    key = "GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER";
-    if (!PlatformMonitoringTech::readValue(keyOffsetMap, keyTelemInfoMap[key], key, 0, timeStampL)) {
-        return ZE_RESULT_ERROR_NOT_AVAILABLE;
-    }
-
-    pBandwidth->timestamp = packInto64Bit(timeStampH, timeStampL) * milliSecsToMicroSecs;
-
-    return ZE_RESULT_SUCCESS;
-}
-
 static ze_result_t getCounterValues(const std::vector<std::pair<const std::string, const std::string>> &registerList, const std::string &keyPrefix,
                                     const std::map<std::string, uint64_t> &keyOffsetMap, std::unordered_map<std::string, std::string> &keyTelemInfoMap, uint64_t &totalCounter) {
     for (const auto &regPair : registerList) {
@@ -919,15 +906,13 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getMemoryBandwidth(zes_mem_bandwi
         return ZE_RESULT_ERROR_NOT_AVAILABLE;
     }
 
-    // Get Timestamp Values
-    if (ZE_RESULT_SUCCESS != getMemoryBandwidthTimestamp(keyOffsetMap, keyTelemInfoMap, pBandwidth)) {
-        return ZE_RESULT_ERROR_NOT_AVAILABLE;
-    }
-
     // Get Max Bandwidth
     if (ZE_RESULT_SUCCESS != getMemoryMaxBandwidth(keyOffsetMap, keyTelemInfoMap, pBandwidth)) {
         return ZE_RESULT_ERROR_NOT_AVAILABLE;
     }
+
+    // Get Timestamp
+    pBandwidth->timestamp = SysmanDevice::getSysmanTimestamp();
 
     return ZE_RESULT_SUCCESS;
 }
@@ -1075,6 +1060,11 @@ ze_result_t SysmanProductHelperHw<gfxProduct>::getPowerEnergyCounter(zes_power_e
 
 template <>
 bool SysmanProductHelperHw<gfxProduct>::isEccConfigurationSupported() {
+    return true;
+}
+
+template <>
+bool SysmanProductHelperHw<gfxProduct>::isLateBindingSupported() {
     return true;
 }
 

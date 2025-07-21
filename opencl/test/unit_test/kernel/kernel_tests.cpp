@@ -751,7 +751,7 @@ TEST_F(KernelFromBinaryTests, WhenRegularKernelIsCreatedThenItIsNotBuiltIn) {
     ASSERT_NE(nullptr, kernel);
 
     // get builtIn property
-    bool isBuiltIn = kernel->isBuiltIn;
+    bool isBuiltIn = kernel->isBuiltInKernel();
 
     EXPECT_FALSE(isBuiltIn);
 
@@ -839,11 +839,27 @@ class CommandStreamReceiverMock : public CommandStreamReceiver {
         TaskCountType taskLevel,
         DispatchFlags &dispatchFlags,
         Device &device) override {
+        if (getHeaplessStateInitEnabled()) {
+            return flushTaskHeapless(commandStream, commandStreamStart, dsh, ioh, ssh, taskLevel, dispatchFlags, device);
+        } else {
+            return flushTaskHeapful(commandStream, commandStreamStart, dsh, ioh, ssh, taskLevel, dispatchFlags, device);
+        }
+    }
+
+    CompletionStamp flushTaskHeapful(
+        LinearStream &commandStream,
+        size_t commandStreamStart,
+        const IndirectHeap *dsh,
+        const IndirectHeap *ioh,
+        const IndirectHeap *ssh,
+        TaskCountType taskLevel,
+        DispatchFlags &dispatchFlags,
+        Device &device) override {
         CompletionStamp cs = {};
         return cs;
     }
 
-    CompletionStamp flushTaskStateless(
+    CompletionStamp flushTaskHeapless(
         LinearStream &commandStream,
         size_t commandStreamStart,
         const IndirectHeap *dsh,
@@ -1161,11 +1177,11 @@ TEST_F(KernelGlobalSurfaceTest, givenBuiltInKernelWhenKernelIsCreatedThenGlobalS
 
     // create kernel
     MockContext context;
-    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
+    MockProgram program(&context, true, toClDeviceVector(*pClDevice));
     program.setGlobalSurface(&gfxAlloc);
     MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    kernel->isBuiltIn = true;
+    EXPECT_TRUE(kernel->isBuiltInKernel());
 
     ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
@@ -1281,12 +1297,12 @@ TEST_F(KernelConstantSurfaceTest, givenBuiltInKernelWhenKernelIsCreatedThenConst
     uint64_t bufferAddress = (uint64_t)gfxAlloc.getUnderlyingBuffer();
 
     // create kernel
-    MockProgram program(toClDeviceVector(*pClDevice));
+    MockContext context;
+    MockProgram program(&context, true, toClDeviceVector(*pClDevice));
     program.setConstantSurface(&gfxAlloc);
     MockKernel *kernel = new MockKernel(&program, *pKernelInfo, *pClDevice);
 
-    kernel->isBuiltIn = true;
-
+    EXPECT_TRUE(kernel->isBuiltInKernel());
     ASSERT_EQ(CL_SUCCESS, kernel->initialize());
 
     EXPECT_EQ(bufferAddress, *(uint64_t *)kernel->getCrossThreadData());
@@ -3705,7 +3721,7 @@ struct KernelLargeGrfTests : Test<ClDeviceFixture> {
     SPatchExecutionEnvironment executionEnvironment = {};
 };
 
-HWTEST2_F(KernelLargeGrfTests, GivenLargeGrfAndSimdSizeWhenGettingMaxWorkGroupSizeThenCorrectValueReturned, IsAtLeastXeHpCore) {
+HWTEST2_F(KernelLargeGrfTests, GivenLargeGrfAndSimdSizeWhenGettingMaxWorkGroupSizeThenCorrectValueReturned, IsAtLeastXeCore) {
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = pClDevice->getGfxCoreHelper().getMinimalSIMDSize();
     pKernelInfo->kernelDescriptor.kernelAttributes.crossThreadDataSize = 4;
     pKernelInfo->kernelDescriptor.payloadMappings.implicitArgs.maxWorkGroupSize = 0;
@@ -3740,7 +3756,7 @@ HWTEST2_F(KernelLargeGrfTests, GivenLargeGrfAndSimdSizeWhenGettingMaxWorkGroupSi
     }
 }
 
-HWTEST2_F(KernelConstantSurfaceTest, givenKernelWithConstantSurfaceWhenKernelIsCreatedThenConstantMemorySurfaceStateIsPatchedWithMocs, IsAtLeastXeHpCore) {
+HWTEST2_F(KernelConstantSurfaceTest, givenKernelWithConstantSurfaceWhenKernelIsCreatedThenConstantMemorySurfaceStateIsPatchedWithMocs, IsAtLeastXeCore) {
     auto pKernelInfo = std::make_unique<MockKernelInfo>();
     pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
 

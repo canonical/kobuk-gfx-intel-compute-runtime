@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2024 Intel Corporation
+ * Copyright (C) 2020-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -17,6 +17,8 @@
 #include "gtest/gtest.h"
 
 namespace L0 {
+struct ModuleBuildLog;
+
 namespace ult {
 
 ModuleImmutableDataFixture::MockImmutableMemoryManager::MockImmutableMemoryManager(NEO::ExecutionEnvironment &executionEnvironment) : NEO::MockMemoryManager(const_cast<NEO::ExecutionEnvironment &>(executionEnvironment)) {}
@@ -34,7 +36,7 @@ ModuleImmutableDataFixture::MockImmutableData::MockImmutableData(uint32_t perHwT
     mockKernelInfo->heapInfo.kernelHeapSize = MemoryConstants::pageSize;
     kernelInfo = mockKernelInfo;
 
-    auto ptr = reinterpret_cast<void *>(0x1234);
+    auto ptr = reinterpret_cast<void *>(0x1234000);
     isaGraphicsAllocation.reset(new NEO::MockGraphicsAllocation(0,
                                                                 1u /*num gmms*/,
                                                                 NEO::AllocationType::kernelIsa,
@@ -86,6 +88,7 @@ void ModuleImmutableDataFixture::setUp() {
     }
     auto executionEnvironment = NEO::MockDevice::prepareExecutionEnvironment(hwInfo, 0u);
     memoryManager = new MockImmutableMemoryManager(*executionEnvironment);
+    memoryManager->initUsmReuseLimits();
     executionEnvironment->memoryManager.reset(memoryManager);
     DeviceFixture::setupWithExecutionEnvironment(*executionEnvironment);
 }

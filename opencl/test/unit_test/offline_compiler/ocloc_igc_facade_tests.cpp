@@ -9,9 +9,8 @@
 
 #include "shared/offline_compiler/source/ocloc_api.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
-#include "shared/source/os_interface/os_inc_base.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-#include "shared/test/common/helpers/stdout_capture.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/mocks/mock_compilers.h"
 
 #include "mock/mock_ocloc_igc_facade.h"
@@ -24,7 +23,7 @@ TEST_F(OclocIgcFacadeTest, GivenMissingIgcLibraryWhenPreparingIgcThenFailureIsRe
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
     mockIgcFacade.shouldFailLoadingOfIgcLib = true;
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     std::string libName = "invalidigc.so";
     auto igcNameGuard = NEO::pushIgcDllName(libName.c_str());
@@ -44,7 +43,7 @@ TEST_F(OclocIgcFacadeTest, GivenFailingLoadingOfIgcSymbolsWhenPreparingIgcThenFa
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
     mockIgcFacade.shouldFailLoadingOfIgcCreateMainFunction = true;
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -60,7 +59,7 @@ TEST_F(OclocIgcFacadeTest, GivenFailingCreationOfIgcMainWhenPreparingIgcThenFail
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
     mockIgcFacade.shouldFailCreationOfIgcMain = true;
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -80,7 +79,7 @@ TEST_F(OclocIgcFacadeTest, GivenIncompatibleIgcInterfacesWhenPreparingIgcThenFai
     mockIgcFacade.isIgcInterfaceCompatibleReturnValue = false;
     mockIgcFacade.getIncompatibleInterfaceReturnValue = "SomeImportantInterface";
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -96,7 +95,7 @@ TEST_F(OclocIgcFacadeTest, GivenMissingPatchtokenInterfaceWhenPreparingIgcThenFa
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
     mockIgcFacade.isPatchtokenInterfaceSupportedReturnValue = false;
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -112,7 +111,7 @@ TEST_F(OclocIgcFacadeTest, GivenFailingCreationOfIgcDeviceContextWhenPreparingIg
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
     mockIgcFacade.shouldFailCreationOfIgcDeviceContext = true;
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -134,7 +133,7 @@ TEST_F(OclocIgcFacadeTest, GivenInvalidIgcDeviceContextWhenPreparingIgcThenFailu
         MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
         mockIgcFacade.*invalidReturnFlag = true;
 
-        StdoutCapture capture;
+        StreamCapture capture;
         capture.captureStdout();
         const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
         const auto output{capture.getCapturedStdout()};
@@ -150,7 +149,7 @@ TEST_F(OclocIgcFacadeTest, GivenInvalidIgcDeviceContextWhenPreparingIgcThenFailu
 TEST_F(OclocIgcFacadeTest, GivenNoneErrorsSetWhenPreparingIgcThenSuccessIsReported) {
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -163,7 +162,7 @@ TEST_F(OclocIgcFacadeTest, GivenNoneErrorsSetWhenPreparingIgcThenSuccessIsReport
 TEST_F(OclocIgcFacadeTest, GivenInitializedIgcWhenGettingIncompatibleInterfaceThenEmptyStringIsReturned) {
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};
@@ -180,7 +179,7 @@ TEST_F(OclocIgcFacadeTest, GivenFailingCreationOfIgcDeviceContext3WhenGettingRev
     MockOclocIgcFacade mockIgcFacade{&mockArgHelper};
     mockIgcFacade.shouldFailCreationOfIgcDeviceContext3 = true;
 
-    StdoutCapture capture;
+    StreamCapture capture;
     capture.captureStdout();
     const auto igcPreparationResult{mockIgcFacade.initialize(hwInfo)};
     const auto output{capture.getCapturedStdout()};

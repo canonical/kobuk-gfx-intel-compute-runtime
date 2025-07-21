@@ -61,7 +61,7 @@ class DirectSubmissionController {
 
   protected:
     struct DirectSubmissionState {
-        DirectSubmissionState(DirectSubmissionState &&other) {
+        DirectSubmissionState(DirectSubmissionState &&other) noexcept {
             isStopped = other.isStopped.load();
             taskCount = other.taskCount.load();
         }
@@ -89,6 +89,7 @@ class DirectSubmissionController {
     bool isDirectSubmissionIdle(CommandStreamReceiver *csr, std::unique_lock<std::recursive_mutex> &csrLock);
     MOCKABLE_VIRTUAL bool sleep(std::unique_lock<std::mutex> &lock);
     MOCKABLE_VIRTUAL SteadyClock::time_point getCpuTimestamp();
+    MOCKABLE_VIRTUAL void overrideDirectSubmissionTimeouts(const ProductHelper &productHelper);
 
     void recalculateTimeout();
     void applyTimeoutForAcLineStatusAndThrottle(bool acLineConnected);
@@ -116,7 +117,6 @@ class DirectSubmissionController {
     int32_t timeoutDivisor = 1;
     int32_t bcsTimeoutDivisor = 1;
     QueueThrottle lowestThrottleSubmitted = QueueThrottle::HIGH;
-    bool adjustTimeoutOnThrottleAndAcLineStatus = false;
     bool isCsrIdleDetectionEnabled = false;
 
     std::condition_variable condVar;

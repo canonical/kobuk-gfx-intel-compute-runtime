@@ -11,7 +11,6 @@
 #include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/helpers/ptr_math.h"
-#include "shared/source/os_interface/product_helper.h"
 #include "shared/source/release_helper/release_helper.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
@@ -65,7 +64,7 @@ HWTEST_F(L0GfxCoreHelperTest, givenL0GfxCoreHelperWhenAskingForCmdListWaitOnMemD
     EXPECT_EQ(expectedSize, l0GfxCoreHelper.getCmdListWaitOnMemoryDataSize());
 }
 
-HWTEST2_F(L0GfxCoreHelperTest, givenL0GfxCoreHelperWhenAskingForUsmCompressionSupportThenReturnFalse, IsAtMostXeHpcCore) {
+HWTEST2_F(L0GfxCoreHelperTest, givenL0GfxCoreHelperWhenAskingForUsmCompressionSupportThenReturnFalse, IsAtMostXeCore) {
     DebugManagerStateRestore restore;
 
     MockExecutionEnvironment executionEnvironment;
@@ -531,7 +530,7 @@ HWTEST_F(L0GfxCoreHelperTest, givenBitmaskWithAttentionBitsForAllEUsWhenGettingT
     }
 }
 
-HWTEST2_F(L0GfxCoreHelperTest, givenEu0To1Threads0To3BitmaskWhenGettingThreadsThenCorrectThreadsAreReturned, IsXeHpcCoreOrXe2HpgCore) {
+HWTEST2_F(L0GfxCoreHelperTest, givenEu0To1Threads0To3BitmaskWhenGettingThreadsThenCorrectThreadsAreReturned, IsWithinXeHpcCoreAndXe2HpgCore) {
     auto hwInfo = *NEO::defaultHwInfo.get();
     MockExecutionEnvironment executionEnvironment;
     auto &l0GfxCoreHelper = executionEnvironment.rootDeviceEnvironments[0]->getHelper<L0GfxCoreHelper>();
@@ -1046,7 +1045,7 @@ struct L0GfxCoreHelperMultiPacketEventFixture {
     void setUp() {
         debugManager.flags.UsePipeControlMultiKernelEventSync.set(usePipeControlMultiPacketEventSync);
         debugManager.flags.CompactL3FlushEventPacket.set(compactL3FlushEventPacket);
-        debugManager.flags.ForceL3FlushAfterPostSync.set(0);
+        debugManager.flags.EnableL3FlushAfterPostSync.set(0);
     }
 
     void tearDown() {
@@ -1059,7 +1058,7 @@ struct L0GfxCoreHelperMultiPacketEventFixture {
 using L0GfxCoreHelperEventMultiKernelEnabledL3FlushCompactDisabledTest = Test<L0GfxCoreHelperMultiPacketEventFixture<0, 0>>;
 HWTEST2_F(L0GfxCoreHelperEventMultiKernelEnabledL3FlushCompactDisabledTest,
           givenL0GfxCoreHelperWhenGettingMaxKernelAndMaxPacketThenExpectKernelThreeAndPacketThreeWithL3PacketWhenApplicable,
-          IsAtLeastXeHpCore) {
+          IsAtLeastXeCore) {
     auto hwInfo = *NEO::defaultHwInfo.get();
     auto &l0GfxCoreHelper = executionEnvironment.rootDeviceEnvironments[0]->getHelper<L0GfxCoreHelper>();
 
@@ -1075,7 +1074,7 @@ HWTEST2_F(L0GfxCoreHelperEventMultiKernelEnabledL3FlushCompactDisabledTest,
 using L0GfxCoreHelperEventMultiKernelEnabledL3FlushCompactEnabledTest = Test<L0GfxCoreHelperMultiPacketEventFixture<0, 1>>;
 HWTEST2_F(L0GfxCoreHelperEventMultiKernelEnabledL3FlushCompactEnabledTest,
           givenL0GfxCoreHelperWhenGettingMaxKernelAndMaxPacketThenExpectKernelThreeAndPacketThree,
-          IsAtLeastXeHpCore) {
+          IsAtLeastXeCore) {
     auto hwInfo = *NEO::defaultHwInfo.get();
     auto &l0GfxCoreHelper = executionEnvironment.rootDeviceEnvironments[0]->getHelper<L0GfxCoreHelper>();
 
@@ -1088,7 +1087,7 @@ HWTEST2_F(L0GfxCoreHelperEventMultiKernelEnabledL3FlushCompactEnabledTest,
 using L0GfxCoreHelperEventMultiKernelDisabledL3FlushCompactDisabledTest = Test<L0GfxCoreHelperMultiPacketEventFixture<1, 0>>;
 HWTEST2_F(L0GfxCoreHelperEventMultiKernelDisabledL3FlushCompactDisabledTest,
           givenL0GfxCoreHelperWhenGettingMaxKernelAndMaxPacketThenExpectKernelOneAndPacketOneWithL3PacketWhenApplicable,
-          IsAtLeastXeHpCore) {
+          IsAtLeastXeCore) {
     auto hwInfo = *NEO::defaultHwInfo.get();
     auto &l0GfxCoreHelper = executionEnvironment.rootDeviceEnvironments[0]->getHelper<L0GfxCoreHelper>();
 
@@ -1104,7 +1103,7 @@ HWTEST2_F(L0GfxCoreHelperEventMultiKernelDisabledL3FlushCompactDisabledTest,
 using L0GfxCoreHelperEventMultiKernelDisabledL3FlushCompactEnabledTest = Test<L0GfxCoreHelperMultiPacketEventFixture<1, 1>>;
 HWTEST2_F(L0GfxCoreHelperEventMultiKernelDisabledL3FlushCompactEnabledTest,
           givenL0GfxCoreHelperWhenGettingMaxKernelAndMaxPacketThenExpectKernelOneAndPacketOne,
-          IsAtLeastXeHpCore) {
+          IsAtLeastXeCore) {
     auto hwInfo = *NEO::defaultHwInfo.get();
     auto &l0GfxCoreHelper = executionEnvironment.rootDeviceEnvironments[0]->getHelper<L0GfxCoreHelper>();
 
@@ -1219,7 +1218,7 @@ TEST_F(L0GfxCoreHelperTest, givenL0GfxCoreHelperWhenGettingDefaultUseImmediateFl
     EXPECT_EQ(l0GfxCoreHelper.platformSupportsImmediateComputeFlushTask(), L0GfxCoreHelper::useImmediateComputeFlushTask(rootDeviceEnvironment));
 }
 
-HWTEST2_F(L0GfxCoreHelperTest, givenL0GfxCoreHelperWhenGettingSyncDispatchSupportThenReturnFalse, IsBeforeXeHpcCore) {
+HWTEST2_F(L0GfxCoreHelperTest, givenL0GfxCoreHelperWhenGettingSyncDispatchSupportThenReturnFalse, IsAtMostXeHpgCore) {
     MockExecutionEnvironment executionEnvironment;
     auto &rootDeviceEnvironment = *executionEnvironment.rootDeviceEnvironments[0].get();
     auto &l0GfxCoreHelper = rootDeviceEnvironment.getHelper<L0GfxCoreHelper>();

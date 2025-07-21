@@ -5,22 +5,21 @@
  *
  */
 
-#include "shared/source/helpers/gfx_core_helper.h"
-#include "shared/source/os_interface/product_helper.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
-#include "shared/test/common/mocks/mock_execution_environment.h"
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/utilities/base_object_utils.h"
 
-#include "opencl/source/helpers/cl_gfx_core_helper.h"
 #include "opencl/source/helpers/cl_memory_properties_helpers.h"
 #include "opencl/source/mem_obj/mem_obj_helper.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
-#include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
 #include "opencl/test/unit_test/mocks/mock_context.h"
 
 #include "gtest/gtest.h"
+
+namespace NEO {
+class Context;
+} // namespace NEO
 
 using namespace NEO;
 
@@ -143,8 +142,8 @@ TEST(MemObjHelper, givenParentMemObjAndHostPtrFlagsWhenValidatingMemoryPropertie
     MemoryProperties memoryProperties = ClMemoryPropertiesHelper::createMemoryProperties(flags, flagsIntel, 0, pDevice);
 
     MockContext context{deviceFactory.rootDevices[0]};
-    auto image = clUniquePtr(Image1dHelper<>::create(&context));
-    auto imageWithAccessFlagsUnrestricted = clUniquePtr(ImageHelper<Image1dWithAccessFlagsUnrestricted>::create(&context));
+    auto image = clUniquePtr(Image1dHelperUlt<>::create(&context));
+    auto imageWithAccessFlagsUnrestricted = clUniquePtr(ImageHelperUlt<Image1dWithAccessFlagsUnrestricted>::create(&context));
 
     cl_mem_flags hostPtrFlags[] = {CL_MEM_USE_HOST_PTR, CL_MEM_ALLOC_HOST_PTR, CL_MEM_COPY_HOST_PTR};
 

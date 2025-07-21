@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018-2024 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -8,17 +8,13 @@
 #include "opencl/source/accelerators/intel_accelerator.h"
 #include "opencl/source/api/api.h"
 #include "opencl/source/api/cl_types.h"
-#include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.h"
 #include "opencl/source/helpers/base_object.h"
 #include "opencl/source/mem_obj/buffer.h"
 #include "opencl/source/mem_obj/mem_obj.h"
-#include "opencl/source/platform/platform.h"
 #include "opencl/source/program/program.h"
-#include "opencl/source/sampler/sampler.h"
 #include "opencl/source/sharings/sharing_factory.h"
 #include "opencl/test/unit_test/fixtures/buffer_fixture.h"
-#include "opencl/test/unit_test/fixtures/cl_device_fixture.h"
 #include "opencl/test/unit_test/fixtures/image_fixture.h"
 #include "opencl/test/unit_test/mocks/mock_buffer.h"
 #include "opencl/test/unit_test/mocks/mock_cl_device.h"
@@ -264,7 +260,7 @@ TEST(CastToBuffer, WhenCastingFromMemObjThenBehavesAsExpected) {
 
 TEST(CastToImage, WhenCastingFromMemObjThenBehavesAsExpected) {
     MockContext context;
-    auto image = Image2dHelper<>::create(&context);
+    auto image = Image2dHelperUlt<>::create(&context);
     MemObj *memObj = image;
     cl_mem clObj = image;
 

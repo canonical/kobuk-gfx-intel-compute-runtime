@@ -44,13 +44,13 @@ TEST(ApiSpecificConfigL0Tests, WhenGettingRegistryPathThenL0RegistryPathIsReturn
 }
 
 TEST(ApiSpecificConfigL0Tests, WhenCheckingIfHostDeviceAllocationCacheIsEnabledThenReturnFalse) {
-    EXPECT_FALSE(ApiSpecificConfig::isHostAllocationCacheEnabled());
-    EXPECT_FALSE(ApiSpecificConfig::isDeviceAllocationCacheEnabled());
+    EXPECT_TRUE(ApiSpecificConfig::isHostAllocationCacheEnabled());
+    EXPECT_TRUE(ApiSpecificConfig::isDeviceAllocationCacheEnabled());
 }
 
-TEST(ApiSpecificConfigL0Tests, WhenCheckingIfUsmAllocPoolingIsEnabledThenReturnFalse) {
-    EXPECT_FALSE(ApiSpecificConfig::isHostUsmPoolingEnabled());
-    EXPECT_FALSE(ApiSpecificConfig::isDeviceUsmPoolingEnabled());
+TEST(ApiSpecificConfigL0Tests, WhenCheckingIfUsmAllocPoolingIsEnabledThenReturnCorrectValue) {
+    EXPECT_TRUE(ApiSpecificConfig::isHostUsmPoolingEnabled());
+    EXPECT_TRUE(ApiSpecificConfig::isDeviceUsmPoolingEnabled());
 }
 
 TEST(ApiSpecificConfigL0Tests, GivenDebugFlagCombinationsGetCorrectSharedAllocPrefetchEnabled) {

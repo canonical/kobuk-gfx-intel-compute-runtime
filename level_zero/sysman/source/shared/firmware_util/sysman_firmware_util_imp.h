@@ -49,12 +49,21 @@ typedef int (*pIgscDeviceOpromVersion)(struct igsc_device_handle *handle,
                                        struct igsc_oprom_version *version);
 
 typedef int (*pIgscDeviceClose)(struct igsc_device_handle *handle);
+typedef int (*pIgscDeviceUpdateLateBindingConfig)(struct igsc_device_handle *handle,
+                                                  uint32_t type,
+                                                  uint32_t flags,
+                                                  uint8_t *payload,
+                                                  size_t payloadSize,
+                                                  uint32_t *status);
 typedef int (*pIgscIfrGetStatusExt)(struct igsc_device_handle *handle,
                                     uint32_t *supportedTests,
                                     uint32_t *hwCapabilities,
                                     uint32_t *ifrApplied,
                                     uint32_t *prevErrors,
                                     uint32_t *pendingReset);
+
+typedef int (*pIgscDevicePscVersion)(struct igsc_device_handle *handle,
+                                     struct igsc_psc_version *version);
 typedef int (*pIgscIafPscUpdate)(struct igsc_device_handle *handle,
                                  const uint8_t *buffer,
                                  const uint32_t bufferLen,
@@ -82,6 +91,10 @@ typedef int (*pIgscGfspHeciCmd)(struct igsc_device_handle *handle,
                                 size_t outBufferSize,
                                 size_t *actualOutBufferSize);
 
+extern const std::string fwDeviceFwVersion;
+extern const std::string fwDeviceOpromVersion;
+extern const std::string fwDevicePscVersion;
+
 extern pIgscDeviceInitByDevice deviceInitByDevice;
 extern pIgscDeviceGetDeviceInfo deviceGetDeviceInfo;
 extern pIgscDeviceFwVersion deviceGetFwVersion;
@@ -94,7 +107,9 @@ extern pIgscImageOpromType imageOpromType;
 extern pIgscDeviceOpromUpdate deviceOpromUpdate;
 extern pIgscDeviceOpromVersion deviceOpromVersion;
 extern pIgscDeviceClose deviceClose;
+extern pIgscDeviceUpdateLateBindingConfig deviceUpdateLateBindingConfig;
 extern pIgscIfrGetStatusExt deviceIfrGetStatusExt;
+extern pIgscDevicePscVersion deviceGetPscVersion;
 extern pIgscIafPscUpdate iafPscUpdate;
 extern pIgscGfspMemoryErrors gfspMemoryErrors;
 extern pIgscGfspCountTiles gfspCountTiles;
@@ -131,7 +146,8 @@ enum GetEccCmd16BytePostition {
     eccAvailable = 0,
     eccCurrentState = 4,
     eccConfigurable = 8,
-    eccPendingState = 12
+    eccPendingState = 12,
+    eccDefaultState = 16
 };
 
 enum GetEccCmd9BytePostition {
@@ -154,10 +170,11 @@ class FirmwareUtilImp : public FirmwareUtil, NEO::NonCopyableAndNonMovableClass 
     ze_result_t fwGetMemoryErrorCount(zes_ras_error_type_t type, uint32_t subDeviceCount, uint32_t subDeviceId, uint64_t &count) override;
     ze_result_t fwGetEccAvailable(ze_bool_t *pAvailable) override;
     ze_result_t fwGetEccConfigurable(ze_bool_t *pConfigurable) override;
-    ze_result_t fwGetEccConfig(uint8_t *currentState, uint8_t *pendingState) override;
+    ze_result_t fwGetEccConfig(uint8_t *currentState, uint8_t *pendingState, uint8_t *defaultState) override;
     ze_result_t fwSetEccConfig(uint8_t newState, uint8_t *currentState, uint8_t *pendingState) override;
     void getDeviceSupportedFwTypes(std::vector<std::string> &fwTypes) override;
     void fwGetMemoryHealthIndicator(zes_mem_health_t *health) override;
+    void getLateBindingSupportedFwTypes(std::vector<std::string> &fwTypes) override;
 
     static int fwUtilLoadFlags;
     static std::string fwUtilLibraryName;
@@ -175,6 +192,7 @@ class FirmwareUtilImp : public FirmwareUtil, NEO::NonCopyableAndNonMovableClass 
     ze_result_t fwFlashGSC(void *pImage, uint32_t size);
     ze_result_t fwFlashOprom(void *pImage, uint32_t size);
     ze_result_t fwFlashIafPsc(void *pImage, uint32_t size);
+    ze_result_t fwFlashLateBinding(void *pImage, uint32_t size, std::string fwType);
     ze_result_t fwCallGetstatusExt(uint32_t &supportedTests, uint32_t &ifrApplied, uint32_t &prevErrors, uint32_t &pendingReset);
 
     std::string fwDevicePath{};

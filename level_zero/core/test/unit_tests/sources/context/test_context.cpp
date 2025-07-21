@@ -5,9 +5,7 @@
  *
  */
 
-#include "shared/source/built_ins/sip.h"
 #include "shared/source/gmm_helper/gmm.h"
-#include "shared/source/helpers/blit_properties.h"
 #include "shared/source/memory_manager/gfx_partition.h"
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/utilities/cpu_info.h"
@@ -21,10 +19,12 @@
 #include "shared/test/common/mocks/mock_svm_manager.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/context/context_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/image/image.h"
+#include "level_zero/core/test/common/ult_helpers_l0.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
 #include "level_zero/core/test/unit_tests/fixtures/host_pointer_manager_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
@@ -32,6 +32,9 @@
 #include "gtest/gtest.h"
 
 namespace L0 {
+template <GFXCORE_FAMILY gfxCoreFamily>
+struct CommandListCoreFamily;
+
 namespace ult {
 
 using MultiDeviceContextTests = Test<MultiDeviceFixture>;
@@ -392,9 +395,11 @@ struct ContextHostAllocTests : public ::testing::Test {
         ze_result_t res = driverHandle->initialize(std::move(devices));
         EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
+        L0UltHelper::cleanupUsmAllocPoolsAndReuse(driverHandle.get());
         prevSvmAllocsManager = driverHandle->svmAllocsManager;
         currSvmAllocsManager = new SVMAllocsManagerContextMock(driverHandle->memoryManager);
         driverHandle->svmAllocsManager = currSvmAllocsManager;
+        L0UltHelper::initUsmAllocPools(driverHandle.get());
 
         zeDevices.resize(numberOfDevicesInContext);
         driverHandle->getDevice(&numberOfDevicesInContext, zeDevices.data());
@@ -406,6 +411,7 @@ struct ContextHostAllocTests : public ::testing::Test {
     }
 
     void TearDown() override {
+        L0UltHelper::cleanupUsmAllocPoolsAndReuse(driverHandle.get());
         driverHandle->svmAllocsManager = prevSvmAllocsManager;
         delete currSvmAllocsManager;
     }
@@ -455,6 +461,8 @@ TEST_F(ContextGetStatusTest, givenCallToContextGetStatusThenCorrectErrorCodeIsRe
 
     res = context->getStatus();
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    driverHandle->getSvmAllocsManager()->cleanupUSMAllocCaches();
 
     for (auto device : driverHandle->devices) {
         L0::DeviceImp *deviceImp = static_cast<DeviceImp *>(device);
@@ -713,6 +721,7 @@ TEST_F(ContextMakeMemoryResidentTests, givenDeviceUnifiedMemoryAndLocalOnlyAlloc
     auto *driverHandleImp{static_cast<DriverHandleImp *>(hostDriverHandle.get())};
     driverHandleImp->memoryManager->usmDeviceAllocationMode = NEO::LocalMemAllocationMode::localOnly;
     static_cast<MockMemoryManager *>(driverHandleImp->memoryManager)->returnFakeAllocation = true;
+    hostDriverHandle->svmAllocsManager->cleanupUSMAllocCaches();
 
     EXPECT_EQ(0U, mockMemoryInterface->makeResidentCalled);
     mockMemoryInterface->makeResidentResult = NEO::MemoryOperationsStatus::success;
@@ -997,9 +1006,6 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
 
     ze_result_t result = ZE_RESULT_SUCCESS;
 
-    DebugManagerStateRestore restorer;
-    NEO::debugManager.flags.EnableFlushTaskSubmission.set(true);
-
     std::unique_ptr<L0::CommandList> commandList0(CommandList::createImmediate(productFamily,
                                                                                device,
                                                                                &desc,
@@ -1049,9 +1055,6 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     csr.setupContext(*neoDevice->getDefaultEngine().osContext);
 
     ze_result_t result = ZE_RESULT_SUCCESS;
-
-    DebugManagerStateRestore restorer;
-    NEO::debugManager.flags.EnableFlushTaskSubmission.set(true);
 
     std::unique_ptr<L0::CommandList> commandListImmediate(CommandList::createImmediate(productFamily,
                                                                                        device,
@@ -1113,9 +1116,6 @@ HWTEST_F(ContextMakeMemoryResidentAndMigrationTests,
     csr.setupContext(*neoDevice->getDefaultEngine().osContext);
 
     ze_result_t result = ZE_RESULT_SUCCESS;
-
-    DebugManagerStateRestore restorer;
-    NEO::debugManager.flags.EnableFlushTaskSubmission.set(true);
 
     std::unique_ptr<L0::CommandList> commandList0(CommandList::createImmediate(productFamily,
                                                                                device,

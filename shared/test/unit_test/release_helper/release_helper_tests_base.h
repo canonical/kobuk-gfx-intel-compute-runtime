@@ -32,10 +32,11 @@ struct ReleaseHelperTestsBase : public ::testing::Test {
     void whenIsLocalOnlyAllowedCalledThenFalseReturned();
     void whenGettingPreferredSlmSizeThenAllEntriesEmpty();
     void whenGettingSupportedNumGrfsThenValuesUpTo256Returned();
-    void whenGettingNumThreadsPerEuThenCorrectValueIsReturnedBasedOnEnable10ThreadsPerEuDebugKey();
     void whenGettingNumThreadsPerEuThenCorrectValueIsReturnedBasedOnOverrideNumThreadsPerEuDebugKey();
     void whenGettingThreadsPerEuConfigsThenCorrectValueIsReturnedBasedOnNumThreadPerEu();
     void whenIsBlitImageAllowedForDepthFormatCalledThenTrueReturned();
+    void whenProgrammAdditionalStallPriorToBarrierWithTimestampCalledThenFalseReturned();
+    void whenIsPostImageWriteFlushRequiredCalledThenFalseReturned();
     virtual std::vector<uint32_t> getRevisions() = 0;
 
     std::unique_ptr<ReleaseHelper> releaseHelper;

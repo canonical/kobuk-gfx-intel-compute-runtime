@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
 #include "shared/source/helpers/hw_info.h"
@@ -74,7 +75,7 @@ struct LuminanceImage : public ImageReadOnly<Image2dDefaults> {
 };
 
 template <typename Traits>
-struct ImageHelper {
+struct ImageHelperUlt {
     using Context = NEO::Context;
     using Image = NEO::Image;
     using MockContext = NEO::MockContext;
@@ -98,27 +99,27 @@ struct ImageHelper {
 };
 
 template <typename Traits = Image1dDefaults>
-struct Image1dHelper : public ImageHelper<Traits> {
+struct Image1dHelperUlt : public ImageHelperUlt<Traits> {
 };
 
 template <typename Traits = Image1dBufferDefaults>
-struct Image1dBufferHelper : public ImageHelper<Traits> {
+struct Image1dBufferHelperUlt : public ImageHelperUlt<Traits> {
 };
 
 template <typename Traits = Image2dDefaults>
-struct Image2dHelper : public ImageHelper<Traits> {
+struct Image2dHelperUlt : public ImageHelperUlt<Traits> {
 };
 
 template <typename Traits = Image3dDefaults>
-struct Image3dHelper : public ImageHelper<Traits> {
+struct Image3dHelperUlt : public ImageHelperUlt<Traits> {
 };
 
 template <typename Traits = Image2dArrayDefaults>
-struct Image2dArrayHelper : public ImageHelper<Traits> {
+struct Image2dArrayHelperUlt : public ImageHelperUlt<Traits> {
 };
 
 template <typename Traits = Image1dArrayDefaults>
-struct Image1dArrayHelper : public ImageHelper<Traits> {
+struct Image1dArrayHelperUlt : public ImageHelperUlt<Traits> {
 };
 
 struct ImageClearColorFixture : ::testing::Test {

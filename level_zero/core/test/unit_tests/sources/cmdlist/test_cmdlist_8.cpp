@@ -14,6 +14,7 @@
 #include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
+#include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/event/event_imp.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
@@ -1370,8 +1371,9 @@ HWTEST_F(CommandListAppendLaunchKernel, givenUnalignePtrToFillWhenSettingFillPro
     auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
     MockCommandListImmediateHw<FamilyType::gfxCoreFamily> cmdList;
     cmdList.cmdQImmediate = queue.get();
+    cmdList.device = device;
     auto unalignedOffset = 2u;
-    auto patternSize = 4u;
+    auto patternSize = 8u;
     auto sizeToFill = 599u * patternSize;
     CmdListFillKernelArguments outArguments;
     cmdList.setupFillKernelArguments(unalignedOffset, patternSize, sizeToFill, outArguments, kernel.get());
@@ -1384,8 +1386,9 @@ HWTEST_F(CommandListAppendLaunchKernel, givenAlignePtrToFillWhenSettingFillPrope
     auto queue = std::make_unique<Mock<CommandQueue>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &queueDesc);
     MockCommandListImmediateHw<FamilyType::gfxCoreFamily> cmdList;
     cmdList.cmdQImmediate = queue.get();
+    cmdList.device = device;
     auto unalignedOffset = 4u;
-    auto patternSize = 4u;
+    auto patternSize = 8u;
     auto sizeToFill = 599u * patternSize;
     CmdListFillKernelArguments outArguments;
     cmdList.setupFillKernelArguments(unalignedOffset, patternSize, sizeToFill, outArguments, kernel.get());
@@ -1482,7 +1485,6 @@ struct ImmediateCommandListHostSynchronize : public Test<DeviceFixture> {
         auto cmdList = std::make_unique<MockCommandListImmediateHw<gfxCoreFamily>>();
         cmdList->cmdQImmediate = commandQueue;
         cmdList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
-        cmdList->isFlushTaskSubmissionEnabled = true;
         cmdList->isSyncModeQueue = false;
 
         return cmdList;
@@ -1546,7 +1548,6 @@ HWTEST_F(ImmediateCommandListHostSynchronize, givenFlushTaskSubmissionIsDisabled
 
     auto cmdList = createCmdList<FamilyType::gfxCoreFamily>(csr);
     cmdList->copyThroughLockedPtrEnabled = true;
-    cmdList->isFlushTaskSubmissionEnabled = false;
 
     EXPECT_EQ(cmdList->hostSynchronize(0), ZE_RESULT_SUCCESS);
 
@@ -1932,6 +1933,30 @@ HWTEST_F(CommandListCreate, givenNullptrPeerAllocationWhenGetDeviceCounterAllocF
     MockGraphicsAllocation counterDeviceAlloc(peerDeviceIndex, nullptr, 0x0);
 
     EXPECT_ANY_THROW(commandList->getDeviceCounterAllocForResidency(&counterDeviceAlloc));
+}
+
+HWTEST_F(CommandListCreate, givenCommandListWhenIsKernelUncachedMocsRequiredCalledThenReturnCorrectValue) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.EnableStateBaseAddressTracking.set(0);
+
+    auto commandList = std::make_unique<MockCommandListCoreFamily<FamilyType::gfxCoreFamily>>();
+    commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
+    EXPECT_FALSE(commandList->isKernelUncachedMocsRequired(false));
+
+    auto &rootDeviceEnvironment = neoDevice->executionEnvironment->rootDeviceEnvironments[0];
+    auto deferMOCSToPatIndex = device->getProductHelper().deferMOCSToPatIndex(rootDeviceEnvironment->isWddmOnLinux());
+    EXPECT_EQ(!deferMOCSToPatIndex, commandList->isKernelUncachedMocsRequired(true));
+    EXPECT_TRUE(commandList->getContainsStatelessUncachedResource());
+}
+
+HWTEST_F(CommandListCreate, givenSbaTrackingEnabledWhenIsKernelUncachedMocsRequiredCalledThenReturnFalse) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.EnableStateBaseAddressTracking.set(1);
+
+    auto commandList = std::make_unique<MockCommandListCoreFamily<FamilyType::gfxCoreFamily>>();
+    commandList->initialize(device, NEO::EngineGroupType::renderCompute, 0u);
+    EXPECT_FALSE(commandList->isKernelUncachedMocsRequired(true));
+    EXPECT_TRUE(commandList->getContainsStatelessUncachedResource());
 }
 
 } // namespace ult

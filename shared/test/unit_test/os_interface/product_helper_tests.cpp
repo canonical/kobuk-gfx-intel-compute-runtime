@@ -9,6 +9,7 @@
 
 #include "shared/source/aub_mem_dump/aub_mem_dump.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/api_specific_config.h"
 #include "shared/source/helpers/constants.h"
 #include "shared/source/helpers/definitions/engine_group_types.h"
 #include "shared/source/helpers/definitions/indirect_detection_versions.h"
@@ -32,6 +33,10 @@
 #include "gtest/gtest.h"
 #include "ocl_igc_shared/indirect_access_detection/version.h"
 #include "test_traits_common.h"
+
+namespace NEO {
+extern ApiSpecificConfig::ApiType apiTypeForUlts;
+}
 
 using namespace NEO;
 
@@ -95,7 +100,7 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingSharedSystemMemCapabili
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfIsBlitSplitEnqueueWARequiredThenReturnFalse) {
 
-    EXPECT_FALSE(productHelper->isBlitSplitEnqueueWARequired(pInHwInfo));
+    EXPECT_FALSE(productHelper->getBcsSplitSettings().enabled);
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingMemoryCapabilitiesThenCorrectValueIsReturned) {
@@ -351,7 +356,7 @@ HWTEST_F(ProductHelperTest, givenVariousDebugKeyValuesWhenGettingLocalMemoryAcce
     EXPECT_EQ(LocalMemoryAccessMode::cpuAccessDisallowed, productHelper->getLocalMemoryAccessMode(pInHwInfo));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfPipeControlPriorToNonPipelinedStateCommandsWARequiredThenFalseIsReturned, IsNotXeHpgOrXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfPipeControlPriorToNonPipelinedStateCommandsWARequiredThenFalseIsReturned, IsNotXeCore) {
 
     auto isRcs = false;
     const auto &[isBasicWARequired, isExtendedWARequired] = productHelper->isPipeControlPriorToNonPipelinedStateCommandsWARequired(pInHwInfo, isRcs, releaseHelper);
@@ -415,7 +420,7 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfStorageInfoAdjustmentIs
     EXPECT_FALSE(productHelper->isStorageInfoAdjustmentRequired());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallUseGemCreateExtInAllocateMemoryByKMDThenFalseIsReturned, IsBeforeXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallUseGemCreateExtInAllocateMemoryByKMDThenFalseIsReturned, IsGen12LP) {
     EXPECT_FALSE(productHelper->useGemCreateExtInAllocateMemoryByKMD());
 }
 
@@ -434,7 +439,7 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfKmdMigrationIsSupported
     EXPECT_FALSE(productHelper->isKmdMigrationSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsSupportedThenReturnFalse, IsBeforeXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfDisableScratchPagesIsSupportedThenReturnFalse, IsAtMostXeHpgCore) {
     EXPECT_FALSE(productHelper->isDisableScratchPagesSupported());
 }
 
@@ -459,16 +464,16 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfPatIndexProgrammingSupp
     EXPECT_FALSE(productHelper->isVmBindPatIndexProgrammingSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfIsTimestampWaitSupportedForEventsThenFalseIsReturned, IsBeforeXeHpCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfIsTimestampWaitSupportedForEventsThenFalseIsReturned, IsGen12LP) {
 
     EXPECT_FALSE(productHelper->isTimestampWaitSupportedForEvents());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallGetCommandBuffersPreallocatedPerCommandQueueThenReturnCorrectValue, IsBeforeXeHpCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallGetCommandBuffersPreallocatedPerCommandQueueThenReturnCorrectValue, IsGen12LP) {
     EXPECT_EQ(0u, productHelper->getCommandBuffersPreallocatedPerCommandQueue());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallGetInternalHeapsPreallocatedThenReturnCorrectValue, IsBeforeXeHpCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallGetInternalHeapsPreallocatedThenReturnCorrectValue, IsGen12LP) {
     EXPECT_EQ(productHelper->getInternalHeapsPreallocated(), 0u);
 
     DebugManagerStateRestore restorer;
@@ -476,7 +481,7 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallGetInternalHeapsPrealloca
     EXPECT_EQ(productHelper->getInternalHeapsPreallocated(), 3u);
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfIsTlbFlushRequiredThenTrueIsReturned, IsNotXeHpgOrXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenAskedIfIsTlbFlushRequiredThenTrueIsReturned, IsNotXeCore) {
     EXPECT_TRUE(productHelper->isTlbFlushRequired());
 }
 
@@ -617,9 +622,9 @@ HWTEST_F(ProductHelperTest, WhenFillingStateBaseAddressPropertiesSupportThenExpe
     EXPECT_EQ(productHelper->getStateBaseAddressPropertyBindingTablePoolBaseAddressSupport(), stateBaseAddressPropertiesSupport.bindingTablePoolBaseAddress);
 }
 
-HWTEST_F(ProductHelperTest, givenProductHelperWhenIsGlobalFenceInCommandStreamRequiredThenFalseIsReturned) {
+HWTEST_F(ProductHelperTest, givenProductHelperWhenisReleaseGlobalFenceInCommandStreamRequiredThenFalseIsReturned) {
 
-    EXPECT_FALSE(productHelper->isGlobalFenceInCommandStreamRequired(*defaultHwInfo));
+    EXPECT_FALSE(productHelper->isReleaseGlobalFenceInCommandStreamRequired(*defaultHwInfo));
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenIsSystolicModeConfigurabledThenFalseIsReturned) {
@@ -652,7 +657,7 @@ HWTEST_F(ProductHelperTest, givenDefaultSettingWhenIsThreadArbitrationPolicyRepo
     EXPECT_EQ(productHelper->getScmPropertyThreadArbitrationPolicySupport(), productHelper->isThreadArbitrationPolicyReportedWithScm());
 }
 
-HWTEST_F(ProductHelperTest, givenForceThreadArbitrationPolicyProgrammingWithScmFlagSetWhenIsThreadArbitrationPolicyReportedWithScmIsQueriedThenCorrectValueIsReturned) {
+HWTEST2_F(ProductHelperTest, givenForceThreadArbitrationPolicyProgrammingWithScmFlagSetWhenIsThreadArbitrationPolicyReportedWithScmIsQueriedThenCorrectValueIsReturned, IsAtMostXe3Core) {
     DebugManagerStateRestore restorer;
 
     debugManager.flags.ForceThreadArbitrationPolicyProgrammingWithScm.set(0);
@@ -671,11 +676,11 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenIsPrefetcherDisablingInDirectS
     EXPECT_TRUE(productHelper->isPrefetcherDisablingInDirectSubmissionRequired());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenIsImplicitScalingSupportedThenExpectFalse, IsNotXeHpOrXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenIsImplicitScalingSupportedThenExpectFalse, IsNotXeHpcCore) {
     EXPECT_FALSE(productHelper->isImplicitScalingSupported(*defaultHwInfo));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperAndDebugFlagWhenGetL1CachePolicyThenReturnCorrectPolicy, IsAtLeastXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperAndDebugFlagWhenGetL1CachePolicyThenReturnCorrectPolicy, IsAtLeastXeCore) {
     DebugManagerStateRestore restorer;
 
     debugManager.flags.OverrideL1CachePolicyInSurfaceStateAndStateless.set(0);
@@ -699,12 +704,12 @@ HWTEST2_F(ProductHelperTest, givenProductHelperAndDebugFlagWhenGetL1CachePolicyT
     EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_CONTROL_UC, productHelper->getL1CachePolicy(true));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenGetL1CachePolicyThenReturnWriteByPass, IsAtLeastXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenGetL1CachePolicyThenReturnWriteByPass, IsAtLeastXeCore) {
     EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_CONTROL_WBP, productHelper->getL1CachePolicy(false));
     EXPECT_EQ(FamilyType::STATE_BASE_ADDRESS::L1_CACHE_CONTROL_WBP, productHelper->getL1CachePolicy(true));
 }
 
-HWTEST2_F(ProductHelperTest, givenPlatformWithUnsupportedL1CachePoliciesWhenGetL1CachePolicyThenReturnZero, IsAtMostXeHpCore) {
+HWTEST2_F(ProductHelperTest, givenPlatformWithUnsupportedL1CachePoliciesWhenGetL1CachePolicyThenReturnZero, IsGen12LP) {
     EXPECT_EQ(0u, productHelper->getL1CachePolicy(false));
     EXPECT_EQ(0u, productHelper->getL1CachePolicy(true));
 }
@@ -717,7 +722,7 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenIsPlatformQueryNotSupportedTh
     EXPECT_FALSE(productHelper->isPlatformQuerySupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenDebugFlagWhenCheckingIsResolveDependenciesByPipeControlsSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenDebugFlagWhenCheckingIsResolveDependenciesByPipeControlsSupportedThenCorrectValueIsReturned, IsGen12LP) {
     DebugManagerStateRestore restorer;
 
     auto mockDevice = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(nullptr));
@@ -769,7 +774,7 @@ HWTEST2_F(ProductHelperTest, givenDebugFlagWhenCheckingIsResolveDependenciesByPi
     EXPECT_TRUE(productHelper->isResolveDependenciesByPipeControlsSupported(pInHwInfo, true, 3, csr));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsBufferPoolAllocatorSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsBufferPoolAllocatorSupportedThenCorrectValueIsReturned, IsGen12LP) {
     EXPECT_FALSE(productHelper->isBufferPoolAllocatorSupported());
 }
 
@@ -781,56 +786,58 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsBufferPoolAllocator
     EXPECT_TRUE(productHelper->isBufferPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsGen12LP) {
+    EXPECT_FALSE(productHelper->isDeviceUsmPoolAllocatorSupported());
     EXPECT_FALSE(productHelper->isHostUsmPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
     EXPECT_FALSE(productHelper->isDeviceUsmPoolAllocatorSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
     EXPECT_FALSE(productHelper->isHostUsmPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
-    EXPECT_FALSE(productHelper->isDeviceUsmPoolAllocatorSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
+    EXPECT_TRUE(productHelper->isDeviceUsmPoolAllocatorSupported());
     EXPECT_TRUE(productHelper->isHostUsmPoolAllocatorSupported());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmPoolAllocatorSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
-    EXPECT_TRUE(productHelper->isDeviceUsmPoolAllocatorSupported());
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsGen12LP) {
+    {
+        VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::OCL);
+        EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
+        EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
+    }
+    {
+        VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::L0);
+        EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
+        EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
+    }
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsAtMostDg2) {
-    EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
+    {
+        VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::OCL);
+        EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
+        EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
+    }
+    {
+        VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::L0);
+        EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
+        EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
+    }
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
-    EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsDeviceUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsAtLeastMtl) {
-    EXPECT_TRUE(productHelper->isDeviceUsmAllocationReuseSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsBeforeXeHpgCore) {
-    EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsXeHpgCore) {
-    EXPECT_TRUE(productHelper->isHostUsmAllocationReuseSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsXeHpcCore) {
-    EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
-}
-
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsHostUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsAtLeastMtl) {
-    EXPECT_TRUE(productHelper->isHostUsmAllocationReuseSupported());
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCheckingIsUsmAllocationReuseSupportedThenCorrectValueIsReturned, IsXe2HpgCore) {
+    {
+        VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::OCL);
+        EXPECT_TRUE(productHelper->isHostUsmAllocationReuseSupported());
+        EXPECT_TRUE(productHelper->isDeviceUsmAllocationReuseSupported());
+    }
+    {
+        VariableBackup<ApiSpecificConfig::ApiType> backup(&apiTypeForUlts, ApiSpecificConfig::L0);
+        EXPECT_FALSE(productHelper->isHostUsmAllocationReuseSupported());
+        EXPECT_FALSE(productHelper->isDeviceUsmAllocationReuseSupported());
+    }
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenCheckingIsUnlockingLockedPtrNecessaryThenReturnFalse) {
@@ -1056,7 +1063,7 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenItsPreXe2ThenCacheLineSizeIs6
     EXPECT_EQ(productHelper->getCacheLineSize(), 64u);
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenItsXe2PlusThenCacheLineSizeIs256Bytes, IsAtLeastBmg) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenItsXe2PlusThenCacheLineSizeIs256Bytes, IsAtLeastXe2HpgCore) {
     EXPECT_EQ(productHelper->getCacheLineSize(), 256u);
 }
 
@@ -1080,24 +1087,28 @@ TEST_F(ProductHelperTest, whenGettingMaxSubSliceSpaceThenValueIsNotSmallerThanMa
     EXPECT_EQ(maxSupportedSubSlices, productHelper->computeMaxNeededSubSliceSpace(hwInfo));
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnFalse, IsBeforeXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnFalse, IsAtMostXeHpgCore) {
 
     EXPECT_FALSE(productHelper->supports2DBlockLoad());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnFalse, IsBeforeXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnFalse, IsAtMostXeHpgCore) {
 
     EXPECT_FALSE(productHelper->supports2DBlockStore());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnTrue, IsAtLeastXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockLoadThenReturnTrue, IsWithinXeHpcCoreAndXe3Core) {
 
     EXPECT_TRUE(productHelper->supports2DBlockLoad());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnTrue, IsAtLeastXeHpcCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenQuery2DBlockStoreThenReturnTrue, IsWithinXeHpcCoreAndXe3Core) {
 
     EXPECT_TRUE(productHelper->supports2DBlockStore());
+}
+
+HWTEST2_F(ProductHelperTest, WhenGetSvmCpuAlignmentThenProperValueIsReturned, IsAtLeastXeHpcCore) {
+    EXPECT_EQ(MemoryConstants::pageSize64k, productHelper->getSvmCpuAlignment());
 }
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenGetRequiredDetectIndirectVersionCalledThenReturnCorrectVersion, IsNotPVC) {
@@ -1145,8 +1156,30 @@ HWTEST2_F(ProductHelperTest, givenProductHelperThenCompressionIsNotForbidden, Is
     EXPECT_FALSE(productHelper->isCompressionForbidden(hwInfo));
 }
 
-HWTEST_F(ProductHelperTest, givenProductHelperWhenQueryIsPostImageWriteFlushRequiredThenFalseReturned) {
-    EXPECT_FALSE(productHelper->isPostImageWriteFlushRequired());
+HWTEST2_F(ProductHelperTest, givenProductHelperBeforeXe2WhenOverrideDirectSubmissionTimeoutsThenTimeoutsNotAdjusted, IsAtMostXeCore) {
+    DebugManagerStateRestore restorer;
+
+    uint64_t timeoutUs{5000};
+    uint64_t maxTimeoutUs{5000};
+    productHelper->overrideDirectSubmissionTimeouts(timeoutUs, maxTimeoutUs);
+    EXPECT_EQ(5000ull, timeoutUs);
+    EXPECT_EQ(5000ull, maxTimeoutUs);
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenOverrideDirectSubmissionTimeoutsThenTimeoutsAdjusted, IsAtLeastXe2HpgCore) {
+    DebugManagerStateRestore restorer;
+
+    uint64_t timeoutUs{5000};
+    uint64_t maxTimeoutUs{5000};
+    productHelper->overrideDirectSubmissionTimeouts(timeoutUs, maxTimeoutUs);
+    EXPECT_EQ(1000ull, timeoutUs);
+    EXPECT_EQ(1000ull, maxTimeoutUs);
+
+    debugManager.flags.DirectSubmissionControllerTimeout.set(10000);
+    debugManager.flags.DirectSubmissionControllerMaxTimeout.set(10000);
+    productHelper->overrideDirectSubmissionTimeouts(timeoutUs, maxTimeoutUs);
+    EXPECT_EQ(10000ull, timeoutUs);
+    EXPECT_EQ(10000ull, maxTimeoutUs);
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenIsExposingSubdevicesAllowedThenTrueIsReturned) {
@@ -1161,7 +1194,7 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenCallingUseAdditionalBlitProper
     EXPECT_FALSE(productHelper->useAdditionalBlitProperties());
 }
 
-HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallingIsResourceUncachedForCSThenFalseReturned, IsBeforeXe2HpgCore) {
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallingIsResourceUncachedForCSThenFalseReturned, IsAtMostXeCore) {
     for (uint32_t i = 0; i < static_cast<uint32_t>(AllocationType::count); i++) {
         auto allocationType = static_cast<AllocationType>(i);
         EXPECT_FALSE(productHelper->isResourceUncachedForCS(allocationType));
@@ -1181,6 +1214,28 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenCallingIsResourceUncachedForC
     }
 }
 
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenisPackedCopyFormatSupportedThenCorrectValueIsReturned, IsAtMostXe3Core) {
+    EXPECT_FALSE(productHelper->isPackedCopyFormatSupported());
+}
+
 HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingPreferredWorkgroupCountPerSubsliceThenZeroReturned) {
     EXPECT_EQ(0u, productHelper->getPreferredWorkgroupCountPerSubslice());
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWithDebugKeyWhenPidFdOrSocketForIpcIsSupportedThenExpectedValueReturned) {
+    DebugManagerStateRestore restore;
+
+    debugManager.flags.EnablePidFdOrSocketsForIpc.set(1);
+    EXPECT_TRUE(productHelper->isPidFdOrSocketForIpcSupported());
+
+    debugManager.flags.EnablePidFdOrSocketsForIpc.set(0);
+    EXPECT_FALSE(productHelper->isPidFdOrSocketForIpcSupported());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenPidFdOrSocketForIpcIsNotSupportedThenFalseReturned, IsAtLeastXe2HpgCore) {
+    EXPECT_FALSE(productHelper->isPidFdOrSocketForIpcSupported());
+}
+
+HWTEST2_F(ProductHelperTest, givenProductHelperWhenPidFdOrSocketForIpcIsNotSupportedThenFalseReturned, IsAtMostXeCore) {
+    EXPECT_FALSE(productHelper->isPidFdOrSocketForIpcSupported());
 }

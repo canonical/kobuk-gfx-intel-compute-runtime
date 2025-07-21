@@ -69,7 +69,7 @@ size_t HardwareCommandsHelper<GfxFamily>::getSizeRequiredIOH(const Kernel &kerne
         requiredWalkOrder,
         simdSize);
     auto size = kernel.getCrossThreadDataSize() +
-                HardwareCommandsHelper::getPerThreadDataSizeTotal(simdSize, grfSize, grfCount, numChannels, localWorkSize, isHwLocalIdGeneration, rootDeviceEnvironment);
+                HardwareCommandsHelper::getPerThreadDataSizeTotal(simdSize, grfSize, grfCount, numChannels, localWorkSize, rootDeviceEnvironment);
 
     auto pImplicitArgs = kernel.getImplicitArgs();
     if (pImplicitArgs) {
@@ -201,7 +201,7 @@ size_t HardwareCommandsHelper<GfxFamily>::sendInterfaceDescriptorData(
                                                                kernelDescriptor.kernelAttributes.numGrfRequired, threadsPerThreadGroup, *walkerCmd);
 
     *pInterfaceDescriptor = interfaceDescriptor;
-    return (size_t)offsetInterfaceDescriptor;
+    return static_cast<size_t>(offsetInterfaceDescriptor);
 }
 
 template <typename GfxFamily>
@@ -297,7 +297,7 @@ size_t HardwareCommandsHelper<GfxFamily>::sendIndirectState(
     auto &gfxCoreHelper = device.getGfxCoreHelper();
     auto grfCount = kernel.getDescriptor().kernelAttributes.numGrfRequired;
     auto localWorkItems = localWorkSize[0] * localWorkSize[1] * localWorkSize[2];
-    auto threadsPerThreadGroup = gfxCoreHelper.calculateNumThreadsPerThreadGroup(simd, static_cast<uint32_t>(localWorkItems), grfCount, !localIdsGenerationByRuntime, device.getRootDeviceEnvironment());
+    auto threadsPerThreadGroup = gfxCoreHelper.calculateNumThreadsPerThreadGroup(simd, static_cast<uint32_t>(localWorkItems), grfCount, device.getRootDeviceEnvironment());
 
     uint32_t sizeCrossThreadData = kernel.getCrossThreadDataSize();
 

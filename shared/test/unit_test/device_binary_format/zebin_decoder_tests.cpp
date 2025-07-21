@@ -25,7 +25,7 @@
 #include "shared/test/common/mocks/mock_modules_zebin.h"
 #include "shared/test/common/test_macros/test.h"
 
-#include "platforms.h"
+#include "neo_aot_platforms.h"
 
 #include <numeric>
 #include <vector>
@@ -1934,6 +1934,7 @@ kernels:
         work_group_walk_order_dimensions: [0, 1, 2]
         thread_scheduling_mode: age_based
         indirect_stateless_count: 2
+        has_lsc_stores_with_non_default_l1_cache_controls: true
 ...
 )===";
 
@@ -1981,6 +1982,7 @@ kernels:
     using ThreadSchedulingMode = NEO::Zebin::ZeInfo::Types::Kernel::ExecutionEnv::ThreadSchedulingMode;
     EXPECT_EQ(ThreadSchedulingMode::ThreadSchedulingModeAgeBased, execEnv.threadSchedulingMode);
     EXPECT_EQ(2, execEnv.indirectStatelessCount);
+    EXPECT_TRUE(execEnv.hasLscStoresWithNonDefaultL1CacheControls);
 }
 
 TEST(ReadZeInfoExecutionEnvironment, GivenUnknownEntryThenEmitsError) {
@@ -4841,6 +4843,7 @@ TEST_F(decodeZeInfoKernelEntryTest, GivenPointerArgWhenMemoryAddressingModeIsKno
                 break;
             case AddressingMode::memoryAddressingModeBindless:
                 EXPECT_EQ(24U, argAsImage.bindless);
+                EXPECT_EQ(8U, argAsImage.size);
                 EXPECT_EQ(32U, argAsSampler.bindless);
                 break;
             }
@@ -6698,11 +6701,11 @@ TEST(ValidateTargetDeviceTests, givenDeviceInCompatModeWhenValidatingTargetDevic
                                             productConfigToCompare,
                                             targetMetadata);
 
-            auto prodConfCompatPairItr = AOT::compatibilityMapping.find(productConfigToCompare);
+            auto prodConfCompatPairItr = AOT::getCompatibilityMapping().find(productConfigToCompare);
 
             if (targetDevice.aotConfig.value == productConfigToCompare) {
                 EXPECT_TRUE(res);
-            } else if (prodConfCompatPairItr != AOT::compatibilityMapping.end()) {
+            } else if (prodConfCompatPairItr != AOT::getCompatibilityMapping().end()) {
                 auto prodConfVec = prodConfCompatPairItr->second;
                 auto found = std::find(prodConfVec.begin(), prodConfVec.end(), currentDevice.second);
                 if (found != prodConfVec.end()) {

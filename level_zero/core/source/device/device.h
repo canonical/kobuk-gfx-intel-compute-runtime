@@ -76,6 +76,7 @@ struct Device : _ze_device_handle_t {
     virtual ze_result_t getMemoryProperties(uint32_t *pCount, ze_device_memory_properties_t *pMemProperties) = 0;
     virtual ze_result_t getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) = 0;
     virtual ze_result_t getProperties(ze_device_properties_t *pDeviceProperties) = 0;
+    virtual ze_result_t getVectorWidthPropertiesExt(uint32_t *pCount, ze_device_vector_width_properties_ext_t *pVectorWidthProperties) = 0;
     virtual ze_result_t getSubDevices(uint32_t *pCount, ze_device_handle_t *phSubdevices) = 0;
     virtual ze_result_t getCacheProperties(uint32_t *pCount, ze_device_cache_properties_t *pCacheProperties) = 0;
     virtual ze_result_t getStatus() = 0;
@@ -95,7 +96,6 @@ struct Device : _ze_device_handle_t {
 
     virtual ~Device() = default;
 
-    virtual void *getExecEnvironment() = 0;
     virtual BuiltinFunctionsLib *getBuiltinFunctionsLib() = 0;
     virtual uint32_t getMOCS(bool l3enabled, bool l1enabled) = 0;
     virtual uint32_t getMaxNumHwThreads() const = 0;
@@ -153,6 +153,7 @@ struct Device : _ze_device_handle_t {
     NEO::TagAllocatorBase *getDeviceInOrderCounterAllocator();
     NEO::TagAllocatorBase *getHostInOrderCounterAllocator();
     NEO::TagAllocatorBase *getInOrderTimestampAllocator();
+    NEO::TagAllocatorBase *getFillPatternAllocator();
     NEO::GraphicsAllocation *getSyncDispatchTokenAllocation() const { return syncDispatchTokenAllocation; }
     uint32_t getNextSyncDispatchQueueId();
     void ensureSyncDispatchTokenAllocation();
@@ -166,6 +167,7 @@ struct Device : _ze_device_handle_t {
     std::unique_ptr<NEO::TagAllocatorBase> deviceInOrderCounterAllocator;
     std::unique_ptr<NEO::TagAllocatorBase> hostInOrderCounterAllocator;
     std::unique_ptr<NEO::TagAllocatorBase> inOrderTimestampAllocator;
+    std::unique_ptr<NEO::TagAllocatorBase> fillPatternAllocator;
     NEO::GraphicsAllocation *syncDispatchTokenAllocation = nullptr;
     std::mutex inOrderAllocatorMutex;
     std::mutex syncDispatchTokenMutex;

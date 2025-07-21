@@ -33,7 +33,6 @@ class CacheReservation;
 struct DeviceImp : public Device, NEO::NonCopyableAndNonMovableClass {
     DeviceImp();
     ze_result_t getStatus() override;
-    ze_result_t submitCopyForP2P(ze_device_handle_t hPeerDevice, ze_bool_t *value);
     MOCKABLE_VIRTUAL ze_result_t queryFabricStats(DeviceImp *pPeerDevice, uint32_t &latency, uint32_t &bandwidth);
     ze_result_t canAccessPeer(ze_device_handle_t hPeerDevice, ze_bool_t *value) override;
     ze_result_t createCommandList(const ze_command_list_desc_t *desc,
@@ -60,6 +59,7 @@ struct DeviceImp : public Device, NEO::NonCopyableAndNonMovableClass {
     ze_result_t getMemoryProperties(uint32_t *pCount, ze_device_memory_properties_t *pMemProperties) override;
     ze_result_t getMemoryAccessProperties(ze_device_memory_access_properties_t *pMemAccessProperties) override;
     ze_result_t getProperties(ze_device_properties_t *pDeviceProperties) override;
+    ze_result_t getVectorWidthPropertiesExt(uint32_t *pCount, ze_device_vector_width_properties_ext_t *pVectorWidthProperties) override;
     ze_result_t getSubDevices(uint32_t *pCount, ze_device_handle_t *phSubdevices) override;
     ze_result_t getCacheProperties(uint32_t *pCount, ze_device_cache_properties_t *pCacheProperties) override;
     ze_result_t reserveCache(size_t cacheLevel, size_t cacheReservationSize) override;
@@ -76,7 +76,6 @@ struct DeviceImp : public Device, NEO::NonCopyableAndNonMovableClass {
 
     ze_result_t systemBarrier() override;
     ze_result_t synchronize() override;
-    void *getExecEnvironment() override;
     BuiltinFunctionsLib *getBuiltinFunctionsLib() override;
     uint32_t getMOCS(bool l3enabled, bool l1enabled) override;
     const NEO::GfxCoreHelper &getGfxCoreHelper() override;
@@ -129,7 +128,6 @@ struct DeviceImp : public Device, NEO::NonCopyableAndNonMovableClass {
     uint32_t getPhysicalSubDeviceId();
 
     bool isSubdevice = false;
-    void *execEnvironment = nullptr;
     std::unique_ptr<BuiltinFunctionsLib> builtins;
     std::unique_ptr<MetricDeviceContext> metricContext;
     std::unique_ptr<CacheReservation> cacheReservation;
@@ -175,7 +173,6 @@ struct DeviceImp : public Device, NEO::NonCopyableAndNonMovableClass {
     ze_result_t getFabricVertex(ze_fabric_vertex_handle_t *phVertex) override;
 
     ze_result_t queryDeviceLuid(ze_device_luid_ext_properties_t *deviceLuidProperties);
-    ze_result_t setDeviceLuid(ze_device_luid_ext_properties_t *deviceLuidProperties);
     uint32_t getEventMaxPacketCount() const override;
     uint32_t getEventMaxKernelCount() const override;
     uint32_t queryDeviceNodeMask();
@@ -184,6 +181,8 @@ struct DeviceImp : public Device, NEO::NonCopyableAndNonMovableClass {
     std::optional<uint32_t> tryGetCopyEngineOrdinal() const;
 
   protected:
+    ze_result_t queryPeerAccess(DeviceImp *peerDevice);
+    bool submitCopyForP2P(DeviceImp *hPeerDevice, ze_result_t &result);
     ze_result_t getGlobalTimestampsUsingSubmission(uint64_t *hostTimestamp, uint64_t *deviceTimestamp);
     ze_result_t getGlobalTimestampsUsingOsInterface(uint64_t *hostTimestamp, uint64_t *deviceTimestamp);
     const char *getDeviceMemoryName();

@@ -9,29 +9,24 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/command_stream/linear_stream.h"
-#include "shared/source/command_stream/wait_status.h"
 #include "shared/source/device/device.h"
 #include "shared/source/helpers/engine_control.h"
 #include "shared/source/helpers/engine_node_helper.h"
 #include "shared/source/helpers/gfx_core_helper.h"
+#include "shared/source/helpers/hw_info.h"
 #include "shared/source/indirect_heap/indirect_heap.h"
-#include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_time.h"
-#include "shared/source/os_interface/sys_calls_common.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
-#include "level_zero/core/source/helpers/properties_parser.h"
 #include "level_zero/tools/source/metrics/metric.h"
 
-#include "igfxfmid.h"
 #include "log_manager.h"
-
-#include <algorithm>
+#include "neo_igfxfmid.h"
 
 namespace L0 {
 
@@ -49,7 +44,7 @@ ze_result_t CommandListImp::destroy() {
         static_cast<DeviceImp *>(this->device)->bcsSplit.releaseResources();
     }
 
-    if (isImmediateType() && this->isFlushTaskSubmissionEnabled && !this->isSyncModeQueue) {
+    if (this->cmdQImmediate && !this->isSyncModeQueue) {
         this->hostSynchronize(std::numeric_limits<uint64_t>::max());
     }
 
@@ -90,7 +85,7 @@ ze_result_t CommandListImp::appendMetricStreamerMarker(zet_metric_streamer_handl
 }
 
 ze_result_t CommandListImp::appendMetricQueryBegin(zet_metric_query_handle_t hMetricQuery) {
-    if (isImmediateType() && isFlushTaskSubmissionEnabled) {
+    if (isImmediateType()) {
         this->device->activateMetricGroups();
     }
 
@@ -209,14 +204,8 @@ CommandList *CommandList::createImmediate(uint32_t productFamily, Device *device
         auto &productHelper = device->getProductHelper();
 
         if (!internalUsage) {
-            commandList->isFlushTaskSubmissionEnabled = gfxCoreHelper.isPlatformFlushTaskEnabled(productHelper);
-            if (NEO::debugManager.flags.EnableFlushTaskSubmission.get() != -1) {
-                commandList->isFlushTaskSubmissionEnabled = !!NEO::debugManager.flags.EnableFlushTaskSubmission.get();
-            }
-            PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Flush Task for Immediate command list : %s\n", commandList->isFlushTaskSubmissionEnabled ? "Enabled" : "Disabled");
-
             auto &rootDeviceEnvironment = device->getNEODevice()->getRootDeviceEnvironment();
-            bool enabledCmdListSharing = !NEO::EngineHelper::isCopyOnlyEngineType(engineGroupType) && commandList->isFlushTaskSubmissionEnabled;
+            bool enabledCmdListSharing = !NEO::EngineHelper::isCopyOnlyEngineType(engineGroupType);
             commandList->immediateCmdListHeapSharing = L0GfxCoreHelper::enableImmediateCmdListHeapSharing(rootDeviceEnvironment, enabledCmdListSharing);
         }
         csr->initializeResources(false, device->getDevicePreemptionMode());

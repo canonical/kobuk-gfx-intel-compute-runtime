@@ -13,7 +13,7 @@
 #include "shared/source/os_interface/linux/drm_wrappers.h"
 #include "shared/source/utilities/stackvec.h"
 
-#include "igfxfmid.h"
+#include "neo_igfxfmid.h"
 
 #include <cinttypes>
 #include <cstddef>
@@ -130,7 +130,7 @@ class IoctlHelper {
     virtual uint32_t getPreferredLocationAdvise() = 0;
     virtual std::optional<MemoryClassInstance> getPreferredLocationRegion(PreferredLocation memoryLocation, uint32_t memoryInstance) = 0;
     virtual bool setVmBoAdvise(int32_t handle, uint32_t attribute, void *region) = 0;
-    virtual bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const uint32_t vmId) { return true; }
+    virtual bool setVmSharedSystemMemAdvise(uint64_t handle, const size_t size, const uint32_t attribute, const uint64_t param, const std::vector<uint32_t> &vmIds) { return true; }
     virtual bool setVmBoAdviseForChunking(int32_t handle, uint64_t start, uint64_t length, uint32_t attribute, void *region) = 0;
     virtual bool setVmPrefetch(uint64_t start, uint64_t length, uint32_t region, uint32_t vmId) = 0;
     virtual bool setGemTiling(void *setTiling) = 0;
@@ -241,6 +241,7 @@ class IoctlHelper {
     virtual void syncUserptrAlloc(DrmMemoryManager &memoryManager, GraphicsAllocation &allocation) { return; };
 
     virtual bool queryDeviceParams(uint32_t *moduleId, uint16_t *serverType) { return false; }
+    virtual std::unique_ptr<std::vector<uint32_t>> queryDeviceCaps() { return nullptr; }
 
     virtual bool isTimestampsRefreshEnabled() { return false; }
     virtual uint32_t getNumProcesses() const { return 1; }
@@ -248,6 +249,7 @@ class IoctlHelper {
     virtual bool makeResidentBeforeLockNeeded() const { return false; }
     virtual bool hasContextFreqHint() { return false; }
     virtual void fillExtSetparamLowLatency(GemContextCreateExtSetParam &extSetparam) { return; }
+    virtual bool isSmallBarConfigAllowed() const = 0;
 
   protected:
     Drm &drm;
@@ -289,6 +291,7 @@ class IoctlHelperI915 : public IoctlHelper {
     uint32_t getGtIdFromTileId(uint32_t tileId, uint16_t engineClass) const override { return tileId; }
     bool hasContextFreqHint() override;
     void fillExtSetparamLowLatency(GemContextCreateExtSetParam &extSetparam) override;
+    bool isSmallBarConfigAllowed() const override { return true; }
 
   protected:
     virtual std::vector<MemoryRegion> translateToMemoryRegions(const std::vector<uint64_t> &regionInfo);

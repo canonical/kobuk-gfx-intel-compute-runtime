@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2022-2024 Intel Corporation
+ * Copyright (C) 2022-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+
 #include "shared/source/gmm_helper/gmm.h"
 #include "shared/source/memory_manager/memory_allocation.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
@@ -19,9 +20,14 @@
 namespace NEO {
 class MockDevice;
 class MemoryManagerMemHandleMock;
+class ExecutionEnvironment;
+class SVMAllocsManager;
 } // namespace NEO
 
 namespace L0 {
+struct Device;
+struct DriverHandle;
+
 namespace ult {
 
 struct DriverHandleGetFdMock : public L0::DriverHandleImp {
@@ -157,6 +163,7 @@ struct MemoryExportImportWinHandleTest : public ::testing::Test {
     void SetUp() override;
 
     void TearDown() override {
+        driverHandle.reset(nullptr);
     }
     std::unique_ptr<DriverHandleGetWinHandleMock> driverHandle;
     NEO::MockDevice *neoDevice = nullptr;
@@ -399,6 +406,18 @@ struct MemoryExportImportImplicitScalingTest : public ::testing::Test {
     NEO::MockDevice *neoDevice = nullptr;
     L0::Device *device = nullptr;
     std::unique_ptr<ContextIpcMock> context;
+};
+
+struct MemoryGetIpcHandlePidfdTest : public ::testing::Test {
+    void SetUp() override;
+    void TearDown() override;
+
+    NEO::MemoryManager *prevMemoryManager = nullptr;
+    NEO::MemoryManager *currMemoryManager = nullptr;
+    std::unique_ptr<DriverHandleImp> driverHandle;
+    NEO::MockDevice *neoDevice = nullptr;
+    L0::Device *device = nullptr;
+    std::unique_ptr<ContextImp> context;
 };
 
 } // namespace ult

@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2018-2023 Intel Corporation
+ * Copyright (C) 2018-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
  */
 
 #pragma once
+
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/test_macros/test_checks_shared.h"
 
@@ -19,6 +20,11 @@
 
 namespace NEO {
 class Device;
+class Buffer;
+class ClDevice;
+class CommandQueue;
+class Context;
+class MockContext;
 
 struct CommandQueueHwFixture {
     CommandQueue *createCommandQueue(ClDevice *device) {
@@ -135,6 +141,27 @@ struct CommandQueueHwTest
 
     cl_command_queue_properties properties;
     const HardwareInfo *pHwInfo = nullptr;
+};
+
+template <template <typename> class CsrType>
+struct CommandQueueHwTestWithCsrT
+    : public CommandQueueHwTest {
+
+    void SetUp() override {}
+
+    void TearDown() override {}
+
+    template <typename FamilyType>
+    void setUpT() {
+        EnvironmentWithCsrWrapper environment;
+        environment.setCsrType<CsrType<FamilyType>>();
+        CommandQueueHwTest::SetUp();
+    }
+
+    template <typename FamilyType>
+    void tearDownT() {
+        CommandQueueHwTest::TearDown();
+    }
 };
 
 struct OOQueueHwTest : public ClDeviceFixture,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -36,8 +36,8 @@ const std::map<std::string, std::pair<uint32_t, uint32_t>> dummyKeyOffsetMap = {
      {"GDDR0_CH0_SOC_32B_WR_REQ_LOWER", {111, 1}},
      {"GDDR0_CH1_SOC_32B_WR_REQ_UPPER", {130, 1}},
      {"GDDR0_CH1_SOC_32B_WR_REQ_LOWER", {131, 1}},
-     {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", {92, 1}},
-     {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", {93, 1}},
+     {"GDDR_TELEM_CAPTURE_TIMESTAMP_UPPER", {93, 1}},
+     {"GDDR_TELEM_CAPTURE_TIMESTAMP_LOWER", {92, 1}},
      {"GDDR0_CH0_GT_64B_RD_REQ_UPPER", {96, 1}},
      {"GDDR0_CH0_GT_64B_RD_REQ_LOWER", {97, 1}},
      {"GDDR0_CH1_GT_64B_RD_REQ_UPPER", {116, 1}},
@@ -118,14 +118,6 @@ HWTEST2_F(SysmanDeviceMemoryHelperFixture, GivenValidMemoryHandleWhenGettingBand
             *lpBytesReturned = 8;
             *static_cast<uint32_t *>(lpOutBuffer) = 131072;
             return true;
-        case 92:
-            *lpBytesReturned = 8;
-            *static_cast<uint32_t *>(lpOutBuffer) = 0;
-            return true;
-        case 93:
-            *lpBytesReturned = 8;
-            *static_cast<uint32_t *>(lpOutBuffer) = mockMemoryBandwidthTimestamp;
-            return true;
         default:
             *lpBytesReturned = 8;
             if (readRequest->offset % 2 == 0) {
@@ -147,12 +139,12 @@ HWTEST2_F(SysmanDeviceMemoryHelperFixture, GivenValidMemoryHandleWhenGettingBand
         EXPECT_EQ(bandwidth.maxBandwidth, static_cast<uint64_t>(mockMemoryMaxBandwidth * megaBytesToBytes * 100));
         EXPECT_EQ(bandwidth.readCounter, (6 * mockPmtBandWidthVariableBackupValue * 32) + (6 * mockPmtBandWidthVariableBackupValue * 64));
         EXPECT_EQ(bandwidth.writeCounter, (4 * mockPmtBandWidthVariableBackupValue * 32) + (4 * mockPmtBandWidthVariableBackupValue * 64));
-        EXPECT_EQ(bandwidth.timestamp, mockMemoryBandwidthTimestamp * milliSecsToMicroSecs);
+        EXPECT_GT(bandwidth.timestamp, 0u);
     }
 }
 
 HWTEST2_F(SysmanDeviceMemoryHelperFixture, GivenValidMemoryHandleWhenGettingBandwidthCoveringNegativePathsThenCallFails, IsBMG) {
-    static uint32_t count = 8;
+    static uint32_t count = 6;
     VariableBackup<decltype(NEO::SysCalls::sysCallsCreateFile)> psysCallsCreateFile(&NEO::SysCalls::sysCallsCreateFile, [](LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) -> HANDLE {
         return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(0x7));
     });
@@ -167,30 +159,22 @@ HWTEST2_F(SysmanDeviceMemoryHelperFixture, GivenValidMemoryHandleWhenGettingBand
             *lpBytesReturned = 8;
             *static_cast<uint32_t *>(lpOutBuffer) = 131072;
             return count == 2 ? false : true;
-        case 92:
-            *lpBytesReturned = 8;
-            *static_cast<uint32_t *>(lpOutBuffer) = 0;
-            return count == 3 ? false : true;
-        case 93:
-            *lpBytesReturned = 8;
-            *static_cast<uint32_t *>(lpOutBuffer) = 1230000;
-            return count == 4 ? false : true;
         case 94:
             *lpBytesReturned = 8;
             *static_cast<uint32_t *>(lpOutBuffer) = 0;
-            return count == 5 ? false : true;
+            return count == 3 ? false : true;
         case 95:
             *lpBytesReturned = 8;
             *static_cast<uint32_t *>(lpOutBuffer) = 10000000;
-            return count == 6 ? false : true;
+            return count == 4 ? false : true;
         case 110:
             *lpBytesReturned = 8;
             *static_cast<uint32_t *>(lpOutBuffer) = 0;
-            return count == 7 ? false : true;
+            return count == 5 ? false : true;
         case 111:
             *lpBytesReturned = 8;
             *static_cast<uint32_t *>(lpOutBuffer) = 10000000;
-            return count == 8 ? false : true;
+            return count == 6 ? false : true;
         default:
             *lpBytesReturned = 8;
             if (readRequest->offset % 2 == 0) {
