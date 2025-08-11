@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/helpers/gfx_core_helper.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/unified_memory/usm_memory_support.h"
@@ -16,6 +17,7 @@
 #include "shared/test/common/test_macros/hw_test.h"
 
 #include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
+#include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/test/unit_tests/fixtures/module_fixture.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
@@ -932,7 +934,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
     ASSERT_NE(nullptr, allocData);
     auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, kernelAllocation);
-    kernel.argumentsResidencyContainer.push_back(kernelAllocation);
+    kernel.state.argumentsResidencyContainer.push_back(kernelAllocation);
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
@@ -1000,7 +1002,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
     ASSERT_NE(nullptr, allocData);
     auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, kernelAllocation);
-    kernel.argumentsResidencyContainer.push_back(kernelAllocation);
+    kernel.state.argumentsResidencyContainer.push_back(kernelAllocation);
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
@@ -1126,9 +1128,9 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
     ASSERT_NE(nullptr, allocData);
     auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, kernelAllocation);
-    kernel.argumentsResidencyContainer.push_back(kernelAllocation);
+    kernel.state.argumentsResidencyContainer.push_back(kernelAllocation);
 
-    kernel.unifiedMemoryControls.indirectHostAllocationsAllowed = true;
+    kernel.state.unifiedMemoryControls.indirectHostAllocationsAllowed = true;
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
@@ -1198,7 +1200,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
     ASSERT_NE(nullptr, allocData);
     auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, kernelAllocation);
-    kernel.argumentsResidencyContainer.push_back(kernelAllocation);
+    kernel.state.argumentsResidencyContainer.push_back(kernelAllocation);
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;
@@ -1266,7 +1268,7 @@ HWTEST2_F(CommandListAppendLaunchKernelXeHpcCore,
     ASSERT_NE(nullptr, allocData);
     auto kernelAllocation = allocData->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
     ASSERT_NE(nullptr, kernelAllocation);
-    kernel.argumentsResidencyContainer.push_back(kernelAllocation);
+    kernel.state.argumentsResidencyContainer.push_back(kernelAllocation);
 
     ze_event_pool_desc_t eventPoolDesc = {};
     eventPoolDesc.count = 1;

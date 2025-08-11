@@ -729,12 +729,13 @@ HWTEST_F(DirectSubmissionDispatchBufferTest, givenDirectSubmissionPrintBuffersWh
 HWTEST_F(DirectSubmissionDispatchBufferTest, givenDirectSubmissionPrintSemaphoreWhenDispatchingThenPrintAllData) {
     DebugManagerStateRestore restorer;
     debugManager.flags.DirectSubmissionPrintSemaphoreUsage.set(1);
+    StreamCapture capture;
 
     {
         FlushStampTracker flushStamp(true);
         MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>> directSubmission(*pDevice->getDefaultEngine().commandStreamReceiver);
 
-        testing::internal::CaptureStdout();
+        capture.captureStdout();
 
         bool ret = directSubmission.initialize(false);
         EXPECT_TRUE(ret);
@@ -743,7 +744,7 @@ HWTEST_F(DirectSubmissionDispatchBufferTest, givenDirectSubmissionPrintSemaphore
         directSubmission.unblockGpu();
     }
 
-    std::string output = testing::internal::GetCapturedStdout();
+    std::string output = capture.getCapturedStdout();
 
     auto pos = output.find("DirectSubmission semaphore");
     EXPECT_TRUE(pos != std::string::npos);
@@ -2165,7 +2166,7 @@ HWTEST2_F(DirectSubmissionRelaxedOrderingTests, givenBcsRelaxedOrderingEnabledWh
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(pDevice->getDefaultEngine().commandStreamReceiver);
     ultCsr->setupContext(*osContext);
-    ultCsr->blitterDirectSubmissionAvailable = true;
+    VariableBackup<bool> blitterDirectSubmissionAvailable{&ultCsr->blitterDirectSubmissionAvailable, true};
 
     auto directSubmission = new MockDirectSubmissionHw<FamilyType, BlitterDispatcher<FamilyType>>(*ultCsr);
     ultCsr->blitterDirectSubmission.reset(directSubmission);

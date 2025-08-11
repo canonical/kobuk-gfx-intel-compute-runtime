@@ -1174,6 +1174,54 @@ TEST_F(ContextTest, whenGettingDriverThenDriverIsRetrievedSuccessfully) {
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 }
 
+TEST_F(ContextTest, whenCreatingContextWithPidfdApproachTrueThenContextSettingsSetCorrectly) {
+    DebugManagerStateRestore restore;
+
+    debugManager.flags.EnablePidFdOrSocketsForIpc.set(1);
+    ze_context_handle_t hContext;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+
+    ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    ContextImp *contextImp = static_cast<ContextImp *>(L0::Context::fromHandle(hContext));
+    EXPECT_TRUE(contextImp->contextSettings.enablePidfdOrSockets);
+
+    res = contextImp->destroy();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+}
+
+TEST_F(ContextTest, whenCreatingContextWithPidfdApproachFalseThenContextSettingsSetCorrectly) {
+    DebugManagerStateRestore restore;
+
+    debugManager.flags.EnablePidFdOrSocketsForIpc.set(0);
+    ze_context_handle_t hContext;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+
+    ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    ContextImp *contextImp = static_cast<ContextImp *>(L0::Context::fromHandle(hContext));
+    EXPECT_FALSE(contextImp->contextSettings.enablePidfdOrSockets);
+
+    res = contextImp->destroy();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+}
+
+HWTEST2_F(ContextTest, whenCreatingContextWithSvmHeapReservationTrueThenContextSettingsSetCorrectly, IsNotMTL) {
+    ze_context_handle_t hContext;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+
+    ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    ContextImp *contextImp = static_cast<ContextImp *>(L0::Context::fromHandle(hContext));
+    EXPECT_TRUE(contextImp->contextSettings.enableSvmHeapReservation);
+
+    res = contextImp->destroy();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+}
+
 TEST_F(ContextTest, whenCallingVirtualMemInterfacesThenSuccessIsReturned) {
     ze_context_handle_t hContext;
     ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
@@ -1711,8 +1759,8 @@ class ReserveMemoryManagerMock : public NEO::MemoryManager {
     GraphicsAllocation *allocatePhysicalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
     GraphicsAllocation *allocatePhysicalLocalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
     GraphicsAllocation *allocatePhysicalHostMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
-    void unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) override { return; };
-    void unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return; };
+    bool unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) override { return false; };
+    bool unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
     bool mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override {
         if (failMapVirtualMemory) {
             return false;
@@ -2462,6 +2510,7 @@ TEST_F(ContextTest, whenCallingMapVirtualMemoryWithInvalidValuesThenFailureRetur
     res = contextImp->mapVirtualMem(offsetAddr, pagesize * 2, mem, offset, access);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, res);
 
+    // Test coverage for case when "if (virtualMemoryReservation)" is false.
     res = contextImp->unMapVirtualMem(nullptr, pagesize);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
@@ -2482,6 +2531,10 @@ TEST_F(ContextTest, whenCallingMapVirtualMemoryWithInvalidValuesThenFailureRetur
     res = contextImp->mapVirtualMem(ptr, pagesize, mem, offset, access);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, res);
 
+    // Test unsupported page size alignment: not covered in API validation layer.
+    res = contextImp->unMapVirtualMem(ptr, pagesize + pagesize / 2);
+    EXPECT_EQ(ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT, res);
+
     res = contextImp->unMapVirtualMem(ptr, pagesize);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
@@ -2490,6 +2543,69 @@ TEST_F(ContextTest, whenCallingMapVirtualMemoryWithInvalidValuesThenFailureRetur
 
     res = contextImp->freeVirtualMem(ptr, pagesize * 2);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = contextImp->destroy();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+}
+
+TEST_F(ContextTest, whenCallingUnmapVirtualMemoryWithFailedUnmapThenUnknownErrorReturned) {
+    ze_context_handle_t hContext;
+    std::unique_ptr<MockMemoryManager> mockMemManager;
+    ze_context_desc_t desc = {ZE_STRUCTURE_TYPE_CONTEXT_DESC, nullptr, 0};
+
+    ze_result_t res = driverHandle->createContext(&desc, 0u, nullptr, &hContext);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    device->getNEODevice()->getExecutionEnvironment()->rootDeviceEnvironments[0]->memoryOperationsInterface =
+        std::make_unique<NEO::MockMemoryOperations>();
+
+    ContextImp *contextImp = static_cast<ContextImp *>(L0::Context::fromHandle(hContext));
+
+    // Use a mock memory manager that returns a failure for unmapVirtualMem.
+    auto memManager = driverHandle->getMemoryManager();
+
+    mockMemManager = std::make_unique<MockMemoryManager>();
+    driverHandle->setMemoryManager(mockMemManager.get());
+
+    void *pStart = 0x0;
+    size_t size = 4096u;
+    void *ptr = nullptr;
+    size_t pagesize = 0u;
+
+    res = contextImp->queryVirtualMemPageSize(device, size, &pagesize);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = contextImp->reserveVirtualMem(pStart, pagesize, &ptr);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    ze_physical_mem_desc_t descMem = {ZE_STRUCTURE_TYPE_PHYSICAL_MEM_DESC, nullptr, ZE_PHYSICAL_MEM_FLAG_ALLOCATE_ON_DEVICE, pagesize};
+    ze_physical_mem_handle_t mem = {};
+
+    res = contextImp->createPhysicalMem(device, &descMem, &mem);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    ze_memory_access_attribute_t access = {ZE_MEMORY_ACCESS_ATTRIBUTE_READWRITE};
+    size_t offset = 0;
+
+    res = contextImp->mapVirtualMem(ptr, pagesize, mem, offset, access);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    // Set the mock memory manager to return an error for unmapVirtualMem.
+    mockMemManager->failUnMapPhysicalToVirtualMemory = true;
+    res = contextImp->unMapVirtualMem(ptr, pagesize);
+    EXPECT_EQ(ZE_RESULT_ERROR_UNKNOWN, res);
+
+    // Reset the mock memory manager to not fail unmapVirtualMem.
+    mockMemManager->failUnMapPhysicalToVirtualMemory = false;
+
+    res = contextImp->destroyPhysicalMem(mem);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    res = contextImp->freeVirtualMem(ptr, pagesize);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, res);
+
+    // Reset the memory manager to the original one.
+    driverHandle->setMemoryManager(memManager);
 
     res = contextImp->destroy();
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);

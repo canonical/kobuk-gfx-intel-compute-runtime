@@ -578,7 +578,7 @@ HWTEST2_F(BlitTests, givenXe2HpgCoreWhenDstGraphicAlloctionWhenAppendBlitCommand
     BlitProperties properties = {};
     DebugManagerStateRestore dbgRestore;
 
-    uint32_t newCompressionFormat = 1;
+    uint32_t newCompressionFormat = 2;
     debugManager.flags.ForceBufferCompressionFormat.set(static_cast<int32_t>(newCompressionFormat));
 
     auto gmm = std::make_unique<MockGmm>(pDevice->getGmmHelper());
@@ -620,7 +620,7 @@ HWTEST2_F(BlitTests, givenXe2HpgCoreWhenDstGraphicAlloctionAndStatelessFlagSetAn
     BlitProperties properties = {};
     DebugManagerStateRestore dbgRestore;
 
-    uint32_t newCompressionFormat = 1;
+    uint32_t newCompressionFormat = 2;
     debugManager.flags.ForceBufferCompressionFormat.set(static_cast<int32_t>(newCompressionFormat));
     debugManager.flags.EnableStatelessCompressionWithUnifiedMemory.set(1);
 
@@ -641,7 +641,7 @@ HWTEST2_F(BlitTests, givenXe2HpgCoreWhenSrcGraphicAlloctionWhenAppendBlitCommand
     BlitProperties properties = {};
     DebugManagerStateRestore dbgRestore;
 
-    uint32_t newCompressionFormat = 1;
+    uint32_t newCompressionFormat = 2;
     debugManager.flags.ForceBufferCompressionFormat.set(static_cast<int32_t>(newCompressionFormat));
 
     auto gmm = std::make_unique<MockGmm>(pDevice->getGmmHelper());
@@ -683,7 +683,7 @@ HWTEST2_F(BlitTests, givenXe2HpgCoreWhenSrcGraphicAlloctionAndStatelessFlagSetAn
     BlitProperties properties = {};
     DebugManagerStateRestore dbgRestore;
 
-    uint32_t newCompressionFormat = 1;
+    uint32_t newCompressionFormat = 2;
     debugManager.flags.ForceBufferCompressionFormat.set(static_cast<int32_t>(newCompressionFormat));
     debugManager.flags.EnableStatelessCompressionWithUnifiedMemory.set(1);
 
@@ -1386,6 +1386,9 @@ HWTEST2_F(BlitTests, givenPlatformWithBlitSyncPropertiesWithAndWithoutUseAdditio
 }
 
 HWTEST2_F(BlitTests, givenSystemMemoryPlatformWithBlitSyncPropertiesWithAndWithoutUseAdditionalPropertiesWhenCallingDispatchBlitMemoryFillThenTheResultsAreTheSame, MatchAny) {
+    DebugManagerStateRestore restore;
+    debugManager.flags.LimitBlitterMaxWidth.set(1024);
+    debugManager.flags.LimitBlitterMaxHeight.set(1024);
     size_t maxBlitWidth = static_cast<size_t>(BlitCommandsHelper<FamilyType>::getMaxBlitWidth(pDevice->getRootDeviceEnvironmentRef()));
     size_t maxBlitHeight = static_cast<size_t>(BlitCommandsHelper<FamilyType>::getMaxBlitHeight(pDevice->getRootDeviceEnvironmentRef(), true));
     size_t dstSize = 2 * sizeof(uint32_t) * (maxBlitWidth * maxBlitHeight) + sizeof(uint32_t);

@@ -6,6 +6,7 @@
  */
 
 #include "shared/source/command_stream/command_stream_receiver.h"
+#include "shared/source/command_stream/transfer_direction.h"
 #include "shared/source/helpers/blit_properties.h"
 #include "shared/source/helpers/register_offsets.h"
 #include "shared/source/os_interface/os_context.h"
@@ -15,7 +16,9 @@
 #include "shared/test/common/mocks/mock_graphics_allocation.h"
 #include "shared/test/common/test_macros/hw_test.h"
 
+#include "level_zero/core/source/device/bcs_split.h"
 #include "level_zero/core/source/event/event.h"
+#include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/source/image/image_hw.h"
 #include "level_zero/core/test/unit_tests/fixtures/cmdlist_fixture.h"
 #include "level_zero/core/test/unit_tests/fixtures/device_fixture.h"
@@ -569,15 +572,24 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
     commandList->appendMemoryCopy(dstBuffer, srcBuffer, 4906u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(0u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     commandList->useAdditionalBlitProperties = true;
     EXPECT_EQ(0u, commandList->additionalBlitPropertiesCalled);
     commandList->appendMemoryCopy(dstBuffer, srcBuffer, 4906u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyCopyBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyCopyBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     context->freeMem(dstBuffer);
     context->freeMem(srcBuffer);
@@ -628,15 +640,24 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
     commandList->appendCopyImageBlit(&mockAllocationDst, &mockAllocationSrc, {0, 0, 0}, {0, 0, 0}, 1, 1, 1, 1, 1, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(0u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     commandList->useAdditionalBlitProperties = true;
 
     commandList->appendCopyImageBlit(&mockAllocationDst, &mockAllocationSrc, {0, 0, 0}, {0, 0, 0}, 1, 1, 1, 1, 1, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyBlockCopyBlt, commandList->inOrderPatchCmds.back().patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyBlockCopyBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 }
 
 HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPropertiesWhenCallingAppendMemoryCopyImageBlitThenInOrderPatchCmdsRemainsTheSame) {
@@ -676,15 +697,23 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
                                         srcBuffer, &sr, width, 0, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(0u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     commandList->useAdditionalBlitProperties = true;
     commandList->appendMemoryCopyRegion(dstBuffer, &dr, width, 0,
                                         srcBuffer, &sr, width, 0, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyCopyBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyCopyBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 }
 
 HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPropertiesWhenCallingAppendMemoryCopyRegionThenInOrderPatchCmdsRemainsTheSame) {
@@ -726,14 +755,22 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
 
     EXPECT_EQ(0u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     commandList->useAdditionalBlitProperties = true;
     commandList->appendBlitFill(dstBuffer, &one, sizeof(uint8_t), 4096u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::memSet, commandList->inOrderPatchCmds[2].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::memSet, commandList->inOrderPatchCmds[2].patchCmdType);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
     context->freeMem(dstBuffer);
 }
 
@@ -757,14 +794,22 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
     commandList->appendBlitFill(dstBuffer, &one, sizeof(uint16_t), 4096u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(0u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     commandList->useAdditionalBlitProperties = true;
     commandList->appendBlitFill(dstBuffer, &one, sizeof(uint16_t), 4096u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(1u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyColorBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(3u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyColorBlt, commandList->inOrderPatchCmds[2].patchCmdType);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
     context->freeMem(dstBuffer);
 }
 
@@ -807,19 +852,23 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
                                         srcBuffer, &sr, width, 0, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(0u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyCopyBlt, commandList->inOrderPatchCmds[0].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyCopyBlt, commandList->inOrderPatchCmds[0].patchCmdType);
 
-    commandList->enablePatching(0);
-    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
-    using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
-    auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
-    EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
-    EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
-    XY_COPY_BLT copyBlt = *reinterpret_cast<XY_COPY_BLT *>(inOrderPatchCmd.cmd1);
-    inOrderPatchCmd.patch(3);
-    XY_COPY_BLT *modifiedBlt = reinterpret_cast<XY_COPY_BLT *>(inOrderPatchCmd.cmd1);
-    EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(XY_COPY_BLT)), 0);
+        commandList->enablePatching(0);
+        using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
+        using XY_COPY_BLT = typename GfxFamily::XY_COPY_BLT;
+        auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
+        EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
+        EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
+        XY_COPY_BLT copyBlt = *reinterpret_cast<XY_COPY_BLT *>(inOrderPatchCmd.cmd1);
+        inOrderPatchCmd.patch(3);
+        XY_COPY_BLT *modifiedBlt = reinterpret_cast<XY_COPY_BLT *>(inOrderPatchCmd.cmd1);
+        EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(XY_COPY_BLT)), 0);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 }
 
 HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPropertiesWhenPatchingCommandsAfterCallingMemoryCopyThenCommandsRemainsTheSame) {
@@ -839,19 +888,23 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
     commandList->appendCopyImageBlit(&mockAllocationDst, &mockAllocationSrc, {0, 0, 0}, {0, 0, 0}, 1, 1, 1, 1, 1, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(0u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyBlockCopyBlt, commandList->inOrderPatchCmds[0].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyBlockCopyBlt, commandList->inOrderPatchCmds[0].patchCmdType);
 
-    commandList->enablePatching(0);
-    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
-    using XY_BLOCK_COPY_BLT = typename GfxFamily::XY_BLOCK_COPY_BLT;
-    auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
-    EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
-    EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
-    XY_BLOCK_COPY_BLT copyBlt = *reinterpret_cast<XY_BLOCK_COPY_BLT *>(inOrderPatchCmd.cmd1);
-    inOrderPatchCmd.patch(3);
-    XY_BLOCK_COPY_BLT *modifiedBlt = reinterpret_cast<XY_BLOCK_COPY_BLT *>(inOrderPatchCmd.cmd1);
-    EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(XY_BLOCK_COPY_BLT)), 0);
+        commandList->enablePatching(0);
+        using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
+        using XY_BLOCK_COPY_BLT = typename GfxFamily::XY_BLOCK_COPY_BLT;
+        auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
+        EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
+        EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
+        XY_BLOCK_COPY_BLT copyBlt = *reinterpret_cast<XY_BLOCK_COPY_BLT *>(inOrderPatchCmd.cmd1);
+        inOrderPatchCmd.patch(3);
+        XY_BLOCK_COPY_BLT *modifiedBlt = reinterpret_cast<XY_BLOCK_COPY_BLT *>(inOrderPatchCmd.cmd1);
+        EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(XY_BLOCK_COPY_BLT)), 0);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 }
 
 HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPropertiesWhenPatchingCommandsAfterCallingMemoryFillWithTwoBytesPatternThenCommandsRemainsTheSame) {
@@ -874,19 +927,23 @@ HWTEST_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPro
     commandList->appendBlitFill(dstBuffer, &one, sizeof(uint16_t), 4096u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(0u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyColorBlt, commandList->inOrderPatchCmds[0].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::xyColorBlt, commandList->inOrderPatchCmds[0].patchCmdType);
 
-    commandList->enablePatching(0);
-    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
-    using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
-    auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
-    EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
-    EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
-    XY_COLOR_BLT copyBlt = *reinterpret_cast<XY_COLOR_BLT *>(inOrderPatchCmd.cmd1);
-    inOrderPatchCmd.patch(3);
-    XY_COLOR_BLT *modifiedBlt = reinterpret_cast<XY_COLOR_BLT *>(inOrderPatchCmd.cmd1);
-    EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(XY_COLOR_BLT)), 0);
+        commandList->enablePatching(0);
+        using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
+        using XY_COLOR_BLT = typename GfxFamily::XY_COLOR_BLT;
+        auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
+        EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
+        EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
+        XY_COLOR_BLT copyBlt = *reinterpret_cast<XY_COLOR_BLT *>(inOrderPatchCmd.cmd1);
+        inOrderPatchCmd.patch(3);
+        XY_COLOR_BLT *modifiedBlt = reinterpret_cast<XY_COLOR_BLT *>(inOrderPatchCmd.cmd1);
+        EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(XY_COLOR_BLT)), 0);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     context->freeMem(dstBuffer);
 }
@@ -911,19 +968,23 @@ HWTEST2_F(AppendMemoryCopyTests, givenCopyOnlyCommandListWithUseAdditionalBlitPr
     commandList->appendBlitFill(dstBuffer, &one, sizeof(uint8_t), 4096u, nullptr, 0, nullptr, copyParams);
     EXPECT_EQ(1u, commandList->additionalBlitPropertiesCalled);
     EXPECT_EQ(0u, commandList->appendSignalInOrderDependencyCounterCalled);
-    EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
-    EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::memSet, commandList->inOrderPatchCmds[0].patchCmdType);
+    if (commandList->inOrderCmdsPatchingEnabled()) {
+        EXPECT_EQ(1u, commandList->inOrderPatchCmds.size());
+        EXPECT_EQ(InOrderPatchCommandHelpers::PatchCmdType::memSet, commandList->inOrderPatchCmds[0].patchCmdType);
 
-    commandList->enablePatching(0);
-    using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
-    using MEM_SET = typename GfxFamily::MEM_SET;
-    auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
-    EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
-    EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
-    MEM_SET copyBlt = *reinterpret_cast<MEM_SET *>(inOrderPatchCmd.cmd1);
-    inOrderPatchCmd.patch(3);
-    MEM_SET *modifiedBlt = reinterpret_cast<MEM_SET *>(inOrderPatchCmd.cmd1);
-    EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(MEM_SET)), 0);
+        commandList->enablePatching(0);
+        using GfxFamily = typename NEO::GfxFamilyMapper<FamilyType::gfxCoreFamily>::GfxFamily;
+        using MEM_SET = typename GfxFamily::MEM_SET;
+        auto &inOrderPatchCmd = commandList->inOrderPatchCmds[0];
+        EXPECT_NE(nullptr, inOrderPatchCmd.cmd1);
+        EXPECT_EQ(nullptr, inOrderPatchCmd.cmd2);
+        MEM_SET copyBlt = *reinterpret_cast<MEM_SET *>(inOrderPatchCmd.cmd1);
+        inOrderPatchCmd.patch(3);
+        MEM_SET *modifiedBlt = reinterpret_cast<MEM_SET *>(inOrderPatchCmd.cmd1);
+        EXPECT_EQ(memcmp(modifiedBlt, &copyBlt, sizeof(MEM_SET)), 0);
+    } else {
+        EXPECT_EQ(0u, commandList->inOrderPatchCmds.size());
+    }
 
     context->freeMem(dstBuffer);
 }
@@ -935,29 +996,33 @@ struct AggregatedBcsSplitTests : public ::testing::Test {
         debugManager.flags.SplitBcsRequiredTileCount.set(expectedTileCount);
         debugManager.flags.SplitBcsRequiredEnginesCount.set(expectedEnginesCount);
         debugManager.flags.SplitBcsMask.set(0b11110);
+        debugManager.flags.SplitBcsTransferDirectionMask.set(transferDirectionMask);
 
-        device = createDevice();
+        createDevice();
         context = Context::fromHandle(driverHandle->getDefaultContext());
         cmdList = createCmdList();
     }
 
-    std::unique_ptr<L0::Device> createDevice() {
-        ze_result_t returnValue;
+    void createDevice() {
         auto hwInfo = *NEO::defaultHwInfo;
         hwInfo.featureTable.ftrBcsInfo = 0b111111111;
         hwInfo.capabilityTable.blitterOperationsSupported = true;
-        auto neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo);
+        auto neoDevice = NEO::MockDevice::createWithNewExecutionEnvironment<NEO::MockDevice>(&hwInfo, 0);
 
         NEO::DeviceVector devices;
         devices.push_back(std::unique_ptr<NEO::Device>(neoDevice));
+
+        for (uint32_t i = 1; i < expectedNumRootDevices; i++) {
+            auto neoRootDevice = NEO::MockDevice::createWithExecutionEnvironment<NEO::MockDevice>(&hwInfo, neoDevice->getExecutionEnvironment(), i);
+            devices.push_back(std::unique_ptr<NEO::Device>(neoRootDevice));
+        }
+
         driverHandle = std::make_unique<Mock<L0::DriverHandleImp>>();
         driverHandle->initialize(std::move(devices));
 
-        auto device = std::unique_ptr<L0::Device>(L0::Device::create(driverHandle.get(), neoDevice, false, &returnValue));
+        this->device = driverHandle->devices[0];
 
-        bcsSplit = &static_cast<DeviceImp *>(device.get())->bcsSplit;
-
-        return device;
+        bcsSplit = static_cast<DeviceImp *>(device)->bcsSplit.get();
     }
 
     uint32_t queryCopyOrdinal() {
@@ -987,7 +1052,7 @@ struct AggregatedBcsSplitTests : public ::testing::Test {
         desc.ordinal = queryCopyOrdinal();
 
         std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily,
-                                                                                  device.get(),
+                                                                                  device,
                                                                                   &desc,
                                                                                   false,
                                                                                   NEO::EngineGroupType::copy,
@@ -1004,17 +1069,64 @@ struct AggregatedBcsSplitTests : public ::testing::Test {
         return alloc;
     }
 
+    void *allocDeviceMem(L0::Device *device) {
+        void *alloc = nullptr;
+        ze_device_mem_alloc_desc_t deviceDesc = {};
+        ze_result_t result = context->allocDeviceMem(device->toHandle(), &deviceDesc, copySize, 4096u, &alloc);
+        EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+        return alloc;
+    }
+
     DebugManagerStateRestore restore;
     CmdListMemoryCopyParams copyParams = {};
     std::unique_ptr<Mock<L0::DriverHandleImp>> driverHandle;
-    std::unique_ptr<L0::Device> device;
+    L0::Device *device = nullptr;
     std::unique_ptr<L0::CommandList> cmdList;
     BcsSplit *bcsSplit = nullptr;
     Context *context = nullptr;
     const size_t copySize = 4 * MemoryConstants::megaByte;
+    const int32_t transferDirectionMask = ~(1 << static_cast<int32_t>(TransferDirection::localToLocal));
+
     uint32_t expectedTileCount = 1;
     uint32_t expectedEnginesCount = 4;
+    uint32_t expectedNumRootDevices = 1;
 };
+
+HWTEST2_F(AggregatedBcsSplitTests, givenLimitedEnginesCountWhenCreatingBcsSplitThenCreateCorrectQueues, IsAtLeastXeHpcCore) {
+    expectedEnginesCount = 2;
+    debugManager.flags.SplitBcsRequiredEnginesCount.set(expectedEnginesCount);
+
+    BcsSplit bcsSplit(static_cast<L0::DeviceImp &>(*device));
+
+    bcsSplit.setupDevice(cmdList->getCsr(false));
+
+    EXPECT_EQ(expectedEnginesCount, bcsSplit.cmdQs.size());
+
+    bcsSplit.releaseResources();
+}
+
+HWTEST_F(AggregatedBcsSplitTests, givenTransferDirectionWhenAskingIfSplitIsNeededThenReturnCorrectValue) {
+    debugManager.flags.SplitBcsTransferDirectionMask.set(-1);
+
+    auto cmdListHw = static_cast<WhiteBox<L0::CommandListCoreFamilyImmediate<FamilyType::gfxCoreFamily>> *>(cmdList.get());
+
+    for (auto transferDirection : {TransferDirection::localToLocal, TransferDirection::localToHost, TransferDirection::hostToLocal, TransferDirection::hostToHost, TransferDirection::remote}) {
+        bool required = cmdListHw->transferDirectionRequiresBcsSplit(transferDirection);
+        EXPECT_EQ(transferDirection != TransferDirection::localToLocal, required);
+    }
+}
+
+HWTEST2_F(AggregatedBcsSplitTests, givenPlatformSupporingAggregatedSplitModeWhenInitializingThenEnableInBcsSplitObject, IsAtLeastXeHpcCore) {
+    debugManager.flags.SplitBcsAggregatedEventsMode.set(-1);
+
+    BcsSplit bcsSplit(static_cast<L0::DeviceImp &>(*device));
+
+    bcsSplit.setupDevice(cmdList->getCsr(false));
+
+    EXPECT_EQ(device->getL0GfxCoreHelper().bcsSplitAggregatedModeEnabled(), bcsSplit.events.aggregatedEventsMode);
+
+    bcsSplit.releaseResources();
+}
 
 HWTEST2_F(AggregatedBcsSplitTests, whenObtainCalledThenAggregatedEventsCreated, IsAtLeastXeHpcCore) {
     EXPECT_EQ(0u, bcsSplit->events.subcopy.size());
@@ -1135,6 +1247,31 @@ HWTEST2_F(AggregatedBcsSplitTests, givenMarkerEventWhenCheckingCompletionThenRes
     EXPECT_EQ(cmdListHw->inOrderExecInfo->getCounterValue(), bcsSplit->events.marker[0]->getInOrderExecBaseSignalValue());
 
     context->freeMem(ptr);
+}
+
+struct MultiRootAggregatedBcsSplitTests : public AggregatedBcsSplitTests {
+    void SetUp() override {
+        expectedNumRootDevices = 2;
+        debugManager.flags.CreateMultipleRootDevices.set(expectedNumRootDevices);
+        AggregatedBcsSplitTests::SetUp();
+    }
+};
+
+HWTEST2_F(MultiRootAggregatedBcsSplitTests, givenRemoteAllocWhenCopyRequestedThenEnableSplit, IsAtLeastXeHpcCore) {
+    auto device1 = driverHandle->devices[1];
+
+    auto ptr = allocHostMem();
+    auto remoteAlloc = allocDeviceMem(device1);
+    auto cmdListHw = static_cast<WhiteBox<L0::CommandListCoreFamilyImmediate<FamilyType::gfxCoreFamily>> *>(cmdList.get());
+
+    cmdListHw->appendMemoryCopy(remoteAlloc, ptr, copySize, nullptr, 0, nullptr, copyParams);
+    EXPECT_EQ(cmdListHw->inOrderExecInfo->getCounterValue(), bcsSplit->events.marker[0]->getInOrderExecBaseSignalValue());
+
+    cmdListHw->appendMemoryCopy(ptr, remoteAlloc, copySize, nullptr, 0, nullptr, copyParams);
+    EXPECT_EQ(cmdListHw->inOrderExecInfo->getCounterValue(), bcsSplit->events.marker[1]->getInOrderExecBaseSignalValue());
+
+    context->freeMem(ptr);
+    context->freeMem(remoteAlloc);
 }
 
 struct MultiTileAggregatedBcsSplitTests : public AggregatedBcsSplitTests {

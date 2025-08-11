@@ -101,10 +101,11 @@ class SysmanProductHelper {
     // Pci
     virtual ze_result_t getPciProperties(zes_pci_properties_t *pProperties) = 0;
     virtual ze_result_t getPciStats(zes_pci_stats_t *pStats, LinuxSysmanImp *pLinuxSysmanImp) = 0;
+    virtual bool isPcieDowngradeSupported() = 0;
+    virtual int32_t maxPcieGenSupported() = 0;
 
     // Engine
     virtual bool isAggregationOfSingleEnginesSupported() = 0;
-    virtual ze_result_t getGroupEngineBusynessFromSingleEngines(LinuxSysmanImp *pLinuxSysmanImp, zes_engine_stats_t *pStats, zes_engine_group_t &engineGroup) = 0;
 
     // Vf Management
     virtual bool isVfMemoryUtilizationSupported() = 0;

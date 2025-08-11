@@ -811,7 +811,7 @@ HWTEST2_F(DeviceWithDualStorage, givenCmdListWithAppendedKernelAndUsmTransferAnd
                                   size, alignment, &ptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
     auto gpuAlloc = device->getDriverHandle()->getSvmAllocsManager()->getSVMAllocs()->get(ptr)->gpuAllocations.getGraphicsAllocation(device->getRootDeviceIndex());
-    kernel.argumentsResidencyContainer.push_back(gpuAlloc);
+    kernel.state.argumentsResidencyContainer.push_back(gpuAlloc);
 
     ze_group_count_t dispatchKernelArguments{1, 1, 1};
     CmdListKernelLaunchParams launchParams = {};
@@ -1164,6 +1164,11 @@ HWTEST_F(CommandQueueCreate, givenCommandsToPatchWithNoopSpacePatchWhenPatchComm
     commandList->commandsToPatch.push_back(commandToPatch);
     commandQueue->patchCommands(*commandList, 0, false);
     EXPECT_EQ(0, memcmp(patchBuffer.get(), zeroBuffer.get(), dataSize));
+
+    memset(patchBuffer.get(), 0xFF, dataSize);
+    commandList->commandsToPatch[0].pDestination = nullptr;
+    commandQueue->patchCommands(*commandList, 0, false);
+    EXPECT_NE(0, memcmp(patchBuffer.get(), zeroBuffer.get(), dataSize));
 }
 
 } // namespace ult

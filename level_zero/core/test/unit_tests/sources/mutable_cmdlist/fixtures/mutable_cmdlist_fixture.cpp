@@ -31,7 +31,9 @@ void MutableCommandListFixtureInit::setUp(bool createInOrder) {
     mockKernelImmData2->crossThreadDataTemplate.reset(new uint8_t[crossThreadInitSize]);
 
     mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.indirectDataPointerAddress.offset = 0;
+    mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.indirectDataPointerAddress.pointerSize = sizeof(void *);
     mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.scratchPointerAddress.offset = 8;
+    mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.scratchPointerAddress.pointerSize = sizeof(void *);
 
     {
         std::initializer_list<ZebinTestData::AppendElfAdditionalSection> additionalSections = {};
@@ -65,7 +67,9 @@ void MutableCommandListFixtureInit::setUp(bool createInOrder) {
     mockKernelImmData->crossThreadDataSize = crossThreadInitSize;
     mockKernelImmData->crossThreadDataTemplate.reset(new uint8_t[crossThreadInitSize]);
     mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.indirectDataPointerAddress.offset = 0;
+    mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.indirectDataPointerAddress.pointerSize = sizeof(void *);
     mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.scratchPointerAddress.offset = 8;
+    mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.scratchPointerAddress.pointerSize = sizeof(void *);
     createModuleFromMockBinary(0u, false, mockKernelImmData.get());
     kernel = std::make_unique<ModuleImmutableDataFixture::MockKernel>(module.get());
     createKernel(kernel.get());
@@ -204,21 +208,68 @@ Event *MutableCommandListFixtureInit::createTestEvent(bool cbEvent, bool signalS
 }
 
 void MutableCommandListFixtureInit::resizeKernelArg(uint32_t resize) {
-    kernel->kernelArgInfos.resize(resize);
-    kernel->isArgUncached.resize(resize);
-    kernel->argumentsResidencyContainer.resize(resize);
-    kernel->slmArgOffsetValues.resize(resize);
-    kernel->slmArgSizes.resize(resize);
-    kernel->kernelArgHandlers.resize(resize);
+    kernel->state.kernelArgInfos.resize(resize);
+    kernel->state.isArgUncached.resize(resize);
+    kernel->state.argumentsResidencyContainer.resize(resize);
+    kernel->state.slmArgOffsetValues.resize(resize);
+    kernel->state.slmArgSizes.resize(resize);
+    kernel->state.kernelArgHandlers.resize(resize);
     mockKernelImmData->resizeExplicitArgs(resize);
 
-    kernel2->kernelArgInfos.resize(resize);
-    kernel2->isArgUncached.resize(resize);
-    kernel2->argumentsResidencyContainer.resize(resize);
-    kernel2->slmArgOffsetValues.resize(resize);
-    kernel2->slmArgSizes.resize(resize);
-    kernel2->kernelArgHandlers.resize(resize);
+    kernel2->state.kernelArgInfos.resize(resize);
+    kernel2->state.isArgUncached.resize(resize);
+    kernel2->state.argumentsResidencyContainer.resize(resize);
+    kernel2->state.slmArgOffsetValues.resize(resize);
+    kernel2->state.slmArgSizes.resize(resize);
+    kernel2->state.kernelArgHandlers.resize(resize);
     mockKernelImmData2->resizeExplicitArgs(resize);
+
+    this->kernelArgCount = resize;
+}
+
+void MutableCommandListFixtureInit::enableCooperativeSyncBuffer(uint32_t kernelMask) {
+    CrossThreadDataOffset offset = this->crossThreadOffset + (this->kernelArgCount * this->nextArgOffset);
+    if (kernelMask & kernel1Bit) {
+        mockKernelImmData->kernelDescriptor->kernelAttributes.flags.usesSyncBuffer = true;
+        mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.syncBufferAddress.stateless = offset;
+        mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.syncBufferAddress.pointerSize = sizeof(uint64_t);
+    }
+    if (kernelMask & kernel2Bit) {
+        mockKernelImmData2->kernelDescriptor->kernelAttributes.flags.usesSyncBuffer = true;
+        mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.syncBufferAddress.stateless = offset;
+        mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.syncBufferAddress.pointerSize = sizeof(uint64_t);
+    }
+}
+
+void MutableCommandListFixtureInit::enableRegionBarrierBuffer(uint32_t kernelMask) {
+    CrossThreadDataOffset offset = this->crossThreadOffset + (this->kernelArgCount * this->nextArgOffset) + 32;
+    if (kernelMask & kernel1Bit) {
+        mockKernelImmData->kernelDescriptor->kernelAttributes.flags.usesRegionGroupBarrier = true;
+        mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.regionGroupBarrierBuffer.stateless = offset;
+        mockKernelImmData->kernelDescriptor->payloadMappings.implicitArgs.regionGroupBarrierBuffer.pointerSize = sizeof(uint64_t);
+    }
+    if (kernelMask & kernel2Bit) {
+        mockKernelImmData2->kernelDescriptor->kernelAttributes.flags.usesRegionGroupBarrier = true;
+        mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.regionGroupBarrierBuffer.stateless = offset;
+        mockKernelImmData2->kernelDescriptor->payloadMappings.implicitArgs.regionGroupBarrierBuffer.pointerSize = sizeof(uint64_t);
+    }
+}
+
+void MutableCommandListFixtureInit::setupGroupCountOffsets(uint32_t kernelMask) {
+    CrossThreadDataOffset offset = this->crossThreadOffset + (this->kernelArgCount * this->nextArgOffset) + 64;
+    if (kernelMask & kernel1Bit) {
+        auto &dispatchTraits = mockKernelImmData->kernelDescriptor->payloadMappings.dispatchTraits;
+        dispatchTraits.globalWorkSize[0] = offset + 3 * sizeof(uint32_t);
+        dispatchTraits.numWorkGroups[0] = dispatchTraits.globalWorkSize[0] + 3 * sizeof(uint32_t);
+        dispatchTraits.workDim = dispatchTraits.numWorkGroups[0] + 3 * sizeof(uint32_t);
+    }
+
+    if (kernelMask & kernel2Bit) {
+        auto &dispatchTraits = mockKernelImmData2->kernelDescriptor->payloadMappings.dispatchTraits;
+        dispatchTraits.globalWorkSize[0] = offset + 3 * sizeof(uint32_t);
+        dispatchTraits.numWorkGroups[0] = dispatchTraits.globalWorkSize[0] + 3 * sizeof(uint32_t);
+        dispatchTraits.workDim = dispatchTraits.numWorkGroups[0] + 3 * sizeof(uint32_t);
+    }
 }
 
 void MutableCommandListFixtureInit::prepareKernelArg(uint16_t argIndex, L0::MCL::VariableType varType, uint32_t kernelMask) {
@@ -264,33 +315,65 @@ void MutableCommandListFixtureInit::prepareKernelArg(uint16_t argIndex, L0::MCL:
         argSlm.pointerSize = 8;
 
         if (kernelMask & kernel1Bit) {
-            memset(ptrOffset(kernel->crossThreadData.get(), argSlm.slmOffset), 0, 8);
+            memset(ptrOffset(kernel->state.crossThreadData.get(), argSlm.slmOffset), 0, 8);
             mockKernelImmData->kernelDescriptor->payloadMappings.explicitArgs[argIndex] = kernelArgSlm;
         }
         if (kernelMask & kernel2Bit) {
-            memset(ptrOffset(kernel2->crossThreadData.get(), argSlm.slmOffset), 0, 8);
+            memset(ptrOffset(kernel2->state.crossThreadData.get(), argSlm.slmOffset), 0, 8);
             mockKernelImmData2->kernelDescriptor->payloadMappings.explicitArgs[argIndex] = kernelArgSlm;
         }
     }
 }
 
 std::vector<L0::MCL::Variable *> MutableCommandListFixtureInit::getVariableList(uint64_t commandId, L0::MCL::VariableType varType, L0::Kernel *kernelOption) {
-    auto &selectedAppend = mutableCommandList->mutations[(commandId - 1)];
+    auto &selectedKernelAppend = mutableCommandList->kernelMutations[(commandId - 1)];
     std::vector<L0::MCL::Variable *> selectedVariables;
-    L0::MCL::MutationVariables *appendVariableDescriptors = nullptr;
-    if (kernelOption != nullptr) {
-        for (auto &mutableKernel : selectedAppend.kernelGroup->getKernelsInGroup()) {
-            if (mutableKernel->getKernel() == kernelOption) {
-                appendVariableDescriptors = &mutableKernel->getKernelVariables();
+    L0::MCL::KernelVariableDescriptor *kernelVariableDescriptors = nullptr;
+    if (varType == L0::MCL::VariableType::buffer ||
+        varType == L0::MCL::VariableType::value ||
+        varType == L0::MCL::VariableType::slmBuffer ||
+        varType == L0::MCL::VariableType::globalOffset ||
+        varType == L0::MCL::VariableType::groupCount ||
+        varType == L0::MCL::VariableType::groupSize) {
+        if (kernelOption != nullptr) {
+            for (auto &mutableKernel : selectedKernelAppend.kernelGroup->getKernelsInGroup()) {
+                if (mutableKernel->getKernel() == kernelOption) {
+                    kernelVariableDescriptors = &mutableKernel->getKernelVariables();
+                }
+            }
+        } else {
+            kernelVariableDescriptors = &selectedKernelAppend.variables;
+        }
+        if (kernelVariableDescriptors != nullptr) {
+            if (varType == L0::MCL::VariableType::buffer ||
+                varType == L0::MCL::VariableType::value ||
+                varType == L0::MCL::VariableType::slmBuffer) {
+                for (auto &varDesc : kernelVariableDescriptors->kernelArguments) {
+                    if (varDesc.kernelArgumentVariable != nullptr &&
+                        varType == varDesc.kernelArgumentVariable->getDesc().type) {
+                        selectedVariables.push_back(varDesc.kernelArgumentVariable);
+                    }
+                }
+            }
+            if (varType == L0::MCL::VariableType::globalOffset && kernelVariableDescriptors->globalOffset != nullptr) {
+                selectedVariables.push_back(kernelVariableDescriptors->globalOffset);
+            }
+            if (varType == L0::MCL::VariableType::groupCount && kernelVariableDescriptors->groupCount != nullptr) {
+                selectedVariables.push_back(kernelVariableDescriptors->groupCount);
+            }
+            if (varType == L0::MCL::VariableType::groupSize && kernelVariableDescriptors->groupSize != nullptr) {
+                selectedVariables.push_back(kernelVariableDescriptors->groupSize);
             }
         }
-    } else {
-        appendVariableDescriptors = &selectedAppend.variables;
     }
-    if (appendVariableDescriptors != nullptr) {
-        for (auto &varDesc : *appendVariableDescriptors) {
-            if (varDesc.var->getType() == varType) {
-                selectedVariables.push_back(varDesc.var);
+    auto &selectedEventAppend = mutableCommandList->eventMutations[(commandId - 1)];
+    if (varType == L0::MCL::VariableType::signalEvent && selectedEventAppend.signalEvent.eventVariable != nullptr) {
+        selectedVariables.push_back(selectedEventAppend.signalEvent.eventVariable);
+    }
+    if (varType == L0::MCL::VariableType::waitEvent) {
+        for (auto &varDesc : selectedEventAppend.waitEvents) {
+            if (varDesc.eventVariable != nullptr) {
+                selectedVariables.push_back(varDesc.eventVariable);
             }
         }
     }
@@ -304,6 +387,16 @@ void MutableCommandListFixtureInit::overridePatchedScratchAddress(uint64_t scrat
             cmd.scratchAddressAfterPatch = scratchAddress;
         }
     }
+}
+
+bool MutableCommandListFixtureInit::isAllocationInMutableResidency(MutableCommandList *mcl, NEO::GraphicsAllocation *allocation) const {
+    auto &whiteBoxAllocations = static_cast<L0::ult::WhiteBoxMutableResidencyAllocations &>(mcl->mutableAllocations);
+    auto allocationIt = std::find_if(whiteBoxAllocations.addedAllocations.begin(),
+                                     whiteBoxAllocations.addedAllocations.end(),
+                                     [&allocation](const L0::MCL::AllocationReference &ref) {
+                                         return ref.allocation == allocation;
+                                     });
+    return allocationIt != whiteBoxAllocations.addedAllocations.end();
 }
 
 } // namespace ult

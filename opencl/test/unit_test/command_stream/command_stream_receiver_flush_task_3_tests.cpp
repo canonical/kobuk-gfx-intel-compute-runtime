@@ -1206,7 +1206,7 @@ HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithMockCsrHw2, givenUpdat
     mockCsr->taskCount.store(10);
     mockCsr->latestFlushedTaskCount.store(5);
 
-    const auto waitStatus = commandQueue.waitForAllEngines(false, nullptr);
+    const auto waitStatus = commandQueue.waitForAllEngines(false, nullptr, false);
     EXPECT_EQ(WaitStatus::ready, waitStatus);
 
     parseCommands<FamilyType>(mockCsr->getCS(4096u));
@@ -1224,21 +1224,11 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenGpuHangOnPrintEnqueueOutputWh
     const auto cleanTemporaryAllocationsList{false};
     MockPrintfHandler printfHandler(*pDevice);
 
-    const auto waitStatus = commandQueue.waitForAllEngines(blockedQueue, &printfHandler, cleanTemporaryAllocationsList);
+    const auto waitStatus = commandQueue.waitForAllEngines(blockedQueue, &printfHandler, cleanTemporaryAllocationsList, false);
     EXPECT_EQ(WaitStatus::gpuHang, waitStatus);
 }
 
-template <typename FamilyType>
-struct MockCsrHwDirectSubmission : public MockCsrHw2<FamilyType> {
-    using MockCsrHw2<FamilyType>::MockCsrHw2;
-    bool isDirectSubmissionEnabled() const override {
-        return true;
-    }
-};
-
-using CommandStreamReceiverFlushTaskTestsWithCustomCsr = UltCommandStreamReceiverTestWithCsrT<MockCsrHwDirectSubmission>;
-
-HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithCustomCsr, givenEnabledDirectSubmissionUpdateTaskCountFromWaitSetWhenFlushTaskThenPipeControlAndBBSIsFlushed) {
+HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithMockCsrHw2, givenEnabledDirectSubmissionUpdateTaskCountFromWaitSetWhenFlushTaskThenPipeControlAndBBSIsFlushed) {
     DebugManagerStateRestore restorer;
     debugManager.flags.UpdateTaskCountFromWait.set(1);
 
@@ -1246,7 +1236,7 @@ HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithCustomCsr, givenEnable
     CommandQueueHw<FamilyType> commandQueue(&context, pClDevice, 0, false);
     commandQueue.taskCount = 10;
 
-    auto mockCsr = static_cast<MockCsrHwDirectSubmission<FamilyType> *>(&pDevice->getGpgpuCommandStreamReceiver());
+    auto mockCsr = static_cast<MockCsrHw2<FamilyType> *>(&pDevice->getGpgpuCommandStreamReceiver());
     mockCsr->useNewResourceImplicitFlush = false;
     mockCsr->useGpuIdleImplicitFlush = false;
     mockCsr->overrideDispatchPolicy(DispatchMode::batchedDispatch);
@@ -1254,7 +1244,7 @@ HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithCustomCsr, givenEnable
     mockCsr->latestFlushedTaskCount.store(5);
     mockCsr->directSubmission = std::make_unique<MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>>(*mockCsr);
 
-    const auto waitStatus = commandQueue.waitForAllEngines(false, nullptr);
+    const auto waitStatus = commandQueue.waitForAllEngines(false, nullptr, false);
     EXPECT_EQ(WaitStatus::ready, waitStatus);
 
     parseCommands<FamilyType>(mockCsr->getCS(4096u));
@@ -1264,6 +1254,7 @@ HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithCustomCsr, givenEnable
     EXPECT_NE(itorPipeControl, cmdList.end());
     EXPECT_NE(itorBBS, cmdList.end());
     EXPECT_EQ(mockCsr->flushCalledCount, 1u);
+    mockCsr->directSubmission.reset();
 }
 
 HWTEST_TEMPLATED_F(CommandStreamReceiverFlushTaskTestsWithMockCsrHw2, givenCsrInBatchingModeWhenDcFlushIsRequiredThenPipeControlIsNotRegistredForNooping) {

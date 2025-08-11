@@ -29,6 +29,8 @@
 
 using namespace NEO;
 
+#include "shared/test/common/test_macros/header/heapless_matchers.h"
+
 typedef UltCommandStreamReceiverTest CommandStreamReceiverFlushTaskTests;
 using CommandStreamReceiverFlushTaskTestsWithMockCsrHw = UltCommandStreamReceiverTestWithCsrT<MockCsrHw>;
 
@@ -716,28 +718,17 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenFlushTaskWhenInitProgrammingF
     EXPECT_FALSE(commandStreamReceiver.bindingTableBaseAddressRequired);
 }
 
-HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenPreambleNotSentAndMediaSamplerRequirementChangedWhenFlushingTaskThenPipelineSelectIsSent, IsAtMostXeCore) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenPreambleNotSentWhenFlushingTaskThenPipelineSelectIsSent, IsAtMostXeCore) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = false;
-    commandStreamReceiver.lastMediaSamplerConfig = -1;
     flushTask(commandStreamReceiver);
     parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
     EXPECT_NE(nullptr, getCommand<typename FamilyType::PIPELINE_SELECT>());
 }
 
-HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenPreambleNotSentAndMediaSamplerRequirementNotChangedWhenFlushingTaskThenPipelineSelectIsSent, IsAtMostXeCore) {
-    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    commandStreamReceiver.isPreambleSent = false;
-    commandStreamReceiver.lastMediaSamplerConfig = 0;
-    flushTask(commandStreamReceiver);
-    parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
-    EXPECT_NE(nullptr, getCommand<typename FamilyType::PIPELINE_SELECT>());
-}
-
-HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenPreambleSentAndMediaSamplerRequirementNotChangedWhenFlushingTaskThenPipelineSelectIsNotSent) {
+HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenPreambleSentWhenFlushingTaskThenPipelineSelectIsNotSent) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
-    commandStreamReceiver.lastMediaSamplerConfig = 0;
     flushTask(commandStreamReceiver);
     parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
     auto &productHelper = pDevice->getProductHelper();
@@ -747,17 +738,8 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenPreambleSentAndMediaSamplerRe
         EXPECT_EQ(nullptr, getCommand<typename FamilyType::PIPELINE_SELECT>());
     }
 }
-HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenPreambleSentAndMediaSamplerRequirementChangedWhenFlushingTaskThenPipelineSelectIsSent, IsAtMostXeCore) {
-    auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
-    commandStreamReceiver.pipelineSupportFlags.mediaSamplerDopClockGate = true;
-    commandStreamReceiver.isPreambleSent = true;
-    commandStreamReceiver.lastMediaSamplerConfig = 1;
-    flushTask(commandStreamReceiver);
-    parseCommands<FamilyType>(commandStreamReceiver.commandStream, 0);
-    EXPECT_NE(nullptr, getCommand<typename FamilyType::PIPELINE_SELECT>());
-}
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenStateBaseAddressNotSentWhenFlushingTaskThenStateBaseAddressIsSent) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenStateBaseAddressNotSentWhenFlushingTaskThenStateBaseAddressIsSent, IsHeapfulSupported) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
     commandStreamReceiver.setMediaVFEStateDirty(false);
@@ -771,7 +753,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenStateBaseAddressNotSentWhenFl
     EXPECT_NE(cmdList.end(), stateBaseAddressItor);
 }
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenSizeChangedWhenFlushingTaskThenStateBaseAddressIsSent) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenSizeChangedWhenFlushingTaskThenStateBaseAddressIsSent, IsHeapfulSupported) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     auto dshSize = dsh.getMaxAvailableSpace();
     auto iohSize = ioh.getMaxAvailableSpace();
@@ -800,7 +782,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenSizeChangedWhenFlushingTaskTh
     EXPECT_NE(cmdList.end(), stateBaseAddressItor);
 }
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDshHeapChangeWhenFlushTaskIsCalledThenSbaIsReloaded) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, givenDshHeapChangeWhenFlushTaskIsCalledThenSbaIsReloaded, IsHeapfulSupported) {
     bool deviceUsesDsh = pDevice->getHardwareInfo().capabilityTable.supportsImages;
     if (!deviceUsesDsh) {
         GTEST_SKIP();
@@ -816,7 +798,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenDshHeapChangeWhenFlushTaskIsC
     EXPECT_NE(cmdList.end(), stateBaseAddressItor);
 }
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, givenSshHeapChangeWhenFlushTaskIsCalledThenSbaIsReloaded) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, givenSshHeapChangeWhenFlushTaskIsCalledThenSbaIsReloaded, IsHeapfulSupported) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     configureCSRtoNonDirtyState<FamilyType>(false);
 
@@ -828,7 +810,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenSshHeapChangeWhenFlushTaskIsC
     EXPECT_NE(cmdList.end(), stateBaseAddressItor);
 }
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, givenIohHeapChangeWhenFlushTaskIsCalledThenSbaIsReloaded) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, givenIohHeapChangeWhenFlushTaskIsCalledThenSbaIsReloaded, IsHeapfulSupported) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     configureCSRtoNonDirtyState<FamilyType>(false);
 
@@ -840,7 +822,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, givenIohHeapChangeWhenFlushTaskIsC
     EXPECT_NE(cmdList.end(), stateBaseAddressItor);
 }
 
-HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenStateBaseAddressNotChangedWhenFlushingTaskThenStateBaseAddressIsNotSent) {
+HWTEST2_F(CommandStreamReceiverFlushTaskTests, GivenStateBaseAddressNotChangedWhenFlushingTaskThenStateBaseAddressIsNotSent, IsHeapfulSupported) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
     configureCSRHeapStatesToNonDirty<FamilyType>();
@@ -1265,7 +1247,7 @@ HWTEST_F(CommandStreamReceiverFlushTaskTests, GivenBlockedKernelRequiringDCFlush
 
     cmdList.clear();
     // Parse command list
-    parseCommands<FamilyType>(commandStreamTask, usedBefore);
+    parseCommands<FamilyType>(commandStreamTask, 0);
 
     auto itorPC = find<PIPE_CONTROL *>(cmdList.begin(), cmdList.end());
     EXPECT_NE(cmdList.end(), itorPC);

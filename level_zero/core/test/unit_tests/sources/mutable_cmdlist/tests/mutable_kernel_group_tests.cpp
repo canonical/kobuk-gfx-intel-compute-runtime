@@ -87,8 +87,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE,
     mockKernelImmData2->kernelDescriptor->kernelAttributes.crossThreadDataSize = kernel2CrossThreadInitSize;
     mockKernelImmData2->crossThreadDataSize = kernel2CrossThreadInitSize;
     mockKernelImmData2->crossThreadDataTemplate.reset(new uint8_t[kernel2CrossThreadInitSize]);
-    kernel2->crossThreadDataSize = kernel2CrossThreadInitSize;
-    kernel2->crossThreadData.reset(new uint8_t[kernel2CrossThreadInitSize]);
+    kernel2->state.crossThreadDataSize = kernel2CrossThreadInitSize;
+    kernel2->state.crossThreadData.reset(new uint8_t[kernel2CrossThreadInitSize]);
 
     createMutableKernelGroup();
 
@@ -118,13 +118,65 @@ HWCMDTEST_F(IGFX_XE_HP_CORE,
     auto expectedCrossThreadSize = crossThreadDataSize - mutableKernels[1]->inlineDataSize;
     kernelDispatch->kernelData = kernel2Data;
     kernelDispatch->offsets.perThreadOffset = expectedCrossThreadSize;
-    kernel2->perThreadDataSizeForWholeThreadGroup = 0x40;
-    kernel2->perThreadDataForWholeThreadGroup = static_cast<uint8_t *>(alignedMalloc(kernel2->perThreadDataSizeForWholeThreadGroup, 32));
+    kernel2->state.perThreadDataSizeForWholeThreadGroup = 0x40;
+    kernel2->state.perThreadDataForWholeThreadGroup = static_cast<uint8_t *>(alignedMalloc(kernel2->state.perThreadDataSizeForWholeThreadGroup, 32));
 
     mutableKernels[1]->createHostViewIndirectData(true);
     auto actualCrossThreadDataSize = mutableKernels[1]->getHostViewIndirectData()->getCrossThreadDataSize();
 
     EXPECT_EQ(expectedCrossThreadSize, actualCrossThreadDataSize);
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE,
+            MutableKernelGroupTest,
+            givenMutableKernelHasPassInlineDataWhenCreateHostViewIndirectWithoutCopyingInlineThenInitializeAndNoCopyInline) {
+    using WalkerType = typename FamilyType::PorWalkerType;
+
+    mutableCommandIdDesc.flags = kernelIsaMutationFlags;
+    auto result = mutableCommandList->getNextCommandId(&mutableCommandIdDesc, 2, kernelMutationGroup, &commandId);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto kernel2Data = mutableCommandList->kernelData[1].get();
+    auto kdPtr = std::make_unique<L0::MCL::KernelDispatch>();
+    auto kernelDispatch = kdPtr.get();
+
+    mockKernelImmData2->kernelDescriptor->kernelAttributes.flags.passInlineData = true;
+    auto crossThreadDataSize = kernel2->getCrossThreadDataSize();
+
+    createMutableComputeWalker<FamilyType, WalkerType>();
+    createMutableKernelGroup();
+    mutableKernels[1]->setComputeWalker(mutableComputeWalker.get());
+    mutableKernels[1]->setKernelDispatch(kernelDispatch);
+    auto expectedCrossThreadSize = crossThreadDataSize - mutableKernels[1]->inlineDataSize;
+    kernelDispatch->kernelData = kernel2Data;
+    kernelDispatch->offsets.perThreadOffset = expectedCrossThreadSize;
+    kernel2->state.perThreadDataSizeForWholeThreadGroup = 0x40;
+    kernel2->state.perThreadDataForWholeThreadGroup = static_cast<uint8_t *>(alignedMalloc(kernel2->state.perThreadDataSizeForWholeThreadGroup, 32));
+
+    auto srcPtr = kernel2->state.crossThreadData.get();
+    memset(srcPtr, 0xFF, mutableKernels[1]->inlineDataSize);
+
+    auto dstPtr = mutableKernels[1]->getMutableComputeWalker()->getHostMemoryInlineDataPointer();
+    memset(dstPtr, 0x00, mutableKernels[1]->inlineDataSize);
+
+    mutableKernels[1]->createHostViewIndirectData(false);
+    auto actualCrossThreadDataSize = mutableKernels[1]->getHostViewIndirectData()->getCrossThreadDataSize();
+    EXPECT_EQ(expectedCrossThreadSize, actualCrossThreadDataSize);
+
+    EXPECT_NE(0, memcmp(srcPtr, dstPtr, mutableKernels[1]->inlineDataSize));
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE,
+            MutableKernelGroupTest,
+            givenMutableKernelGroupWhenSettingScratchPatchIndexThenIndexIsSet) {
+    using WalkerType = typename FamilyType::PorWalkerType;
+
+    createMutableComputeWalker<FamilyType, WalkerType>();
+    createMutableKernelGroup();
+
+    size_t scratchIndex = 2;
+    mockMutableKernelGroup->setScratchAddressPatchIndex(2);
+    EXPECT_EQ(scratchIndex, mockMutableKernelGroup->getScratchAddressPatchIndex());
 }
 
 } // namespace ult

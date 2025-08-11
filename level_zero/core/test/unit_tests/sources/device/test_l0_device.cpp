@@ -47,6 +47,7 @@
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/driver/extension_function_address.h"
 #include "level_zero/core/source/driver/host_pointer_manager.h"
+#include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/fabric/fabric.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/source/image/image.h"
@@ -2746,7 +2747,6 @@ TEST_F(MultipleDevicesTest, whenCallingsetAtomicAccessAttributeForSystemAccessSh
     void *ptr = reinterpret_cast<void *>(0x1234);
 
     L0::Device *device0 = driverHandle->devices[0];
-    auto &hwInfo = device0->getNEODevice()->getHardwareInfo();
     DebugManagerStateRestore restorer;
     debugManager.flags.UseKmdMigration.set(true);
     debugManager.flags.EnableRecoverablePageFaults.set(true);
@@ -2763,9 +2763,7 @@ TEST_F(MultipleDevicesTest, whenCallingsetAtomicAccessAttributeForSystemAccessSh
 
     ze_memory_atomic_attr_exp_flags_t attr = ZE_MEMORY_ATOMIC_ATTR_EXP_FLAG_SYSTEM_ATOMICS;
     result = context->setAtomicAccessAttribute(device0->toHandle(), ptr, size, attr);
-    if ((hwInfo.capabilityTable.p2pAccessSupported == true) && (hwInfo.capabilityTable.p2pAtomicAccessSupported == true)) {
-        EXPECT_EQ(ZE_RESULT_SUCCESS, result);
-    }
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     result = context->freeMem(ptr);
     ASSERT_EQ(result, ZE_RESULT_SUCCESS);
@@ -2929,13 +2927,9 @@ struct MultipleDevicesP2PFixture : public ::testing::Test {
 
         NEO::HardwareInfo hardwareInfo = *NEO::defaultHwInfo;
 
-        hardwareInfo.capabilityTable.p2pAccessSupported = p2pAccess;
-        hardwareInfo.capabilityTable.p2pAtomicAccessSupported = p2pAtomicAccess;
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfoAndInitHelpers(&hardwareInfo);
         executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
-        hardwareInfo.capabilityTable.p2pAccessSupported = p2pAccess;
-        hardwareInfo.capabilityTable.p2pAtomicAccessSupported = p2pAtomicAccess;
         executionEnvironment->rootDeviceEnvironments[1]->setHwInfoAndInitHelpers(&hardwareInfo);
         executionEnvironment->rootDeviceEnvironments[1]->initGmm();
 
@@ -3189,14 +3183,10 @@ struct MultipleDevicesP2PWithXeLinkFixture : public ::testing::Test {
         EXPECT_EQ(numRootDevices, executionEnvironment->rootDeviceEnvironments.size());
 
         auto hwInfo0 = *NEO::defaultHwInfo;
-        hwInfo0.capabilityTable.p2pAccessSupported = p2pAccess;
-        hwInfo0.capabilityTable.p2pAtomicAccessSupported = p2pAtomicAccess;
         executionEnvironment->rootDeviceEnvironments[0]->setHwInfoAndInitHelpers(&hwInfo0);
         executionEnvironment->rootDeviceEnvironments[0]->initGmm();
 
         auto hwInfo1 = *NEO::defaultHwInfo;
-        hwInfo1.capabilityTable.p2pAccessSupported = p2pAccess;
-        hwInfo1.capabilityTable.p2pAtomicAccessSupported = p2pAtomicAccess;
         executionEnvironment->rootDeviceEnvironments[1]->setHwInfoAndInitHelpers(&hwInfo1);
         executionEnvironment->rootDeviceEnvironments[1]->initGmm();
 
@@ -4463,6 +4453,16 @@ TEST_F(DeviceTest, givenValidDeviceWhenCallingReleaseResourcesThenResourcesRelea
     EXPECT_TRUE(nullptr == deviceImp->pageFaultCommandList);
     deviceImp->releaseResources();
     EXPECT_TRUE(deviceImp->resourcesReleased);
+}
+
+TEST_F(DeviceTest, givenValidDeviceWhenCallingReleaseResourcesThenDirectSubmissionIsStopped) {
+    auto deviceImp = static_cast<DeviceImp *>(device);
+    EXPECT_FALSE(neoDevice->stopDirectSubmissionCalled);
+    neoDevice->incRefInternal();
+    driverHandle->getSvmAllocsManager()->cleanupUSMAllocCaches();
+    deviceImp->releaseResources();
+    EXPECT_TRUE(neoDevice->stopDirectSubmissionCalled);
+    neoDevice->decRefInternal();
 }
 
 HWTEST_F(DeviceTest, givenCooperativeDispatchSupportedWhenQueryingPropertiesFlagsThenCooperativeKernelsAreSupported) {
@@ -6522,6 +6522,7 @@ TEST_F(DeviceSimpleTests, whenWorkgroupSizeCheckedThenSizeLimitIs1kOrLess) {
 
 HWTEST_F(DeviceSimpleTests, givenGpuHangWhenSynchronizingDeviceThenErrorIsPropagated) {
     auto &csr = neoDevice->getUltCommandStreamReceiver<FamilyType>();
+    csr.resourcesInitialized = true;
     csr.waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::gpuHang;
 
     auto result = zeDeviceSynchronize(device);
@@ -6541,6 +6542,7 @@ HWTEST_F(DeviceSimpleTests, givenNoGpuHangWhenSynchronizingDeviceThenCallWaitFor
         csr->flushStamp->setStamp(flushStampToWait++);
         csr->captureWaitForTaskCountWithKmdNotifyInputParams = true;
         csr->waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::ready;
+        csr->resourcesInitialized = true;
     }
 
     auto &secondaryCsrs = neoDevice->getSecondaryCsrs();
@@ -6552,6 +6554,7 @@ HWTEST_F(DeviceSimpleTests, givenNoGpuHangWhenSynchronizingDeviceThenCallWaitFor
         csr->flushStamp->setStamp(flushStampToWait++);
         csr->captureWaitForTaskCountWithKmdNotifyInputParams = true;
         csr->waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::ready;
+        csr->resourcesInitialized = true;
     }
 
     auto result = zeDeviceSynchronize(device);
@@ -6576,6 +6579,48 @@ HWTEST_F(DeviceSimpleTests, givenNoGpuHangWhenSynchronizingDeviceThenCallWaitFor
     }
 }
 
+HWTEST_F(DeviceSimpleTests, whenSynchronizingDeviceThenIgnoreUninitializedCsrs) {
+    auto &engines = neoDevice->getAllEngines();
+
+    TaskCountType taskCountToWait = 1u;
+    FlushStamp flushStampToWait = 4u;
+    for (auto &engine : engines) {
+        auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(engine.commandStreamReceiver);
+        csr->latestSentTaskCount = 0u;
+        csr->latestFlushedTaskCount = 0u;
+        csr->taskCount = taskCountToWait++;
+        csr->flushStamp->setStamp(flushStampToWait++);
+        csr->captureWaitForTaskCountWithKmdNotifyInputParams = true;
+        csr->waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::gpuHang;
+        csr->resourcesInitialized = false;
+    }
+
+    auto &secondaryCsrs = neoDevice->getSecondaryCsrs();
+    for (auto &secondaryCsr : secondaryCsrs) {
+        auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(secondaryCsr.get());
+        csr->latestSentTaskCount = 0u;
+        csr->latestFlushedTaskCount = 0u;
+        csr->taskCount = taskCountToWait++;
+        csr->flushStamp->setStamp(flushStampToWait++);
+        csr->captureWaitForTaskCountWithKmdNotifyInputParams = true;
+        csr->waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::gpuHang;
+        csr->resourcesInitialized = false;
+    }
+
+    auto result = zeDeviceSynchronize(device);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    for (auto &engine : engines) {
+        auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(engine.commandStreamReceiver);
+        EXPECT_EQ(0u, csr->waitForTaskCountWithKmdNotifyInputParams.size());
+    }
+
+    for (auto &secondaryCsr : secondaryCsrs) {
+        auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(secondaryCsr.get());
+        EXPECT_EQ(0u, csr->waitForTaskCountWithKmdNotifyInputParams.size());
+    }
+}
+
 HWTEST_F(DeviceSimpleTests, givenGpuHangOnSecondaryCsrWhenSynchronizingDeviceThenErrorIsPropagated) {
     if (neoDevice->getSecondaryCsrs().empty()) {
         GTEST_SKIP();
@@ -6584,12 +6629,14 @@ HWTEST_F(DeviceSimpleTests, givenGpuHangOnSecondaryCsrWhenSynchronizingDeviceThe
 
     for (auto &engine : engines) {
         auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(engine.commandStreamReceiver);
+        csr->resourcesInitialized = true;
         csr->waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::ready;
     }
 
     auto &secondaryCsrs = neoDevice->getSecondaryCsrs();
     for (auto &secondaryCsr : secondaryCsrs) {
         auto csr = static_cast<UltCommandStreamReceiver<FamilyType> *>(secondaryCsr.get());
+        csr->resourcesInitialized = true;
         csr->waitForTaskCountWithKmdNotifyFallbackReturnValue = WaitStatus::gpuHang;
     }
 

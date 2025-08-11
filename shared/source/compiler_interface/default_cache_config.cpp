@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2024 Intel Corporation
+ * Copyright (C) 2024-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -31,6 +31,13 @@ CompilerCacheConfig getDefaultCompilerCacheConfig() {
 
     if (envReader.getSetting(neoCachePersistent.c_str(), ApiSpecificConfig::compilerCacheDefaultEnabled()) != 0) {
         ret.enabled = true;
+
+        if (isAnyIgcEnvVarSet()) {
+            ret.enabled = false;
+            PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintDebugMessages.get(), stdout, "WARNING: Detected IGC_* environment variable(s). Compiler cache is disabled.\n");
+            return ret;
+        }
+
         std::string emptyString = "";
         ret.cacheDir = envReader.getSetting(neoCacheDir.c_str(), emptyString);
 
@@ -62,5 +69,4 @@ CompilerCacheConfig getDefaultCompilerCacheConfig() {
 
     return ret;
 }
-
 } // namespace NEO

@@ -8,7 +8,6 @@
 #include "api.h"
 
 #include "shared/source/aub/aub_center.h"
-#include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/execution_environment/root_device_environment.h"
@@ -19,10 +18,7 @@
 #include "shared/source/os_interface/debug_env_reader.h"
 #include "shared/source/os_interface/device_factory.h"
 #include "shared/source/utilities/buffer_pool_allocator.inl"
-#include "shared/source/utilities/heap_allocator.h"
-#include "shared/source/utilities/staging_buffer_manager.h"
 
-#include "opencl/source/accelerators/intel_motion_estimation.h"
 #include "opencl/source/api/additional_extensions.h"
 #include "opencl/source/api/api_enter.h"
 #include "opencl/source/cl_device/cl_device.h"
@@ -98,6 +94,9 @@ cl_int CL_API_CALL clGetPlatformIDs(cl_uint numEntries,
             if (envReader.getSetting("NEO_FP64_EMULATION", false)) {
                 executionEnvironment->setFP64EmulationEnabled();
             }
+            bool oneApiPvcWa = envReader.getSetting("ONEAPI_PVC_SEND_WAR_WA", true);
+            executionEnvironment->setOneApiPvcWaEnv(oneApiPvcWa);
+
             auto allDevices = DeviceFactory::createDevices(*executionEnvironment);
             executionEnvironment->decRefInternal();
             if (allDevices.empty()) {
@@ -914,7 +913,7 @@ cl_mem CL_API_CALL clCreateImage(cl_context context,
                    "cl_image_format.channel_data_type", imageFormat->image_channel_data_type,
                    "cl_image_format.channel_order", imageFormat->image_channel_order,
                    "cl_image_desc.width", imageDesc->image_width,
-                   "cl_image_desc.heigth", imageDesc->image_height,
+                   "cl_image_desc.height", imageDesc->image_height,
                    "cl_image_desc.depth", imageDesc->image_depth,
                    "cl_image_desc.type", imageDesc->image_type,
                    "cl_image_desc.array_size", imageDesc->image_array_size,
@@ -954,7 +953,7 @@ cl_mem CL_API_CALL clCreateImageWithProperties(cl_context context,
                    "cl_image_format.channel_data_type", imageFormat->image_channel_data_type,
                    "cl_image_format.channel_order", imageFormat->image_channel_order,
                    "cl_image_desc.width", imageDesc->image_width,
-                   "cl_image_desc.heigth", imageDesc->image_height,
+                   "cl_image_desc.height", imageDesc->image_height,
                    "cl_image_desc.depth", imageDesc->image_depth,
                    "cl_image_desc.type", imageDesc->image_type,
                    "cl_image_desc.array_size", imageDesc->image_array_size,
@@ -993,7 +992,7 @@ cl_mem CL_API_CALL clCreateImageWithPropertiesINTEL(cl_context context,
                    "cl_image_format.channel_data_type", imageFormat->image_channel_data_type,
                    "cl_image_format.channel_order", imageFormat->image_channel_order,
                    "cl_image_desc.width", imageDesc->image_width,
-                   "cl_image_desc.heigth", imageDesc->image_height,
+                   "cl_image_desc.height", imageDesc->image_height,
                    "cl_image_desc.depth", imageDesc->image_depth,
                    "cl_image_desc.type", imageDesc->image_type,
                    "cl_image_desc.array_size", imageDesc->image_array_size,
@@ -4470,40 +4469,13 @@ cl_accelerator_intel CL_API_CALL clCreateAcceleratorINTEL(
     cl_int *errcodeRet) {
 
     TRACING_ENTER(ClCreateAcceleratorINTEL, &context, &acceleratorType, &descriptorSize, &descriptor, &errcodeRet);
-    cl_int retVal = CL_SUCCESS;
+    cl_int retVal = CL_INVALID_ACCELERATOR_TYPE_INTEL;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("context", context,
                    "acceleratorType", acceleratorType,
                    "descriptorSize", descriptorSize,
                    "descriptor", NEO::fileLoggerInstance().infoPointerToString(descriptor, descriptorSize));
     cl_accelerator_intel accelerator = nullptr;
-
-    do {
-        retVal = validateObjects(context);
-
-        if (retVal != CL_SUCCESS) {
-            retVal = CL_INVALID_CONTEXT;
-            break;
-        }
-
-        Context *pContext = castToObject<Context>(context);
-
-        DEBUG_BREAK_IF(!pContext);
-
-        switch (acceleratorType) {
-        case CL_ACCELERATOR_TYPE_MOTION_ESTIMATION_INTEL:
-            accelerator = VmeAccelerator::create(
-                pContext,
-                acceleratorType,
-                descriptorSize,
-                descriptor,
-                retVal);
-            break;
-        default:
-            retVal = CL_INVALID_ACCELERATOR_TYPE_INTEL;
-        }
-
-    } while (false);
 
     if (errcodeRet) {
         *errcodeRet = retVal;
@@ -4517,22 +4489,9 @@ cl_int CL_API_CALL clRetainAcceleratorINTEL(
     cl_accelerator_intel accelerator) {
 
     TRACING_ENTER(ClRetainAcceleratorINTEL, &accelerator);
-    cl_int retVal = CL_SUCCESS;
+    cl_int retVal = CL_INVALID_ACCELERATOR_INTEL;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("accelerator", accelerator);
-
-    IntelAccelerator *pAccelerator = nullptr;
-
-    do {
-        pAccelerator = castToObject<IntelAccelerator>(accelerator);
-
-        if (!pAccelerator) {
-            retVal = CL_INVALID_ACCELERATOR_INTEL;
-            break;
-        }
-
-        pAccelerator->retain();
-    } while (false);
 
     TRACING_EXIT(ClRetainAcceleratorINTEL, &retVal);
     return retVal;
@@ -4546,27 +4505,13 @@ cl_int CL_API_CALL clGetAcceleratorInfoINTEL(
     size_t *paramValueSizeRet) {
 
     TRACING_ENTER(ClGetAcceleratorInfoINTEL, &accelerator, &paramName, &paramValueSize, &paramValue, &paramValueSizeRet);
-    cl_int retVal = CL_SUCCESS;
+    cl_int retVal = CL_INVALID_ACCELERATOR_INTEL;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("accelerator", accelerator,
                    "paramName", paramName,
                    "paramValueSize", paramValueSize,
                    "paramValue", NEO::fileLoggerInstance().infoPointerToString(paramValue, paramValueSize),
                    "paramValueSizeRet", paramValueSizeRet);
-    IntelAccelerator *pAccelerator = nullptr;
-
-    do {
-        pAccelerator = castToObject<IntelAccelerator>(accelerator);
-
-        if (!pAccelerator) {
-            retVal = CL_INVALID_ACCELERATOR_INTEL;
-            break;
-        }
-
-        retVal = pAccelerator->getInfo(
-            paramName, paramValueSize, paramValue, paramValueSizeRet);
-
-    } while (false);
 
     TRACING_EXIT(ClGetAcceleratorInfoINTEL, &retVal);
     return retVal;
@@ -4576,26 +4521,9 @@ cl_int CL_API_CALL clReleaseAcceleratorINTEL(
     cl_accelerator_intel accelerator) {
 
     TRACING_ENTER(ClReleaseAcceleratorINTEL, &accelerator);
-    cl_int retVal = CL_SUCCESS;
-    if (wasPlatformTeardownCalled) {
-        TRACING_EXIT(ClReleaseAcceleratorINTEL, &retVal);
-        return CL_SUCCESS;
-    }
+    cl_int retVal = CL_INVALID_ACCELERATOR_INTEL;
     API_ENTER(&retVal);
     DBG_LOG_INPUTS("accelerator", accelerator);
-
-    IntelAccelerator *pAccelerator = nullptr;
-
-    do {
-        pAccelerator = castToObject<IntelAccelerator>(accelerator);
-
-        if (!pAccelerator) {
-            retVal = CL_INVALID_ACCELERATOR_INTEL;
-            break;
-        }
-
-        pAccelerator->release();
-    } while (false);
 
     TRACING_EXIT(ClReleaseAcceleratorINTEL, &retVal);
     return retVal;
@@ -4957,6 +4885,11 @@ cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue commandQueue,
         }
     } else {
         retVal = pCommandQueue->enqueueMarkerWithWaitList(numEventsInWaitList, eventWaitList, event);
+
+        if (event) {
+            auto pEvent = castToObjectOrAbort<Event>(*event);
+            pEvent->setCmdType(CL_COMMAND_SVM_MEMCPY);
+        }
     }
     TRACING_EXIT(ClEnqueueSvmMemcpy, &retVal);
     return retVal;
@@ -4994,7 +4927,7 @@ cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue commandQueue,
         return retVal;
     }
 
-    if ((svmPtr == nullptr) || (size == 0)) {
+    if ((svmPtr == nullptr) && (size != 0)) {
         retVal = CL_INVALID_VALUE;
         TRACING_EXIT(ClEnqueueSvmMemFill, &retVal);
         return retVal;

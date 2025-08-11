@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2024 Intel Corporation
+ * Copyright (C) 2021-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -16,25 +16,10 @@ void populatePointerKernelArg(KernelDescriptor &kernelDesc, ArgDescPointer &dst,
                               KernelDescriptor::AddressingMode addressingMode);
 }
 
-void MockKernelInfo::addArgAccelerator(uint32_t index, SurfaceStateHeapOffset bindful,
-                                       CrossThreadDataOffset mbBlockType, CrossThreadDataOffset sadAdjustMode,
-                                       CrossThreadDataOffset searchPathType, CrossThreadDataOffset subpixelMode) {
-    addArgSampler(index, bindful);
-    argAsSmp(index).samplerType = iOpenCL::SAMPLER_OBJECT_VME;
-    argAt(index).getExtendedTypeInfo().isAccelerator = true;
-    addExtendedVmeDescriptor(index, mbBlockType, sadAdjustMode, searchPathType, subpixelMode);
-    kernelDescriptor.kernelAttributes.flags.usesVme = true;
-}
-
 void MockKernelInfo::addArgBuffer(uint32_t index, CrossThreadDataOffset stateless, uint8_t pointerSize, SurfaceStateHeapOffset bindful, CrossThreadDataOffset bindless) {
     resizeArgsIfIndexTooBig(index);
 
     populatePointerKernelArg(kernelDescriptor, argAt(index).as<ArgDescPointer>(true), stateless, pointerSize, bindful, bindless, kernelDescriptor.kernelAttributes.bufferAddressingMode);
-}
-
-void MockKernelInfo::addArgDevQueue(uint32_t index, CrossThreadDataOffset stateless, uint8_t pointerSize, SurfaceStateHeapOffset bindful) {
-    addArgBuffer(index, stateless, pointerSize, bindful);
-    argAt(index).getExtendedTypeInfo().isDeviceQueue = true;
 }
 
 void MockKernelInfo::addArgImage(uint32_t index, SurfaceStateHeapOffset offset, uint32_t type, bool isTransformable) {
@@ -107,22 +92,6 @@ void MockKernelInfo::addExtendedMetadata(uint32_t index, const std::string &argN
     }
 
     extendedMetadata[index] = {argName, type, accessQualifier, addressQualifier, typeQualifiers};
-}
-
-void MockKernelInfo::addExtendedVmeDescriptor(uint32_t index, CrossThreadDataOffset mbBlockType, CrossThreadDataOffset sadAdjustMode, CrossThreadDataOffset searchPathType, CrossThreadDataOffset subpixelMode) {
-    auto &explicitArgsExtendedDescriptors = kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
-    if (index >= explicitArgsExtendedDescriptors.size()) {
-        explicitArgsExtendedDescriptors.resize(index + 1);
-    }
-
-    auto vmeDescriptor = std::make_unique<ArgDescVme>();
-    vmeDescriptor->mbBlockType = mbBlockType;
-    vmeDescriptor->sadAdjustMode = sadAdjustMode;
-    vmeDescriptor->searchPathType = searchPathType;
-    vmeDescriptor->subpixelMode = subpixelMode;
-    explicitArgsExtendedDescriptors[index] = std::move(vmeDescriptor);
-
-    argAt(index).getExtendedTypeInfo().hasVmeExtendedDescriptor = true;
 }
 
 void MockKernelInfo::populatePointerArg(ArgDescPointer &arg, uint8_t pointerSize, CrossThreadDataOffset stateless, SurfaceStateHeapOffset bindful) {

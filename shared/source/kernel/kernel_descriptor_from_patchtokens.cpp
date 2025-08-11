@@ -9,7 +9,6 @@
 
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device_binary_format/patchtokens_decoder.h"
-#include "shared/source/kernel/kernel_arg_descriptor_extended_vme.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 
 #include <sstream>
@@ -196,10 +195,6 @@ void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateStatele
     populatePointerKernelArg(dst, dst.payloadMappings.implicitArgs.printfSurfaceAddress, token, dst.kernelAttributes.bufferAddressingMode);
 }
 
-void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateStatelessDefaultDeviceQueueSurface &token) {
-    populatePointerKernelArg(dst, dst.payloadMappings.implicitArgs.deviceSideEnqueueDefaultQueueSurfaceAddress, token, dst.kernelAttributes.bufferAddressingMode);
-}
-
 void populateKernelDescriptor(KernelDescriptor &dst, const SPatchAllocateSystemThreadSurface &token) {
     dst.payloadMappings.implicitArgs.systemThreadSurfaceAddress.bindful = token.Offset;
     dst.kernelAttributes.perThreadSystemThreadSurfaceSize = token.PerThreadSystemThreadSurfaceSize;
@@ -276,7 +271,6 @@ void populateKernelArgDescriptor(KernelDescriptor &dst, size_t argNum, const SPa
         DEBUG_BREAK_IF(token.Type != iOpenCL::SAMPLER_OBJECT_VME &&
                        token.Type != iOpenCL::SAMPLER_OBJECT_VE &&
                        token.Type != iOpenCL::SAMPLER_OBJECT_VD);
-        dst.payloadMappings.explicitArgs[argNum].getExtendedTypeInfo().isAccelerator = true;
         dst.kernelAttributes.flags.usesVme |= (token.Type == iOpenCL::SAMPLER_OBJECT_VME);
     }
 }
@@ -314,17 +308,6 @@ void populateKernelArgDescriptor(KernelDescriptor &dst, size_t argNum, const SPa
 
     auto &argPointer = dst.payloadMappings.explicitArgs[argNum].as<ArgDescPointer>(true);
     dst.payloadMappings.explicitArgs[argNum].getTraits().addressQualifier = KernelArgMetadata::AddrConstant;
-
-    populatePointerKernelArg(dst, argPointer, token, dst.kernelAttributes.bufferAddressingMode);
-}
-
-void populateKernelArgDescriptor(KernelDescriptor &dst, size_t argNum, const SPatchStatelessDeviceQueueKernelArgument &token) {
-    markArgAsPatchable(dst, argNum);
-
-    auto &argPointer = dst.payloadMappings.explicitArgs[argNum].as<ArgDescPointer>(true);
-    dst.payloadMappings.explicitArgs[argNum].getTraits().addressQualifier = KernelArgMetadata::AddrGlobal;
-
-    dst.payloadMappings.explicitArgs[argNum].getExtendedTypeInfo().isDeviceQueue = true;
 
     populatePointerKernelArg(dst, argPointer, token, dst.kernelAttributes.bufferAddressingMode);
 }
@@ -397,9 +380,6 @@ void populateArgDescriptor(KernelDescriptor &dst, size_t argNum, const PatchToke
         case PATCH_TOKEN_STATELESS_CONSTANT_MEMORY_OBJECT_KERNEL_ARGUMENT:
             populateKernelArgDescriptor(dst, argNum, *reinterpret_cast<const SPatchStatelessConstantMemoryObjectKernelArgument *>(src.objectArg));
             break;
-        case PATCH_TOKEN_STATELESS_DEVICE_QUEUE_KERNEL_ARGUMENT:
-            populateKernelArgDescriptor(dst, argNum, *reinterpret_cast<const SPatchStatelessDeviceQueueKernelArgument *>(src.objectArg));
-            break;
         }
     }
 
@@ -445,23 +425,6 @@ void populateArgDescriptor(KernelDescriptor &dst, size_t argNum, const PatchToke
     } break;
     }
 
-    switch (src.objectTypeSpecialized) {
-    default:
-        UNRECOVERABLE_IF(PatchTokenBinary::ArgObjectTypeSpecialized::none != src.objectTypeSpecialized);
-        break;
-    case PatchTokenBinary::ArgObjectTypeSpecialized::vme: {
-        dst.payloadMappings.explicitArgs[argNum].getExtendedTypeInfo().hasVmeExtendedDescriptor = true;
-        dst.payloadMappings.explicitArgsExtendedDescriptors.resize(dst.payloadMappings.explicitArgs.size());
-
-        auto vmeDescriptor = std::make_unique<ArgDescVme>();
-        vmeDescriptor->mbBlockType = getOffset(src.metadataSpecialized.vme.mbBlockType);
-        vmeDescriptor->subpixelMode = getOffset(src.metadataSpecialized.vme.subpixelMode);
-        vmeDescriptor->sadAdjustMode = getOffset(src.metadataSpecialized.vme.sadAdjustMode);
-        vmeDescriptor->searchPathType = getOffset(src.metadataSpecialized.vme.searchPathType);
-        dst.payloadMappings.explicitArgsExtendedDescriptors[argNum] = std::move(vmeDescriptor);
-    } break;
-    }
-
     for (auto &byValArg : src.byValMap) {
         if (PatchTokenBinary::ArgObjectType::slm != src.objectType) {
             populateKernelArgDescriptor(dst, argNum, *byValArg);
@@ -486,7 +449,6 @@ void populateKernelDescriptor(KernelDescriptor &dst, const PatchTokenBinary::Ker
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessConstantMemorySurfaceWithInitialization);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessGlobalMemorySurfaceWithInitialization);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessPrintfSurface);
-    populateKernelDescriptorIfNotNull(dst, src.tokens.allocateStatelessDefaultDeviceQueueSurface);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateSyncBuffer);
     populateKernelDescriptorIfNotNull(dst, src.tokens.allocateRTGlobalBuffer);
 

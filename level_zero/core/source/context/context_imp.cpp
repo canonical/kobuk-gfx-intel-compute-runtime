@@ -64,6 +64,26 @@ DriverHandle *ContextImp::getDriverHandle() {
 ContextImp::ContextImp(DriverHandle *driverHandle) {
     this->driverHandle = static_cast<DriverHandleImp *>(driverHandle);
     this->contextExt = createContextExt(driverHandle);
+
+    bool platformSupportSvmHeapReservation = true;
+    for (auto &device : this->driverHandle->devices) {
+        auto &productHelper = device->getNEODevice()->getProductHelper();
+        if (!productHelper.isSvmHeapReservationSupported()) {
+            platformSupportSvmHeapReservation = false;
+            break;
+        }
+    }
+    contextSettings.enableSvmHeapReservation = platformSupportSvmHeapReservation;
+
+    bool pidfdOrSocket = true;
+    for (auto &device : this->driverHandle->devices) {
+        auto &productHelper = device->getNEODevice()->getProductHelper();
+        if (!productHelper.isPidFdOrSocketForIpcSupported()) {
+            pidfdOrSocket = false;
+            break;
+        }
+    }
+    contextSettings.enablePidfdOrSockets = pidfdOrSocket;
 }
 
 ContextImp::~ContextImp() {
@@ -75,7 +95,7 @@ ze_result_t ContextImp::allocHostMem(const ze_host_mem_alloc_desc_t *hostDesc,
                                      size_t alignment,
                                      void **ptr) {
 
-    auto hostMemDesc = hostDesc ? hostDesc : &DefaultDescriptors::hostMemDesc;
+    auto hostMemDesc = hostDesc ? hostDesc : &defaultHostMemDesc;
 
     if (NEO::debugManager.flags.ForceExtendedUSMBufferSize.get() >= 1) {
         size += (MemoryConstants::pageSize * NEO::debugManager.flags.ForceExtendedUSMBufferSize.get());
@@ -214,7 +234,7 @@ ze_result_t ContextImp::allocDeviceMem(ze_device_handle_t hDevice,
                                        size_t size,
                                        size_t alignment, void **ptr) {
 
-    auto deviceMemDesc = deviceDesc ? deviceDesc : &DefaultDescriptors::deviceMemDesc;
+    auto deviceMemDesc = deviceDesc ? deviceDesc : &defaultDeviceMemDesc;
 
     if (NEO::debugManager.flags.ForceExtendedUSMBufferSize.get() >= 1) {
         size += (MemoryConstants::pageSize * NEO::debugManager.flags.ForceExtendedUSMBufferSize.get());
@@ -337,8 +357,8 @@ ze_result_t ContextImp::allocSharedMem(ze_device_handle_t hDevice,
                                        size_t alignment,
                                        void **ptr) {
 
-    auto deviceMemDesc = deviceDesc ? deviceDesc : &DefaultDescriptors::deviceMemDesc;
-    auto hostMemDesc = hostDesc ? hostDesc : &DefaultDescriptors::hostMemDesc;
+    auto deviceMemDesc = deviceDesc ? deviceDesc : &defaultDeviceMemDesc;
+    auto hostMemDesc = hostDesc ? hostDesc : &defaultHostMemDesc;
 
     if (NEO::debugManager.flags.ForceExtendedUSMBufferSize.get() >= 1) {
         size += (MemoryConstants::pageSize * NEO::debugManager.flags.ForceExtendedUSMBufferSize.get());
@@ -779,14 +799,7 @@ ze_result_t ContextImp::getIpcMemHandlesImpl(const void *ptr,
         ipcType = InternalIpcMemoryType::hostUnifiedMemory;
     }
 
-    bool pidfdOrSocket = true;
-    for (auto &device : this->driverHandle->devices) {
-        auto &productHelper = device->getNEODevice()->getProductHelper();
-        if (!productHelper.isPidFdOrSocketForIpcSupported()) {
-            pidfdOrSocket = false;
-            break;
-        }
-    }
+    bool pidfdOrSocket = contextSettings.enablePidfdOrSockets;
     uint32_t loopCount = numIpcHandles ? *numIpcHandles : 1u;
     for (uint32_t i = 0u; i < loopCount; i++) {
         uint64_t handle = 0;
@@ -1192,12 +1205,7 @@ ze_result_t ContextImp::reserveVirtualMem(const void *pStart,
         reserveOnSvmHeap = true;
     }
 
-    bool platformSupportSvmHeapReservation = true;
-    for (auto &device : this->driverHandle->devices) {
-        auto &productHelper = device->getNEODevice()->getProductHelper();
-        platformSupportSvmHeapReservation &= productHelper.isSvmHeapReservationSupported();
-    }
-    reserveOnSvmHeap &= platformSupportSvmHeapReservation;
+    reserveOnSvmHeap &= contextSettings.enableSvmHeapReservation;
     reserveOnSvmHeap &= NEO::debugManager.flags.EnableReservingInSvmRange.get();
 
     NEO::AddressRange addressRange{};
@@ -1476,34 +1484,45 @@ ze_result_t ContextImp::mapVirtualMem(const void *ptr,
     }
 }
 
-ze_result_t ContextImp::unMapVirtualMem(const void *ptr,
-                                        size_t size) {
+ze_result_t ContextImp::unMapVirtualMem(const void *ptr, size_t size) {
+    ze_result_t result = ZE_RESULT_SUCCESS;
 
-    NEO::VirtualMemoryReservation *virtualMemoryReservation = nullptr;
-    auto lockVirtual = this->driverHandle->getMemoryManager()->lockVirtualMemoryReservationMap();
-    virtualMemoryReservation = findSupportedVirtualReservation(ptr, size);
+    // Test for unsupported page size alignment: not covered in API validation layer.
+    if ((getPageAlignedSizeRequired(size, nullptr, nullptr) != size)) {
+        return ZE_RESULT_ERROR_UNSUPPORTED_ALIGNMENT;
+    }
+
+    auto memManager = this->driverHandle->getMemoryManager();
+    auto lockVirtual = memManager->lockVirtualMemoryReservationMap();
+
+    auto virtualMemoryReservation = findSupportedVirtualReservation(ptr, size);
     if (virtualMemoryReservation) {
         std::map<void *, NEO::MemoryMappedRange *>::iterator physicalMapIt;
         physicalMapIt = virtualMemoryReservation->mappedAllocations.find(const_cast<void *>(ptr));
         if (physicalMapIt != virtualMemoryReservation->mappedAllocations.end()) {
+            NEO::SVMAllocsManager *svmAllocsManager = this->driverHandle->getSvmAllocsManager();
             NEO::PhysicalMemoryAllocation *physicalAllocation = &physicalMapIt->second->mappedAllocation;
-            NEO::SvmAllocationData *allocData = this->driverHandle->getSvmAllocsManager()->getSVMAlloc(reinterpret_cast<void *>(physicalAllocation->allocation->getGpuAddress()));
+            NEO::SvmAllocationData *allocData = svmAllocsManager->getSVMAlloc(reinterpret_cast<void *>(physicalAllocation->allocation->getGpuAddress()));
+            bool retVal = false;
 
             if (physicalAllocation->allocation->getAllocationType() == NEO::AllocationType::buffer) {
-                this->driverHandle->getSvmAllocsManager()->removeSVMAlloc(*allocData);
+                svmAllocsManager->removeSVMAlloc(*allocData);
                 NEO::OsContext *osContext = &physicalAllocation->device->getDefaultEngine().commandStreamReceiver->getOsContext();
-                this->driverHandle->getMemoryManager()->unMapPhysicalDeviceMemoryFromVirtualMemory(physicalAllocation->allocation, castToUint64(ptr), size, osContext, virtualMemoryReservation->rootDeviceIndex);
+                retVal = memManager->unMapPhysicalDeviceMemoryFromVirtualMemory(physicalAllocation->allocation, castToUint64(ptr), size, osContext, virtualMemoryReservation->rootDeviceIndex);
             } else {
                 auto gpuAllocations = allocData->gpuAllocations;
-                this->driverHandle->getSvmAllocsManager()->removeSVMAlloc(*allocData);
-                this->driverHandle->getMemoryManager()->unMapPhysicalHostMemoryFromVirtualMemory(gpuAllocations, physicalAllocation->allocation, castToUint64(ptr), size);
+                svmAllocsManager->removeSVMAlloc(*allocData);
+                retVal = memManager->unMapPhysicalHostMemoryFromVirtualMemory(gpuAllocations, physicalAllocation->allocation, castToUint64(ptr), size);
+            }
+            if (!retVal) {
+                result = ZE_RESULT_ERROR_UNKNOWN;
             }
 
             delete physicalMapIt->second;
             virtualMemoryReservation->mappedAllocations.erase(physicalMapIt);
         }
     }
-    return ZE_RESULT_SUCCESS;
+    return result;
 }
 
 ze_result_t ContextImp::setVirtualMemAccessAttribute(const void *ptr,

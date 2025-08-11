@@ -58,7 +58,7 @@ struct BcsSplit {
         size_t createAggregatedEvent(Context *context);
         uint64_t *getNextAllocationForAggregatedEvent();
 
-        Events(BcsSplit &bcsSplit);
+        Events(BcsSplit &bcsSplit) : bcsSplit(bcsSplit) {}
     } events;
 
     std::vector<CommandQueue *> cmdQs;
@@ -162,11 +162,11 @@ struct BcsSplit {
         return result;
     }
 
-    bool setupDevice(uint32_t productFamily, bool internalUsage, const ze_command_queue_desc_t *desc, NEO::CommandStreamReceiver *csr);
+    bool setupDevice(NEO::CommandStreamReceiver *csr);
     void releaseResources();
     std::vector<CommandQueue *> &getCmdQsForSplit(NEO::TransferDirection direction);
     void setupEnginesMask(NEO::BcsSplitSettings &settings);
-    bool setupQueues(const NEO::BcsSplitSettings &settings, uint32_t productFamily);
+    bool setupQueues(const NEO::BcsSplitSettings &settings);
 
     BcsSplit(DeviceImp &device) : device(device), events(*this){};
 };

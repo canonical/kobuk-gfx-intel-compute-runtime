@@ -421,6 +421,12 @@ bool Device::createEngines() {
 
                 auto contextCount = gfxCoreHelper.getContextGroupContextsCount();
 
+                if (getRootDeviceEnvironment().osInterface && getRootDeviceEnvironment().osInterface->getAggregatedProcessCount() > 1) {
+                    const auto numProcesses = getRootDeviceEnvironment().osInterface->getAggregatedProcessCount();
+
+                    contextCount = std::max(contextCount / numProcesses, 2u);
+                }
+
                 createSecondaryContexts(primaryEngine, secondaryEnginesForType, contextCount, 0, contextCount);
             }
         }
@@ -693,7 +699,7 @@ uint64_t Device::getProfilingTimerClock() {
 
 bool Device::isBcsSplitSupported() {
     auto &productHelper = getProductHelper();
-    auto bcsSplit = productHelper.getBcsSplitSettings().enabled && Device::isBlitSplitEnabled();
+    auto bcsSplit = productHelper.getBcsSplitSettings(getHardwareInfo()).enabled && Device::isBlitSplitEnabled();
 
     if (debugManager.flags.SplitBcsCopy.get() != -1) {
         bcsSplit = debugManager.flags.SplitBcsCopy.get();
@@ -1084,6 +1090,23 @@ void Device::stopDirectSubmissionAndWaitForCompletion() {
     }
 }
 
+void Device::pollForCompletion() {
+    if (allEngines.size() == 0 || !getDefaultEngine().commandStreamReceiver->isAubMode()) {
+        return;
+    }
+
+    for (auto &engine : allEngines) {
+        auto csr = engine.commandStreamReceiver;
+        csr->pollForCompletion();
+    }
+
+    for (auto &subDevice : subdevices) {
+        if (subDevice != nullptr) {
+            subDevice->pollForCompletion();
+        }
+    }
+}
+
 bool Device::isAnyDirectSubmissionEnabled() const {
     return this->isAnyDirectSubmissionEnabledImpl(false);
 }
@@ -1123,28 +1146,29 @@ void Device::allocateRTDispatchGlobals(uint32_t maxBvhLevels) {
     auto rtStackSize = RayTracingHelper::getRTStackSizePerTile(*this, tileCount, maxBvhLevels, extraBytesLocal, extraBytesGlobal);
 
     std::unique_ptr<RTDispatchGlobalsInfo> dispatchGlobalsInfo = std::make_unique<RTDispatchGlobalsInfo>();
-    auto releaseHelper = getReleaseHelper();
+
     auto &productHelper = getProductHelper();
-    bool isResource48Bit = productHelper.is48bResourceNeededForRayTracing();
+
+    GraphicsAllocation *dispatchGlobalsArrayAllocation = nullptr;
 
     AllocationProperties arrayAllocProps(getRootDeviceIndex(), true, dispatchGlobalsSize,
                                          AllocationType::globalSurface, true, getDeviceBitfield());
-    arrayAllocProps.flags.resource48Bit = isResource48Bit;
+    arrayAllocProps.flags.resource48Bit = productHelper.is48bResourceNeededForRayTracing();
     arrayAllocProps.flags.isUSMDeviceAllocation = true;
-    GraphicsAllocation *dispatchGlobalsArrayAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties(arrayAllocProps);
+    dispatchGlobalsArrayAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties(arrayAllocProps);
 
     if (dispatchGlobalsArrayAllocation == nullptr) {
         return;
     }
 
-    for (auto tile = 0u; tile < tileCount; tile++) {
+    for (unsigned int tile = 0; tile < tileCount; tile++) {
         DeviceBitfield deviceBitfield =
             (tileCount == 1)
                 ? this->getDeviceBitfield()
                 : subdevices[tile]->getDeviceBitfield();
 
         AllocationProperties allocProps(getRootDeviceIndex(), true, rtStackSize, AllocationType::buffer, true, deviceBitfield);
-        allocProps.flags.resource48Bit = isResource48Bit;
+        allocProps.flags.resource48Bit = productHelper.is48bResourceNeededForRayTracing();
         allocProps.flags.isUSMDeviceAllocation = true;
 
         auto rtStackAllocation = getMemoryManager()->allocateGraphicsMemoryWithProperties(allocProps);
@@ -1155,14 +1179,22 @@ void Device::allocateRTDispatchGlobals(uint32_t maxBvhLevels) {
         }
 
         RTDispatchGlobals dispatchGlobals = {0};
-        dispatchGlobals.rtMemBasePtr = rtStackAllocation->getGpuAddress() + rtStackSize;
-        dispatchGlobals.callStackHandlerKSP = 0;
-        dispatchGlobals.stackSizePerRay = releaseHelper ? releaseHelper->getAsyncStackSizePerRay() : 0;
-        dispatchGlobals.numDSSRTStacks = RayTracingHelper::getAsyncNumRTStacksPerDss();
-        dispatchGlobals.maxBVHLevels = maxBvhLevels;
-        dispatchGlobals.flags = 1;
 
-        productHelper.adjustRTDispatchGlobals(dispatchGlobals, this->getHardwareInfo());
+        dispatchGlobals.rtMemBasePtr = rtStackAllocation->getGpuAddress() + rtStackSize;
+        dispatchGlobals.callStackHandlerKSP = reinterpret_cast<uint64_t>(nullptr);
+        auto releaseHelper = getReleaseHelper();
+        dispatchGlobals.stackSizePerRay = releaseHelper ? releaseHelper->getStackSizePerRay() : 0;
+
+        auto rtStacksPerDss = RayTracingHelper::getNumRtStacksPerDss(*this);
+        dispatchGlobals.numDSSRTStacks = rtStacksPerDss;
+        dispatchGlobals.maxBVHLevels = maxBvhLevels;
+        uint32_t *dispatchGlobalsAsArray = reinterpret_cast<uint32_t *>(&dispatchGlobals);
+        dispatchGlobalsAsArray[7] = 1;
+
+        if (releaseHelper) {
+            bool heaplessEnabled = this->getCompilerProductHelper().isHeaplessModeEnabled(this->getHardwareInfo());
+            releaseHelper->adjustRTDispatchGlobals(static_cast<void *>(&dispatchGlobals), rtStacksPerDss, heaplessEnabled, maxBvhLevels);
+        }
 
         MemoryTransferHelper::transferMemoryToAllocation(productHelper.isBlitCopyRequiredForLocalMemory(this->getRootDeviceEnvironment(), *dispatchGlobalsArrayAllocation),
                                                          *this,

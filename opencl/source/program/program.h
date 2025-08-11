@@ -35,6 +35,9 @@ class ExecutionEnvironment;
 class Program;
 struct MetadataGeneration;
 struct KernelInfo;
+enum class DecodeError : uint8_t;
+struct ExternalFunctionInfo;
+
 template <>
 struct OpenCLObjectMapper<_cl_program> {
     typedef class Program DerivedType;
@@ -246,6 +249,7 @@ class Program : public BaseObject<_cl_program> {
     MOCKABLE_VIRTUAL std::string getInternalOptions() const;
     uint32_t getMaxRootDeviceIndex() const { return maxRootDeviceIndex; }
     uint32_t getIndirectDetectionVersion() const { return indirectDetectionVersion; }
+    uint32_t getIndirectAccessBufferVersion() const { return indirectAccessBufferMajorVersion; }
     void retainForKernel() {
         std::unique_lock<std::mutex> lock{lockMutex};
         exposedKernels++;
@@ -296,9 +300,6 @@ class Program : public BaseObject<_cl_program> {
 
     void setBuildStatus(cl_build_status status);
     void setBuildStatusSuccess(const ClDeviceVector &deviceVector, cl_program_binary_type binaryType);
-
-    bool containsVmeUsage(const std::vector<KernelInfo *> &kernelInfos) const;
-    void disableZebinIfVmeEnabled(std::string &options, std::string &internalOptions, const std::string &sourceCode);
 
     void notifyModuleCreate();
     void notifyModuleDestroy();
@@ -371,6 +372,7 @@ class Program : public BaseObject<_cl_program> {
     ClDeviceVector clDevicesInProgram;
 
     uint32_t indirectDetectionVersion = 0u;
+    uint32_t indirectAccessBufferMajorVersion = 0u;
     bool isBuiltIn = false;
     bool isGeneratedByIgc = true;
 

@@ -58,7 +58,9 @@ const KernelInfo *Program::getKernelInfo(
 }
 
 size_t Program::getNumKernels() const {
-    auto numKernels = buildInfos[clDevices[0]->getRootDeviceIndex()].kernelInfoArray.size();
+    auto pClDevice = this->getDevicesInProgram();
+    auto rootDeviceIndex = pClDevice.at(0)->getRootDeviceIndex();
+    auto numKernels = buildInfos[rootDeviceIndex].kernelInfoArray.size();
     auto usesExportedFunctions = (exportedFunctionsKernelId != std::numeric_limits<size_t>::max());
     if (usesExportedFunctions) {
         numKernels--;
@@ -201,6 +203,7 @@ cl_int Program::processGenBinary(const ClDevice &clDevice) {
 
             this->isGeneratedByIgc = singleDeviceBinary.generator == GeneratorType::igc;
             this->indirectDetectionVersion = singleDeviceBinary.generatorFeatureVersions.indirectMemoryAccessDetection;
+            this->indirectAccessBufferMajorVersion = singleDeviceBinary.generatorFeatureVersions.indirectAccessBuffer;
 
         } else {
             return CL_INVALID_BINARY;
@@ -320,6 +323,7 @@ cl_int Program::processProgramInfo(ProgramInfo &src, const ClDevice &clDevice) {
     }
 
     indirectDetectionVersion = src.indirectDetectionVersion;
+    indirectAccessBufferMajorVersion = src.indirectAccessBufferMajorVersion;
 
     return linkBinary(&clDevice.getDevice(), src.globalConstants.initData, src.globalConstants.size, src.globalVariables.initData,
                       src.globalVariables.size, src.globalStrings, src.externalFunctions);

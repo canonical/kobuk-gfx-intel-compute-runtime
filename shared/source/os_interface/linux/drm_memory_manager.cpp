@@ -521,7 +521,15 @@ DrmAllocation *DrmMemoryManager::allocateGraphicsMemoryWithAlignmentImpl(const A
     auto svmCpuAllocation = allocationData.type == AllocationType::svmCpu;
     if (svmCpuAllocation) {
         // add padding in case reserved addr is not aligned
-        alignedStorageSize = alignUp(cSize, cAlignment);
+
+        auto &productHelper = getGmmHelper(allocationData.rootDeviceIndex)->getRootDeviceEnvironment().getHelper<ProductHelper>();
+        if (alignedStorageSize >= 2 * MemoryConstants::megaByte &&
+            productHelper.is2MBLocalMemAlignmentEnabled()) {
+            alignedStorageSize = alignUp(cSize, MemoryConstants::pageSize2M);
+        } else {
+            alignedStorageSize = alignUp(cSize, cAlignment);
+        }
+
         alignedVirtualAddressRangeSize = alignedStorageSize + cAlignment;
     }
 
@@ -746,13 +754,17 @@ GraphicsAllocation *DrmMemoryManager::allocateGraphicsMemory64kb(const Allocatio
     return nullptr;
 }
 
-void DrmMemoryManager::unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) {
+bool DrmMemoryManager::unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) {
+    bool result = true;
+
     DrmAllocation *drmAllocation = reinterpret_cast<DrmAllocation *>(physicalAllocation);
     auto bufferObjects = drmAllocation->getBOs();
     for (auto bufferObject : bufferObjects) {
         if (bufferObject) {
             for (auto drmIterator = 0u; drmIterator < osContext->getDeviceBitfield().size(); drmIterator++) {
-                bufferObject->unbind(osContext, drmIterator);
+                if (bufferObject->unbind(osContext, drmIterator) != 0) {
+                    result = false;
+                }
             }
             auto address = bufferObject->peekAddress();
             uint64_t offset = address - gpuRange;
@@ -761,9 +773,10 @@ void DrmMemoryManager::unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAlloca
     }
     physicalAllocation->setCpuPtrAndGpuAddress(nullptr, 0u);
     physicalAllocation->setReservedAddressRange(nullptr, 0u);
+    return result;
 }
 
-void DrmMemoryManager::unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
+bool DrmMemoryManager::unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
     void *addressToUnmap = static_cast<DrmAllocation *>(multiGraphicsAllocation.getGraphicsAllocation(physicalAllocation->getRootDeviceIndex()))->getMmapPtr();
     size_t sizeToUnmap = static_cast<DrmAllocation *>(multiGraphicsAllocation.getGraphicsAllocation(physicalAllocation->getRootDeviceIndex()))->getMmapSize();
 
@@ -795,8 +808,8 @@ void DrmMemoryManager::unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAll
             delete allocation;
         }
     }
-
-    this->munmapFunction(addressToUnmap, sizeToUnmap);
+    // Unmap the memory region
+    return (this->munmapFunction(addressToUnmap, sizeToUnmap) == 0);
 }
 
 bool DrmMemoryManager::mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
@@ -921,7 +934,7 @@ GraphicsAllocation *DrmMemoryManager::allocateMemoryByKMD(const AllocationData &
     gmmRequirements.preferCompressed = allocationData.flags.preferCompressed;
     auto gmmHelper = executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmHelper();
     auto gmm = std::make_unique<Gmm>(gmmHelper, allocationData.hostPtr,
-                                     allocationData.size, 0u, CacheSettingsHelper::getGmmUsageType(allocationData.type, allocationData.flags.uncacheable, productHelper, gmmHelper->getHardwareInfo()), systemMemoryStorageInfo, gmmRequirements);
+                                     allocationData.size, allocationData.alignment, CacheSettingsHelper::getGmmUsageType(allocationData.type, allocationData.flags.uncacheable, productHelper, gmmHelper->getHardwareInfo()), systemMemoryStorageInfo, gmmRequirements);
     size_t bufferSize = allocationData.size;
     auto alignment = allocationData.alignment;
     if (bufferSize >= 2 * MemoryConstants::megaByte) {
@@ -2166,7 +2179,7 @@ GraphicsAllocation *DrmMemoryManager::allocatePhysicalHostMemory(const Allocatio
     uint64_t offset = 0;
     auto ioctlHelper = this->getDrm(allocationData.rootDeviceIndex).getIoctlHelper();
     uint64_t mmapOffsetWb = ioctlHelper->getDrmParamValue(DrmParam::mmapOffsetWb);
-    if (!retrieveMmapOffsetForBufferObject(allocationData.rootDeviceIndex, *bo, mmapOffsetWb, offset)) {
+    if (!ioctlHelper->retrieveMmapOffsetForBufferObject(*bo, mmapOffsetWb, offset)) {
         return nullptr;
     }
     bo->setMmapOffset(offset);
@@ -2519,55 +2532,6 @@ BufferObject::BOType DrmMemoryManager::getBOTypeFromPatIndex(uint64_t patIndex, 
     }
 }
 
-bool DrmMemoryManager::retrieveMmapOffsetForBufferObject(uint32_t rootDeviceIndex, BufferObject &bo, uint64_t flags, uint64_t &offset) {
-    constexpr uint64_t mmapOffsetFixed = 4;
-    constexpr uint64_t mmapOffsetCoherent = I915_MMAP_OFFSET_WB;
-    constexpr uint64_t mmapOffsetNonCoherent = I915_MMAP_OFFSET_WC;
-
-    GemMmapOffset mmapOffset = {};
-    mmapOffset.handle = bo.peekHandle();
-    if (isLocalMemorySupported(rootDeviceIndex)) {
-        mmapOffset.flags = mmapOffsetFixed;
-    } else {
-        auto &productHelper = executionEnvironment.rootDeviceEnvironments[rootDeviceIndex]->getHelper<ProductHelper>();
-        if (productHelper.useGemCreateExtInAllocateMemoryByKMD()) {
-            BufferObject::BOType boType = bo.peekBOType();
-            switch (boType) {
-            case NEO::BufferObject::BOType::nonCoherent:
-                mmapOffset.flags = mmapOffsetNonCoherent;
-                break;
-            case NEO::BufferObject::BOType::legacy:
-            case NEO::BufferObject::BOType::coherent:
-            default:
-                mmapOffset.flags = mmapOffsetCoherent;
-                break;
-            }
-        } else {
-            mmapOffset.flags = flags;
-        }
-    }
-    auto &drm = this->getDrm(rootDeviceIndex);
-    auto ioctlHelper = drm.getIoctlHelper();
-    auto ret = ioctlHelper->ioctl(DrmIoctl::gemMmapOffset, &mmapOffset);
-    if (ret != 0 && isLocalMemorySupported(rootDeviceIndex)) {
-        mmapOffset.flags = flags;
-        ret = ioctlHelper->ioctl(DrmIoctl::gemMmapOffset, &mmapOffset);
-    }
-    if (ret != 0) {
-        int err = drm.getErrno();
-
-        CREATE_DEBUG_STRING(str, "ioctl(DRM_IOCTL_I915_GEM_MMAP_OFFSET) failed with %d. errno=%d(%s)\n", ret, err, strerror(err));
-        drm.getRootDeviceEnvironment().executionEnvironment.setErrorDescription(std::string(str.get()));
-        PRINT_DEBUG_STRING(debugManager.flags.PrintDebugMessages.get(), stderr, str.get());
-        DEBUG_BREAK_IF(true);
-
-        return false;
-    }
-
-    offset = mmapOffset.offset;
-    return true;
-}
-
 bool DrmMemoryManager::allocationTypeForCompletionFence(AllocationType allocationType) {
     int32_t overrideAllowAllAllocations = debugManager.flags.UseDrmCompletionFenceForAllAllocations.get();
     bool allowAllAllocations = overrideAllowAllAllocations == -1 ? false : !!overrideAllowAllAllocations;
@@ -2655,7 +2619,7 @@ DrmAllocation *DrmMemoryManager::createAllocWithAlignment(const AllocationData &
 
         uint64_t offset = 0;
         uint64_t mmapOffsetWb = ioctlHelper->getDrmParamValue(DrmParam::mmapOffsetWb);
-        if (!retrieveMmapOffsetForBufferObject(allocationData.rootDeviceIndex, *bo, mmapOffsetWb, offset)) {
+        if (!ioctlHelper->retrieveMmapOffsetForBufferObject(*bo, mmapOffsetWb, offset)) {
             ioctlHelper->releaseGpuRange(*this, reinterpret_cast<void *>(preferredAddress), totalSizeToAlloc, allocationData.rootDeviceIndex, allocationData.type);
             ioctlHelper->munmapFunction(*this, cpuPointer, size);
             return nullptr;
@@ -2705,12 +2669,10 @@ void *DrmMemoryManager::lockBufferObject(BufferObject *bo) {
     }
 
     auto drm = bo->peekDrm();
-    auto rootDeviceIndex = this->getRootDeviceIndex(drm);
-
     auto ioctlHelper = drm->getIoctlHelper();
     uint64_t mmapOffsetWc = ioctlHelper->getDrmParamValue(DrmParam::mmapOffsetWc);
     uint64_t offset = 0;
-    if (!retrieveMmapOffsetForBufferObject(rootDeviceIndex, *bo, mmapOffsetWc, offset)) {
+    if (!ioctlHelper->retrieveMmapOffsetForBufferObject(*bo, mmapOffsetWc, offset)) {
         return nullptr;
     }
 
@@ -2858,7 +2820,7 @@ GraphicsAllocation *DrmMemoryManager::createSharedUnifiedMemoryAllocation(const 
         uint64_t mmapOffsetWb = ioctlHelper->getDrmParamValue(DrmParam::mmapOffsetWb);
         uint64_t offset = 0;
         bo->setBOType(getBOTypeFromPatIndex(patIndex, productHelper.isVmBindPatIndexProgrammingSupported()));
-        if (!retrieveMmapOffsetForBufferObject(allocationData.rootDeviceIndex, *bo, mmapOffsetWb, offset)) {
+        if (!ioctlHelper->retrieveMmapOffsetForBufferObject(*bo, mmapOffsetWb, offset)) {
             ioctlHelper->munmapFunction(*this, cpuBasePointer, totalSizeToAlloc);
             ioctlHelper->releaseGpuRange(*this, reinterpret_cast<void *>(preferredAddress), totalSizeToAlloc, allocationData.rootDeviceIndex, allocationData.type);
             return nullptr;
@@ -3018,7 +2980,7 @@ DrmAllocation *DrmMemoryManager::createUSMHostAllocationFromSharedHandle(osHandl
 
         uint64_t mmapOffsetWb = ioctlHelper->getDrmParamValue(DrmParam::mmapOffsetWb);
         uint64_t offset = 0;
-        if (!retrieveMmapOffsetForBufferObject(properties.rootDeviceIndex, *bo, mmapOffsetWb, offset)) {
+        if (!ioctlHelper->retrieveMmapOffsetForBufferObject(*bo, mmapOffsetWb, offset)) {
             this->munmapFunction(cpuPointer, size);
             delete bo;
             return nullptr;

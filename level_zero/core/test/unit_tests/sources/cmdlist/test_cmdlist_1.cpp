@@ -93,17 +93,7 @@ TEST_F(ContextCommandListCreate, givenInvalidDescWhenCreatingCommandListImmediat
     EXPECT_EQ(CommandList::fromHandle(hCommandList), nullptr);
 }
 
-struct DefautlDescriptorWithBlitterTest : Test<DeviceFixture> {
-
-    void SetUp() override {
-        NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
-        hwInfo.capabilityTable.blitterOperationsSupported = true;
-        hwInfo.featureTable.ftrBcsInfo.set(0);
-        DeviceFixture::setUpImpl(&hwInfo);
-    }
-};
-
-struct DefautlDescriptorWithoutBlitterTest : Test<DeviceFixture> {
+struct DefaultDescriptorWithoutBlitterTest : Test<DeviceFixture> {
 
     void SetUp() override {
         NEO::HardwareInfo hwInfo = *NEO::defaultHwInfo.get();
@@ -112,9 +102,27 @@ struct DefautlDescriptorWithoutBlitterTest : Test<DeviceFixture> {
     }
 };
 
-TEST_F(DefautlDescriptorWithoutBlitterTest, givenDeviceWithoutBlitterSupportWhenCreatingCommandListImmediateWithoutDescriptorThenInOrderAsyncCmdListWithoutCopyOffloadIsCreated) {
+TEST_F(DefaultDescriptorWithoutBlitterTest, givenDeviceWithoutBlitterSupportWhenCreatingCommandListImmediateWithoutDescriptorThenInOrderAsyncCmdListWithoutCopyOffloadIsCreated) {
     ze_command_list_handle_t hCommandList = {};
     ze_result_t result = context->createCommandListImmediate(device, nullptr, &hCommandList);
+    EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+
+    auto commandList = CommandList::whiteboxCast(L0::CommandList::fromHandle(hCommandList));
+    uint32_t ordinal = std::numeric_limits<uint32_t>::max();
+    EXPECT_EQ(commandList->getOrdinal(&ordinal), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(ordinal, 0u);
+    uint32_t index = std::numeric_limits<uint32_t>::max();
+    EXPECT_EQ(commandList->getImmediateIndex(&index), ZE_RESULT_SUCCESS);
+    EXPECT_EQ(index, 0u);
+    EXPECT_TRUE(commandList->isInOrderExecutionEnabled());
+    EXPECT_FALSE(commandList->isSyncModeQueue);
+    EXPECT_FALSE(commandList->isCopyOffloadEnabled());
+    commandList->destroy();
+}
+
+TEST_F(DefaultDescriptorWithoutBlitterTest, givenDeviceWithoutBlitterSupportWhenCreatingCommandListImmediateWithDefaultDescriptorThenInOrderAsyncCmdListWithoutCopyOffloadIsCreated) {
+    ze_command_list_handle_t hCommandList = {};
+    ze_result_t result = context->createCommandListImmediate(device, &defaultCommandQueueDesc, &hCommandList);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 
     auto commandList = CommandList::whiteboxCast(L0::CommandList::fromHandle(hCommandList));
@@ -2156,6 +2164,225 @@ HWTEST2_F(CommandListCreateTests, givenInOrderExecutionWhenDispatchingRelaxedOrd
                                                                                            NEO::CompareOperation::less, true, FamilyType::isQwordInOrderCounter, false));
 }
 
+HWTEST2_F(CommandListCreateTests, givenDirectSubmissionAndImmCmdListWhenDispatchingWalkerWithProfilingThenSetCsrFlagIsWalkerWithProfilingEnqueued, IsAtLeastXeCore) {
+    ze_command_queue_desc_t desc = {};
+    desc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::createImmediate(productFamily, device, &desc, false, NEO::EngineGroupType::renderCompute, returnValue));
+    ASSERT_NE(nullptr, commandList);
+    auto whiteBoxCmdList = static_cast<CommandList *>(commandList.get());
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+
+    ze_event_handle_t event = nullptr;
+
+    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    ASSERT_EQ(ZE_RESULT_SUCCESS, eventPool->createEvent(&eventDesc, &event));
+    std::unique_ptr<L0::Event> eventObject(L0::Event::fromHandle(event));
+
+    std::unique_ptr<L0::ult::Module> mockModule = std::make_unique<L0::ult::Module>(device, nullptr, ModuleType::builtin);
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = mockModule.get();
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+
+    uint8_t srcPtr[64] = {};
+    uint8_t dstPtr[64] = {};
+    const ze_copy_region_t region = {0U, 0U, 0U, 1, 1, 0U};
+
+    driverHandle->importExternalPointer(dstPtr, MemoryConstants::pageSize);
+
+    auto ultCsr = static_cast<NEO::UltCommandStreamReceiver<FamilyType> *>(whiteBoxCmdList->getCsr(false));
+
+    auto verifyFlag = [&ultCsr](ze_result_t result, bool dispatchFlag) {
+        EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+        EXPECT_EQ(ultCsr->isWalkerWithProfilingEnqueued, dispatchFlag);
+        ultCsr->isWalkerWithProfilingEnqueued = false;
+    };
+
+    auto expectFlagEnabled = true && this->device->getNEODevice()->getProductHelper().shouldRegisterEnqueuedWalkerWithProfiling();
+    // non-pipelined state
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams), expectFlagEnabled);
+
+    // non-pipelined state already programmed
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams), false);
+
+    verifyFlag(commandList->appendLaunchKernelIndirect(kernel.toHandle(), groupCount, event, 0, nullptr, false), expectFlagEnabled);
+
+    verifyFlag(commandList->appendBarrier(event, 0, nullptr, false), false);
+
+    CmdListMemoryCopyParams copyParams = {};
+    verifyFlag(commandList->appendMemoryCopy(dstPtr, srcPtr, 8, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendMemoryCopyRegion(dstPtr, &region, 0, 0, srcPtr, &region, 0, 0, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendEventReset(event), false);
+
+    verifyFlag(commandList->appendSignalEvent(event, false), false);
+
+    verifyFlag(commandList->appendPageFaultCopy(kernel.getIsaAllocation(), kernel.getIsaAllocation(), 1, false), false);
+
+    verifyFlag(commandList->appendWaitOnEvents(1, &event, nullptr, false, true, false, false, false, false), false);
+
+    verifyFlag(commandList->appendWriteGlobalTimestamp(reinterpret_cast<uint64_t *>(dstPtr), event, 0, nullptr), false);
+
+    if constexpr (FamilyType::supportsSampler) {
+        auto kernel = device->getBuiltinFunctionsLib()->getImageFunction(ImageBuiltin::copyImageRegion);
+        auto mockBuiltinKernel = static_cast<Mock<::L0::KernelImp> *>(kernel);
+        mockBuiltinKernel->setArgRedescribedImageCallBase = false;
+
+        auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
+        ze_image_region_t imgRegion = {1, 1, 1, 1, 1, 1};
+        ze_image_desc_t zeDesc = {};
+        zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+        image->initialize(device, &zeDesc);
+        auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
+
+        CmdListMemoryCopyParams copyParams = {};
+
+        verifyFlag(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, event, 0, nullptr, copyParams), expectFlagEnabled);
+    }
+
+    size_t rangeSizes = 1;
+    const void **ranges = reinterpret_cast<const void **>(&dstPtr[0]);
+    verifyFlag(commandList->appendMemoryRangesBarrier(1, &rangeSizes, ranges, event, 0, nullptr), false);
+
+    CmdListKernelLaunchParams cooperativeParams = {};
+    cooperativeParams.isCooperative = true;
+
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, cooperativeParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, cooperativeParams), expectFlagEnabled);
+
+    driverHandle->releaseImportedPointer(dstPtr);
+}
+
+HWTEST2_F(CommandListCreateTests, givenCmdListWhenDispatchingWalkerWithProfilingThenSetCmdListFlagIsWalkerWithProfilingEnqueued, IsAtLeastXeCore) {
+    ze_result_t returnValue;
+    std::unique_ptr<L0::CommandList> commandList(CommandList::create(productFamily, device, NEO::EngineGroupType::renderCompute, 0u, returnValue, false));
+    ASSERT_NE(nullptr, commandList);
+    auto whiteBoxCmdList = static_cast<CommandList *>(commandList.get());
+
+    ze_event_pool_desc_t eventPoolDesc = {};
+    eventPoolDesc.count = 1;
+    eventPoolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+
+    ze_event_desc_t eventDesc = {};
+    eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+
+    ze_event_handle_t event = nullptr;
+
+    std::unique_ptr<L0::EventPool> eventPool(EventPool::create(driverHandle.get(), context, 0, nullptr, &eventPoolDesc, returnValue));
+    EXPECT_EQ(ZE_RESULT_SUCCESS, returnValue);
+
+    ASSERT_EQ(ZE_RESULT_SUCCESS, eventPool->createEvent(&eventDesc, &event));
+    std::unique_ptr<L0::Event> eventObject(L0::Event::fromHandle(event));
+
+    std::unique_ptr<L0::ult::Module> mockModule = std::make_unique<L0::ult::Module>(device, nullptr, ModuleType::builtin);
+    Mock<::L0::KernelImp> kernel;
+    kernel.module = mockModule.get();
+    ze_group_count_t groupCount{1, 1, 1};
+    CmdListKernelLaunchParams launchParams = {};
+
+    uint8_t srcPtr[64] = {};
+    uint8_t dstPtr[64] = {};
+    const ze_copy_region_t region = {0U, 0U, 0U, 1, 1, 0U};
+
+    driverHandle->importExternalPointer(dstPtr, MemoryConstants::pageSize);
+
+    auto verifyFlag = [&whiteBoxCmdList](ze_result_t result, bool dispatchFlag) {
+        EXPECT_EQ(ZE_RESULT_SUCCESS, result);
+        EXPECT_EQ(whiteBoxCmdList->getAndClearIsWalkerWithProfilingEnqueued(), dispatchFlag);
+    };
+
+    auto expectFlagEnabled = true && device->getNEODevice()->getProductHelper().shouldRegisterEnqueuedWalkerWithProfiling();
+    // non-pipelined state
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams), expectFlagEnabled);
+
+    // non-pipelined state already programmed
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, launchParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, nullptr, 0, nullptr, launchParams), false);
+
+    verifyFlag(commandList->appendLaunchKernelIndirect(kernel.toHandle(), groupCount, event, 0, nullptr, false), expectFlagEnabled);
+
+    verifyFlag(commandList->appendBarrier(event, 0, nullptr, false), false);
+
+    CmdListMemoryCopyParams copyParams = {};
+    verifyFlag(commandList->appendMemoryCopy(dstPtr, srcPtr, 8, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendMemoryCopyRegion(dstPtr, &region, 0, 0, srcPtr, &region, 0, 0, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendMemoryFill(dstPtr, srcPtr, 8, 1, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendEventReset(event), false);
+
+    verifyFlag(commandList->appendSignalEvent(event, false), false);
+
+    verifyFlag(commandList->appendPageFaultCopy(kernel.getIsaAllocation(), kernel.getIsaAllocation(), 1, false), false);
+
+    verifyFlag(commandList->appendWaitOnEvents(1, &event, nullptr, false, true, false, false, false, false), false);
+
+    verifyFlag(commandList->appendWriteGlobalTimestamp(reinterpret_cast<uint64_t *>(dstPtr), event, 0, nullptr), false);
+
+    if constexpr (FamilyType::supportsSampler) {
+        auto kernel = device->getBuiltinFunctionsLib()->getImageFunction(ImageBuiltin::copyImageRegion);
+        auto mockBuiltinKernel = static_cast<Mock<::L0::KernelImp> *>(kernel);
+        mockBuiltinKernel->setArgRedescribedImageCallBase = false;
+
+        auto image = std::make_unique<WhiteBox<::L0::ImageCoreFamily<FamilyType::gfxCoreFamily>>>();
+        ze_image_region_t imgRegion = {1, 1, 1, 1, 1, 1};
+        ze_image_desc_t zeDesc = {};
+        zeDesc.stype = ZE_STRUCTURE_TYPE_IMAGE_DESC;
+        image->initialize(device, &zeDesc);
+        auto bytesPerPixel = static_cast<uint32_t>(image->getImageInfo().surfaceFormat->imageElementSizeInBytes);
+
+        CmdListMemoryCopyParams copyParams = {};
+
+        verifyFlag(commandList->appendImageCopyRegion(image->toHandle(), image->toHandle(), &imgRegion, &imgRegion, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyFromMemory(image->toHandle(), dstPtr, &imgRegion, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyToMemory(dstPtr, image->toHandle(), &imgRegion, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyFromMemoryExt(image->toHandle(), dstPtr, &imgRegion, bytesPerPixel, bytesPerPixel, event, 0, nullptr, copyParams), expectFlagEnabled);
+
+        verifyFlag(commandList->appendImageCopyToMemoryExt(dstPtr, image->toHandle(), &imgRegion, bytesPerPixel, bytesPerPixel, event, 0, nullptr, copyParams), expectFlagEnabled);
+    }
+
+    size_t rangeSizes = 1;
+    const void **ranges = reinterpret_cast<const void **>(&dstPtr[0]);
+    verifyFlag(commandList->appendMemoryRangesBarrier(1, &rangeSizes, ranges, event, 0, nullptr), false);
+
+    CmdListKernelLaunchParams cooperativeParams = {};
+    cooperativeParams.isCooperative = true;
+
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, cooperativeParams), expectFlagEnabled);
+
+    verifyFlag(commandList->appendLaunchKernel(kernel.toHandle(), groupCount, event, 0, nullptr, cooperativeParams), expectFlagEnabled);
+
+    driverHandle->releaseImportedPointer(dstPtr);
+}
+
 TEST_F(CommandListCreateTests, GivenGpuHangWhenCreatingImmCmdListWithSyncModeAndAppendBarrierThenAppendBarrierReturnsDeviceLost) {
     ze_command_queue_desc_t desc = {};
     desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
@@ -2269,8 +2496,8 @@ TEST_F(CommandListCreateTests, givenImmediateCommandListWhenThereIsNoEnoughSpace
     EXPECT_TRUE(commandList->isImmediateType());
     EXPECT_NE(nullptr, whiteBoxCmdList->cmdQImmediate);
 
-    void *srcPtr = reinterpret_cast<void *>(0x1234);
-    void *dstPtr = reinterpret_cast<void *>(0x2345);
+    size_t src = 0;
+    size_t dst = 0;
 
     // reduce available cmd buffer size, so next command can't fit in 1st and we need to use 2nd cmd buffer
     size_t useSize = commandList->getCmdContainer().getCommandStream()->getMaxAvailableSpace() - commonImmediateCommandSize + 1;
@@ -2279,7 +2506,7 @@ TEST_F(CommandListCreateTests, givenImmediateCommandListWhenThereIsNoEnoughSpace
 
     auto oldStreamPtr = commandList->getCmdContainer().getCommandStream()->getCpuBase();
     CmdListMemoryCopyParams copyParams = {};
-    auto result = commandList->appendMemoryCopy(dstPtr, srcPtr, 8, nullptr, 0, nullptr, copyParams);
+    auto result = commandList->appendMemoryCopy(&dst, &src, sizeof(size_t), nullptr, 0, nullptr, copyParams);
     auto newStreamPtr = commandList->getCmdContainer().getCommandStream()->getCpuBase();
 
     ASSERT_EQ(ZE_RESULT_SUCCESS, result);
@@ -2666,9 +2893,9 @@ TEST_F(CommandListCreateTests, whenInvokingAppendMemoryCopyFromContextForImmedia
     EXPECT_TRUE(commandList->isImmediateType());
     EXPECT_NE(nullptr, whiteBoxCmdList->cmdQImmediate);
 
-    void *srcPtr = reinterpret_cast<void *>(0x1234);
-    void *dstPtr = reinterpret_cast<void *>(0x2345);
-    auto result = commandList->appendMemoryCopyFromContext(dstPtr, nullptr, srcPtr, 8, nullptr, 0, nullptr, false);
+    size_t src = 0;
+    size_t dst = 0;
+    auto result = commandList->appendMemoryCopyFromContext(&dst, nullptr, &src, sizeof(size_t), nullptr, 0, nullptr, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
@@ -2726,9 +2953,9 @@ TEST_F(CommandListCreateTests, whenInvokingAppendMemoryCopyFromContextForImmedia
     EXPECT_TRUE(commandList->isImmediateType());
     EXPECT_NE(nullptr, whiteBoxCmdList->cmdQImmediate);
 
-    void *srcPtr = reinterpret_cast<void *>(0x1234);
-    void *dstPtr = reinterpret_cast<void *>(0x2345);
-    auto result = commandList->appendMemoryCopyFromContext(dstPtr, nullptr, srcPtr, 8, nullptr, 0, nullptr, false);
+    size_t src = 0;
+    size_t dst = 0;
+    auto result = commandList->appendMemoryCopyFromContext(&dst, nullptr, &src, sizeof(size_t), nullptr, 0, nullptr, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
@@ -2743,9 +2970,9 @@ TEST_F(CommandListCreateTests, whenInvokingAppendMemoryCopyFromContextForImmedia
     EXPECT_TRUE(commandList->isImmediateType());
     EXPECT_NE(nullptr, whiteBoxCmdList->cmdQImmediate);
 
-    void *srcPtr = reinterpret_cast<void *>(0x1234);
-    void *dstPtr = reinterpret_cast<void *>(0x2345);
-    auto result = commandList->appendMemoryCopyFromContext(dstPtr, nullptr, srcPtr, 8, nullptr, 0, nullptr, false);
+    size_t src = 0;
+    size_t dst = 0;
+    auto result = commandList->appendMemoryCopyFromContext(&dst, nullptr, &src, sizeof(size_t), nullptr, 0, nullptr, false);
     EXPECT_EQ(ZE_RESULT_SUCCESS, result);
 }
 
@@ -3225,7 +3452,6 @@ HWTEST_F(CommandListCreateTests, givenNullEventWhenAppendEventAfterWalkerThenNot
 
 TEST_F(CommandListCreateTests, givenCreatedCommandListWhenGettingTrackingFlagsThenDefaultValuseIsHwSupported) {
     auto &rootDeviceEnvironment = device->getNEODevice()->getRootDeviceEnvironment();
-    auto &hwInfo = device->getNEODevice()->getHardwareInfo();
 
     auto &l0GfxCoreHelper = rootDeviceEnvironment.getHelper<L0GfxCoreHelper>();
     auto &productHelper = rootDeviceEnvironment.getHelper<NEO::ProductHelper>();
@@ -3259,7 +3485,6 @@ TEST_F(CommandListCreateTests, givenCreatedCommandListWhenGettingTrackingFlagsTh
 
     EXPECT_EQ(commandList->heaplessModeEnabled, commandList->scratchAddressPatchingEnabled);
     EXPECT_EQ(commandList->statelessBuiltinsEnabled, compilerProductHelper.isForceToStatelessRequired());
-    EXPECT_EQ((productHelper.getSupportedLocalDispatchSizes(hwInfo).size() > 0), commandList->getLocalDispatchSupport());
 }
 
 TEST(BuiltinTypeHelperTest, givenNonStatelessAndNonHeaplessWhenAdjustBuiltinTypeIsCalledThenCorrectBuiltinTypeIsReturned) {
@@ -3446,7 +3671,7 @@ TEST_F(CommandListAppendLaunchKernelWithArgumentsTests, givenIncorrectGroupSizeW
     Mock<::L0::KernelImp> kernel;
     kernel.module = mockModule.get();
 
-    void *arguments = nullptr;
+    const void *arguments = nullptr;
     retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), kernel.toHandle(), groupCounts, groupSizes, &arguments, nullptr, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION, retVal);
 }
@@ -3512,7 +3737,7 @@ TEST_F(CommandListAppendLaunchKernelWithArgumentsTests, whenAppendLaunchKernelWi
     uint8_t argImmediate[16]{};
     size_t argSlm = 0x60;
 
-    void *arguments[] = {&argBuffer, &argImage, &argSampler, &argImmediate, &argSlm};
+    const void *arguments[] = {&argBuffer, &argImage, &argSampler, &argImmediate, &argSlm};
     retVal = zeCommandListAppendLaunchKernelWithArguments(commandList->toHandle(), kernel.toHandle(), groupCounts, groupSizes, arguments, nullptr, nullptr, 0, nullptr);
     EXPECT_EQ(ZE_RESULT_SUCCESS, retVal);
 

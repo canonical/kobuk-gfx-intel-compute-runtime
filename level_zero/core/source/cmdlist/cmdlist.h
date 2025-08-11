@@ -21,6 +21,7 @@
 
 #include "level_zero/core/source/cmdlist/command_to_patch.h"
 #include "level_zero/core/source/helpers/api_handle_helper.h"
+#include "level_zero/experimental/source/graph/graph.h"
 #include "level_zero/include/level_zero/ze_intel_gpu.h"
 #include <level_zero/ze_api.h>
 #include <level_zero/zet_api.h>
@@ -30,6 +31,7 @@
 #include <map>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct _ze_command_list_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_COMMAND_LIST> {};
@@ -130,8 +132,8 @@ struct CommandList : _ze_command_list_handle_t {
                                                         const ze_group_count_t groupCounts,
                                                         const ze_group_size_t groupSizes,
 
-                                                        void **pArguments,
-                                                        void *pNext,
+                                                        const void **pArguments,
+                                                        const void *pNext,
                                                         ze_event_handle_t hSignalEvent,
                                                         uint32_t numWaitEvents,
                                                         ze_event_handle_t *phWaitEvents) = 0;
@@ -185,11 +187,6 @@ struct CommandList : _ze_command_list_handle_t {
                                                     const size_t *pOffsets, ze_event_handle_t hSignalEvent,
                                                     uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) = 0;
 
-    virtual ze_result_t appendMILoadRegImm(uint32_t reg, uint32_t value, bool isBcs) = 0;
-    virtual ze_result_t appendMILoadRegReg(uint32_t reg1, uint32_t reg2) = 0;
-    virtual ze_result_t appendMILoadRegMem(uint32_t reg1, uint64_t address) = 0;
-    virtual ze_result_t appendMIStoreRegMem(uint32_t reg1, uint64_t address) = 0;
-    virtual ze_result_t appendMIMath(void *aluArray, size_t aluCount) = 0;
     virtual ze_result_t appendMIBBStart(uint64_t address, size_t predication, bool secondLevel) = 0;
     virtual ze_result_t appendMIBBEnd() = 0;
     virtual ze_result_t appendMINoop() = 0;
@@ -435,14 +432,37 @@ struct CommandList : _ze_command_list_handle_t {
         return engineGroupType;
     }
 
-    bool getLocalDispatchSupport() const {
-        return localDispatchSupport;
-    }
-
     bool isClosed() const {
         return closedCmdList;
     }
     ze_result_t obtainLaunchParamsFromExtensions(const ze_base_desc_t *desc, CmdListKernelLaunchParams &launchParams, ze_kernel_handle_t kernelHandle) const;
+
+    void setCaptureTarget(Graph *graph) {
+        this->captureTarget = graph;
+    }
+
+    Graph *getCaptureTarget() const {
+        return this->captureTarget;
+    }
+
+    Graph *releaseCaptureTarget() {
+        return std::exchange(this->captureTarget, nullptr);
+    }
+
+    template <CaptureApi api, typename... TArgs>
+    ze_result_t capture(TArgs... apiArgs) {
+        return L0::captureCommand<api>(*this, this->captureTarget, apiArgs...);
+    }
+
+    inline bool getIsWalkerWithProfilingEnqueued() {
+        return this->isWalkerWithProfilingEnqueued;
+    }
+
+    inline bool getAndClearIsWalkerWithProfilingEnqueued() {
+        bool retVal = this->isWalkerWithProfilingEnqueued;
+        this->isWalkerWithProfilingEnqueued = false;
+        return retVal;
+    }
 
   protected:
     NEO::GraphicsAllocation *getAllocationFromHostPtrMap(const void *buffer, uint64_t bufferSize, bool copyOffload);
@@ -456,6 +476,7 @@ struct CommandList : _ze_command_list_handle_t {
 
     bool isDualStreamCopyOffloadOperation(bool offloadOperation) const { return (getCopyOffloadModeForOperation(offloadOperation) == CopyOffloadModes::dualStream); }
     bool isNonDualStreamCopyOffloadOperation(bool offloadOperation) const { return offloadOperation && !isDualStreamCopyOffloadOperation(offloadOperation); }
+    void registerWalkerWithProfilingEnqueued(Event *event);
 
     std::map<const void *, NEO::GraphicsAllocation *> hostPtrMap;
     NEO::PrivateAllocsToReuseContainer ownedPrivateAllocations;
@@ -537,10 +558,13 @@ struct CommandList : _ze_command_list_handle_t {
     bool scratchAddressPatchingEnabled = false;
     bool taskCountUpdateFenceRequired = false;
     bool statelessBuiltinsEnabled = false;
-    bool localDispatchSupport = false;
     bool l3FlushAfterPostSyncRequired = false;
     bool textureCacheFlushPending = false;
     bool closedCmdList = false;
+    bool isWalkerWithProfilingEnqueued = false;
+    bool shouldRegisterEnqueuedWalkerWithProfiling = false;
+
+    Graph *captureTarget = nullptr;
 };
 
 using CommandListAllocatorFn = CommandList *(*)(uint32_t);

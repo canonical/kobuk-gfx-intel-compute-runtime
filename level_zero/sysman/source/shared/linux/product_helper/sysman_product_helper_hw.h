@@ -75,10 +75,11 @@ class SysmanProductHelperHw : public SysmanProductHelper {
     // Pci
     ze_result_t getPciProperties(zes_pci_properties_t *pProperties) override;
     ze_result_t getPciStats(zes_pci_stats_t *pStats, LinuxSysmanImp *pLinuxSysmanImp) override;
+    bool isPcieDowngradeSupported() override;
+    int32_t maxPcieGenSupported() override;
 
     // Engine
     bool isAggregationOfSingleEnginesSupported() override;
-    ze_result_t getGroupEngineBusynessFromSingleEngines(LinuxSysmanImp *pLinuxSysmanImp, zes_engine_stats_t *pStats, zes_engine_group_t &engineGroup) override;
 
     // Vf Management
     bool isVfMemoryUtilizationSupported() override;

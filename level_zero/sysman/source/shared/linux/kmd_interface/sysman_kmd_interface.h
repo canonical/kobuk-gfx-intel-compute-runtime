@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "level_zero/sysman/source/api/engine/sysman_engine.h"
 #include <level_zero/zes_api.h>
 
 #include "neo_igfxfmid.h"
@@ -14,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,8 +33,11 @@ class PmuInterface;
 class LinuxSysmanImp;
 class SysmanProductHelper;
 
+struct EngineGroupInfo;
+
 constexpr std::string_view deviceDir("device");
 constexpr std::string_view sysDevicesDir("/sys/devices/");
+constexpr std::string_view mediaDirSuffix("1");
 
 typedef std::pair<std::string, std::string> valuePair;
 
@@ -121,16 +126,24 @@ class SysmanKmdInterface {
     static std::unique_ptr<SysmanKmdInterface> create(NEO::Drm &drm, SysmanProductHelper *pSysmanProductHelper);
 
     virtual std::string getBasePath(uint32_t subDeviceId) const = 0;
+    virtual std::string getBasePathForFreqDomain(uint32_t subDeviceId, zes_freq_domain_t frequencyDomainNumber) const = 0;
     virtual std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) = 0;
+    virtual std::string getSysfsPathForFreqDomain(SysfsName sysfsName, uint32_t subDeviceId, bool prefixBaseDirectory,
+                                                  zes_freq_domain_t frequencyDomainNumber) = 0;
     virtual std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) = 0;
     virtual std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) = 0;
-    virtual ze_result_t getEngineActivityFdListAndConfigPair(zes_engine_group_t engineGroup,
-                                                             uint32_t engineInstance,
-                                                             uint32_t gtId,
-                                                             PmuInterface *const &pPmuInterface,
-                                                             std::vector<std::pair<int64_t, int64_t>> &fdList,
-                                                             std::pair<uint64_t, uint64_t> &configPair) = 0;
-    virtual ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::pair<int64_t, int64_t> &fdPair, zes_engine_stats_t *pStats) = 0;
+    virtual ze_result_t getPmuConfigsForSingleEngines(const std::string &sysmanDeviceDir,
+                                                      const EngineGroupInfo &engineInfo,
+                                                      PmuInterface *const &pPmuInterface,
+                                                      const NEO::Drm *pDrm,
+                                                      std::vector<uint64_t> &pmuConfigs) = 0;
+    virtual ze_result_t getPmuConfigsForGroupEngines(const MapOfEngineInfo &mapEngineInfo,
+                                                     const std::string &sysmanDeviceDir,
+                                                     const EngineGroupInfo &engineInfo,
+                                                     PmuInterface *const &pPmuInterface,
+                                                     const NEO::Drm *pDrm,
+                                                     std::vector<uint64_t> &pmuConfigs) = 0;
+    virtual ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::vector<int64_t> &fdList, zes_engine_stats_t *pStats) = 0;
     virtual std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const = 0;
     virtual bool isStandbyModeControlAvailable() const = 0;
     virtual bool clientInfoAvailableInFdInfo() const = 0;
@@ -177,8 +190,11 @@ class SysmanKmdInterface {
     virtual std::string getGpuUnBindEntry() const = 0;
     virtual std::vector<zes_power_domain_t> getPowerDomains() const = 0;
     virtual void setSysmanDeviceDirName(const bool isIntegratedDevice) = 0;
+    virtual std::string getBurstPowerLimitFile(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) = 0;
+    virtual std::string getFreqMediaDomainBasePath() = 0;
     const std::string getSysmanDeviceDirName() const;
     ze_result_t checkErrorNumberAndReturnStatus();
+    virtual ze_result_t readPcieDowngradeAttribute(std::string sysfsName, uint32_t &val) { return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE; }
 
   protected:
     std::unique_ptr<FsAccessInterface> pFsAccess;
@@ -208,16 +224,24 @@ class SysmanKmdInterfaceI915Upstream : public SysmanKmdInterface, SysmanKmdInter
     ~SysmanKmdInterfaceI915Upstream() override;
 
     std::string getBasePath(uint32_t subDeviceId) const override;
+    std::string getBasePathForFreqDomain(uint32_t subDeviceId, zes_freq_domain_t frequencyDomainNumber) const override;
     std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
+    std::string getSysfsPathForFreqDomain(SysfsName sysfsName, uint32_t subDeviceId, bool prefixBaseDirectory,
+                                          zes_freq_domain_t frequencyDomainNumber) override;
     std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) override;
     std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) override;
-    ze_result_t getEngineActivityFdListAndConfigPair(zes_engine_group_t engineGroup,
-                                                     uint32_t engineInstance,
-                                                     uint32_t gtId,
-                                                     PmuInterface *const &pPmuInterface,
-                                                     std::vector<std::pair<int64_t, int64_t>> &fdList,
-                                                     std::pair<uint64_t, uint64_t> &configPair) override;
-    ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::pair<int64_t, int64_t> &fdPair, zes_engine_stats_t *pStats) override;
+    ze_result_t getPmuConfigsForSingleEngines(const std::string &sysmanDeviceDir,
+                                              const EngineGroupInfo &engineInfo,
+                                              PmuInterface *const &pPmuInterface,
+                                              const NEO::Drm *pDrm,
+                                              std::vector<uint64_t> &pmuConfigs) override;
+    ze_result_t getPmuConfigsForGroupEngines(const MapOfEngineInfo &mapEngineInfo,
+                                             const std::string &sysmanDeviceDir,
+                                             const EngineGroupInfo &engineInfo,
+                                             PmuInterface *const &pPmuInterface,
+                                             const NEO::Drm *pDrm,
+                                             std::vector<uint64_t> &pmuConfigs) override;
+    ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::vector<int64_t> &fdList, zes_engine_stats_t *pStats) override;
     std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const override;
     bool isStandbyModeControlAvailable() const override { return true; }
     bool clientInfoAvailableInFdInfo() const override { return false; }
@@ -251,6 +275,8 @@ class SysmanKmdInterfaceI915Upstream : public SysmanKmdInterface, SysmanKmdInter
     std::string getGpuUnBindEntry() const override;
     std::vector<zes_power_domain_t> getPowerDomains() const override { return {ZES_POWER_DOMAIN_PACKAGE}; }
     void setSysmanDeviceDirName(const bool isIntegratedDevice) override;
+    std::string getBurstPowerLimitFile(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
+    std::string getFreqMediaDomainBasePath() override;
 
   protected:
     std::map<SysfsName, valuePair> sysfsNameToFileMap;
@@ -268,16 +294,24 @@ class SysmanKmdInterfaceI915Prelim : public SysmanKmdInterface, SysmanKmdInterfa
     ~SysmanKmdInterfaceI915Prelim() override;
 
     std::string getBasePath(uint32_t subDeviceId) const override;
+    std::string getBasePathForFreqDomain(uint32_t subDeviceId, zes_freq_domain_t frequencyDomainNumber) const override;
     std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
+    std::string getSysfsPathForFreqDomain(SysfsName sysfsName, uint32_t subDeviceId, bool prefixBaseDirectory,
+                                          zes_freq_domain_t frequencyDomainNumber) override;
     std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) override;
     std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) override;
-    ze_result_t getEngineActivityFdListAndConfigPair(zes_engine_group_t engineGroup,
-                                                     uint32_t engineInstance,
-                                                     uint32_t gtId,
-                                                     PmuInterface *const &pPmuInterface,
-                                                     std::vector<std::pair<int64_t, int64_t>> &fdList,
-                                                     std::pair<uint64_t, uint64_t> &configPair) override;
-    ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::pair<int64_t, int64_t> &fdPair, zes_engine_stats_t *pStats) override;
+    ze_result_t getPmuConfigsForSingleEngines(const std::string &sysmanDeviceDir,
+                                              const EngineGroupInfo &engineInfo,
+                                              PmuInterface *const &pPmuInterface,
+                                              const NEO::Drm *pDrm,
+                                              std::vector<uint64_t> &pmuConfigs) override;
+    ze_result_t getPmuConfigsForGroupEngines(const MapOfEngineInfo &mapEngineInfo,
+                                             const std::string &sysmanDeviceDir,
+                                             const EngineGroupInfo &engineInfo,
+                                             PmuInterface *const &pPmuInterface,
+                                             const NEO::Drm *pDrm,
+                                             std::vector<uint64_t> &pmuConfigs) override;
+    ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::vector<int64_t> &fdList, zes_engine_stats_t *pStats) override;
     std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const override;
     bool isStandbyModeControlAvailable() const override { return true; }
     bool clientInfoAvailableInFdInfo() const override { return false; }
@@ -311,6 +345,8 @@ class SysmanKmdInterfaceI915Prelim : public SysmanKmdInterface, SysmanKmdInterfa
     std::string getGpuUnBindEntry() const override;
     std::vector<zes_power_domain_t> getPowerDomains() const override { return {ZES_POWER_DOMAIN_PACKAGE}; }
     void setSysmanDeviceDirName(const bool isIntegratedDevice) override;
+    std::string getBurstPowerLimitFile(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
+    std::string getFreqMediaDomainBasePath() override;
 
   protected:
     std::map<SysfsName, valuePair> sysfsNameToFileMap;
@@ -328,17 +364,25 @@ class SysmanKmdInterfaceXe : public SysmanKmdInterface {
     ~SysmanKmdInterfaceXe() override;
 
     std::string getBasePath(uint32_t subDeviceId) const override;
+    std::string getBasePathForFreqDomain(uint32_t subDeviceId, zes_freq_domain_t frequencyDomainNumber) const override;
     std::string getSysfsFilePath(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
+    std::string getSysfsPathForFreqDomain(SysfsName sysfsName, uint32_t subDeviceId, bool prefixBaseDirectory,
+                                          zes_freq_domain_t frequencyDomainNumber) override;
     std::string getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) override;
     std::string getEngineBasePath(uint32_t subDeviceId) const override;
     std::string getEnergyCounterNodeFile(zes_power_domain_t powerDomain) override;
-    ze_result_t getEngineActivityFdListAndConfigPair(zes_engine_group_t engineGroup,
-                                                     uint32_t engineInstance,
-                                                     uint32_t gtId,
-                                                     PmuInterface *const &pPmuInterface,
-                                                     std::vector<std::pair<int64_t, int64_t>> &fdList,
-                                                     std::pair<uint64_t, uint64_t> &configPair) override;
-    ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::pair<int64_t, int64_t> &fdPair, zes_engine_stats_t *pStats) override;
+    ze_result_t getPmuConfigsForSingleEngines(const std::string &sysmanDeviceDir,
+                                              const EngineGroupInfo &engineInfo,
+                                              PmuInterface *const &pPmuInterface,
+                                              const NEO::Drm *pDrm,
+                                              std::vector<uint64_t> &pmuConfigs) override;
+    ze_result_t getPmuConfigsForGroupEngines(const MapOfEngineInfo &mapEngineInfo,
+                                             const std::string &sysmanDeviceDir,
+                                             const EngineGroupInfo &engineInfo,
+                                             PmuInterface *const &pPmuInterface,
+                                             const NEO::Drm *pDrm,
+                                             std::vector<uint64_t> &pmuConfigs) override;
+    ze_result_t readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::vector<int64_t> &fdList, zes_engine_stats_t *pStats) override;
     std::string getHwmonName(uint32_t subDeviceId, bool isSubdevice) const override;
     bool isStandbyModeControlAvailable() const override { return false; }
     bool clientInfoAvailableInFdInfo() const override { return true; }
@@ -373,6 +417,9 @@ class SysmanKmdInterfaceXe : public SysmanKmdInterface {
     std::string getGpuBindEntry() const override;
     std::string getGpuUnBindEntry() const override;
     void setSysmanDeviceDirName(const bool isIntegratedDevice) override;
+    std::string getBurstPowerLimitFile(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) override;
+    std::string getFreqMediaDomainBasePath() override;
+    ze_result_t readPcieDowngradeAttribute(std::string sysfsName, uint32_t &val) override;
 
   protected:
     std::map<SysfsName, valuePair> sysfsNameToFileMap;

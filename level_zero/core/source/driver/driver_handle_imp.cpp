@@ -21,10 +21,12 @@
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/source/os_interface/device_factory.h"
 #include "shared/source/os_interface/os_interface.h"
 #include "shared/source/os_interface/os_library.h"
 #include "shared/source/release_helper/release_helper.h"
 #include "shared/source/utilities/logger.h"
+#include "shared/source/utilities/staging_buffer_manager.h"
 
 #include "level_zero/core/source/builtin/builtin_functions_lib.h"
 #include "level_zero/core/source/context/context_imp.h"
@@ -108,6 +110,10 @@ void DriverHandleImp::setMemoryManager(NEO::MemoryManager *memoryManager) {
 
 NEO::SVMAllocsManager *DriverHandleImp::getSvmAllocsManager() {
     return this->svmAllocsManager;
+}
+
+NEO::StagingBufferManager *DriverHandleImp::getStagingBufferManager() {
+    return this->stagingBufferManager.get();
 }
 
 ze_result_t DriverHandleImp::getApiVersion(ze_api_version_t *version) {
@@ -214,6 +220,11 @@ ze_result_t DriverHandleImp::getExtensionProperties(uint32_t *pCount,
 }
 
 DriverHandleImp::~DriverHandleImp() {
+    for (auto &device : this->devices) {
+        // release temporary pointers before default context destruction
+        device->bcsSplitReleaseResources();
+    }
+
     if (this->defaultContext) {
         L0::Context::fromHandle(this->defaultContext)->destroy();
         this->defaultContext = nullptr;
@@ -222,6 +233,7 @@ DriverHandleImp::~DriverHandleImp() {
         this->externalSemaphoreController.reset();
     }
 
+    this->stagingBufferManager.reset();
     if (memoryManager != nullptr) {
         memoryManager->peekExecutionEnvironment().prepareForCleanup();
         if (this->svmAllocsManager) {
@@ -331,7 +343,7 @@ ze_result_t DriverHandleImp::initialize(std::vector<std::unique_ptr<NEO::Device>
         Device::fromHandle(deviceToExpose)->setIdentifier(deviceIdentifier++);
     }
     createContext(&DefaultDescriptors::contextDesc, static_cast<uint32_t>(this->devicesToExpose.size()), this->devicesToExpose.data(), &defaultContext);
-
+    this->stagingBufferManager = std::make_unique<NEO::StagingBufferManager>(svmAllocsManager, this->rootDeviceIndices, this->deviceBitfields, false);
     return ZE_RESULT_SUCCESS;
 }
 
@@ -359,7 +371,8 @@ void DriverHandleImp::initHostUsmAllocPool() {
     auto usmHostAllocPoolingEnabled = NEO::ApiSpecificConfig::isHostUsmPoolingEnabled();
     for (auto device : this->devices) {
         usmHostAllocPoolingEnabled &= device->getNEODevice()->getProductHelper().isHostUsmPoolAllocatorSupported() &&
-                                      nullptr == device->getL0Debugger();
+                                      nullptr == device->getL0Debugger() &&
+                                      NEO::DeviceFactory::isHwModeSelected();
     }
     auto poolSize = 2 * MemoryConstants::megaByte;
     if (NEO::debugManager.flags.EnableHostUsmAllocationPool.get() != -1) {
@@ -378,7 +391,8 @@ void DriverHandleImp::initDeviceUsmAllocPool(NEO::Device &device) {
     const uint64_t maxServicedSize = 1 * MemoryConstants::megaByte;
     bool enabled = NEO::ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
                    device.getProductHelper().isDeviceUsmPoolAllocatorSupported() &&
-                   nullptr == device.getL0Debugger();
+                   nullptr == device.getL0Debugger() &&
+                   NEO::DeviceFactory::isHwModeSelected();
     uint64_t poolSize = 2 * MemoryConstants::megaByte;
 
     if (NEO::debugManager.flags.EnableDeviceUsmAllocationPool.get() != -1) {
@@ -474,7 +488,7 @@ bool DriverHandleImp::findAllocationDataForRange(const void *buffer,
     // Make sure the host buffer does not overlap any existing allocation
     const char *baseAddress = reinterpret_cast<const char *>(buffer);
     NEO::SvmAllocationData *beginAllocData = svmAllocsManager->getSVMAlloc(buffer);
-    NEO::SvmAllocationData *endAllocData = svmAllocsManager->getSVMAlloc(static_cast<const void *>(baseAddress + offset));
+    NEO::SvmAllocationData *endAllocData = offset == 0 ? beginAllocData : svmAllocsManager->getSVMAlloc(static_cast<const void *>(baseAddress + offset));
 
     if (beginAllocData) {
         allocData = beginAllocData;

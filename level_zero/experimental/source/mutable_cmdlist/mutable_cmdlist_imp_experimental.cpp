@@ -20,11 +20,43 @@
 #include "level_zero/experimental/source/mutable_cmdlist/program/mcl_encoder.h"
 #include "level_zero/experimental/source/mutable_cmdlist/program/mcl_program.h"
 
+#include "implicit_args.h"
+
 #include <algorithm>
 #include <memory>
 
 namespace L0 {
 namespace MCL {
+
+ze_result_t MutableCommandListImp::getVariable(const InterfaceVariableDescriptor *varDesc, Variable **outVariable) {
+    *outVariable = nullptr;
+
+    std::string varName = varDesc->name == nullptr ? "" : std::string(varDesc->name);
+
+    if (false == varName.empty()) {
+        auto it = variableMap.find(varName);
+        if (it != variableMap.end()) {
+            *outVariable = it->second;
+            return ZE_RESULT_SUCCESS;
+        }
+    }
+
+    auto var = std::unique_ptr<Variable>(Variable::create(this->base, varDesc));
+    if (false == varName.empty()) {
+        variableMap.insert(std::make_pair(varName, var.get()));
+    }
+
+    if (var->getDesc().isTemporary) {
+        tempMem.variables.push_back(var.get());
+    }
+
+    *outVariable = var.get();
+    variableStorage.push_back(std::move(var));
+
+    this->hasStageCommitVariables |= varDesc->isStageCommit;
+
+    return ZE_RESULT_SUCCESS;
+}
 
 ze_result_t MutableCommandListImp::getVariablesList(uint32_t *pVarCount, Variable **outVariables) {
     *pVarCount = static_cast<uint32_t>(variableStorage.size());
@@ -171,7 +203,6 @@ ze_result_t MutableCommandListImp::loadFromBinary(const uint8_t *pBinary, const 
     args.cmdListEngine = base->getEngineGroupType();
     args.partitionCount = base->getPartitionCount();
     args.heapless = this->getBase()->isHeaplessModeEnabled();
-    args.localDispatch = this->getBase()->getLocalDispatchSupport();
     args.mutableWalkerCmds = &mutableWalkerCmds;
     Program::Decoder::MclDecoder::decode(args);
     if (base->getCmdListStateBaseAddressTracking()) {

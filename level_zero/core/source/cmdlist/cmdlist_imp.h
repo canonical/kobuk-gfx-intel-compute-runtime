@@ -44,6 +44,8 @@ struct CommandListImp : public CommandList {
     const std::vector<Event *> &peekMappedEventList() { return mappedTsEventList; }
     void addRegularCmdListSubmissionCounter();
     virtual void patchInOrderCmds() = 0;
+    bool inOrderCmdsPatchingEnabled() const;
+    void clearInOrderExecCounterAllocation();
     void enableSynchronizedDispatch(NEO::SynchronizedDispatchMode mode);
     NEO::SynchronizedDispatchMode getSynchronizedDispatchMode() const { return synchronizedDispatchMode; }
     void enableCopyOperationOffload();
@@ -60,8 +62,6 @@ struct CommandListImp : public CommandList {
     static constexpr bool cmdListDefaultCoherency = false;
     static constexpr bool cmdListDefaultDisableOverdispatch = true;
     static constexpr bool cmdListDefaultPipelineSelectModeSelected = true;
-    static constexpr bool cmdListDefaultMediaSamplerClockGate = false;
-    static constexpr bool cmdListDefaultGlobalAtomics = false;
     std::vector<Event *> mappedTsEventList;
     std::vector<Event *> interruptEvents;
 };

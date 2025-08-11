@@ -1042,7 +1042,7 @@ struct WaitForQueueCompletionTests : public ::testing::Test {
     template <typename Family>
     struct MyCmdQueue : public CommandQueueHw<Family> {
         MyCmdQueue(Context *context, ClDevice *device) : CommandQueueHw<Family>(context, device, nullptr, false){};
-        WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) override {
+        WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, std::span<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) override {
             requestedUseQuickKmdSleep = useQuickKmdSleep;
             waitUntilCompleteCounter++;
 
@@ -1380,7 +1380,7 @@ HWTEST_F(CommandQueueTests, givenDirectSubmissionAndSharedImageWhenReleasingShar
     EXPECT_EQ(result, CL_SUCCESS);
 
     auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(&cmdQ.getGpgpuCommandStreamReceiver());
-    ultCsr->directSubmissionAvailable = true;
+    VariableBackup<bool> directSubmissionAvailable{&ultCsr->directSubmissionAvailable, true};
     ultCsr->callBaseSendRenderStateCacheFlush = false;
     ultCsr->flushReturnValue = SubmissionStatus::success;
     EXPECT_FALSE(ultCsr->renderStateCacheFlushed);
@@ -1395,6 +1395,7 @@ TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageWhenUsingSharingHandler
     MockContext context;
     MockCommandQueue cmdQ(&context, mockDevice.get(), 0, false);
     MockSharingHandler *mockSharingHandler = new MockSharingHandler;
+    constexpr cl_command_type expectedCmd = CL_COMMAND_NDRANGE_KERNEL;
 
     auto image = std::unique_ptr<Image>(ImageHelperUlt<Image2dDefaults>::create(&context));
     image->setSharingHandler(mockSharingHandler);
@@ -1403,19 +1404,21 @@ TEST(CommandQueue, givenEnqueuesForSharedObjectsWithImageWhenUsingSharingHandler
     cl_uint numObjects = 1;
     cl_mem *memObjects = &memObject;
 
-    Event *eventAcquire = new Event(&cmdQ, CL_COMMAND_NDRANGE_KERNEL, 1, 5);
-    cl_event clEventAquire = eventAcquire;
-    cl_int result = cmdQ.enqueueAcquireSharedObjects(numObjects, memObjects, 0, nullptr, &clEventAquire, 0);
+    cl_event clEventAquire = nullptr;
+    cl_int result = cmdQ.enqueueAcquireSharedObjects(numObjects, memObjects, 0, nullptr, &clEventAquire, expectedCmd);
     EXPECT_EQ(result, CL_SUCCESS);
-    ASSERT_NE(clEventAquire, nullptr);
-    eventAcquire->release();
+    EXPECT_NE(clEventAquire, nullptr);
+    cl_command_type actualCmd = castToObjectOrAbort<Event>(clEventAquire)->getCommandType();
+    EXPECT_EQ(expectedCmd, actualCmd);
+    clReleaseEvent(clEventAquire);
 
-    Event *eventRelease = new Event(&cmdQ, CL_COMMAND_NDRANGE_KERNEL, 1, 5);
-    cl_event clEventRelease = eventRelease;
-    result = cmdQ.enqueueReleaseSharedObjects(numObjects, memObjects, 0, nullptr, &clEventRelease, 0);
+    cl_event clEventRelease = nullptr;
+    result = cmdQ.enqueueReleaseSharedObjects(numObjects, memObjects, 0, nullptr, &clEventRelease, expectedCmd);
     EXPECT_EQ(result, CL_SUCCESS);
-    ASSERT_NE(clEventRelease, nullptr);
-    eventRelease->release();
+    EXPECT_NE(clEventRelease, nullptr);
+    actualCmd = castToObjectOrAbort<Event>(clEventRelease)->getCommandType();
+    EXPECT_EQ(expectedCmd, actualCmd);
+    clReleaseEvent(clEventRelease);
 }
 
 TEST(CommandQueue, givenEnqueueAcquireSharedObjectsWhenIncorrectArgumentsThenReturnProperError) {

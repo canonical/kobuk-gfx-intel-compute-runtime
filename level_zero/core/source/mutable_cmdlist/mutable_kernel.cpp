@@ -16,12 +16,18 @@
 #include "level_zero/core/source/mutable_cmdlist/mutable_kernel_dispatch.h"
 #include <level_zero/ze_api.h>
 
+#include "implicit_args.h"
+
 namespace L0::MCL {
 
 MutableKernel::MutableKernel(ze_kernel_handle_t kernelHandle, uint32_t inlineDataSize, uint32_t maxPerThreadDataSize)
     : inlineDataSize(inlineDataSize),
       maxPerThreadDataSize(maxPerThreadDataSize) {
     this->kernel = L0::Kernel::fromHandle(kernelHandle);
+    this->kernelVariables.kernelArguments.reserve(this->kernel->getKernelDescriptor().payloadMappings.explicitArgs.size());
+    // space for internal allocations like ISA, private, const, global buffers, etc.
+    constexpr size_t estimatedInternalResidencyCount = 10;
+    this->kernelResidencySnapshotContainer.reserve(estimatedInternalResidencyCount);
 }
 
 uint32_t MutableKernel::getKernelScratchSize(uint32_t slotId) const {
@@ -103,15 +109,14 @@ void MutableKernel::makeKernelResidencySnapshotContainer(bool saveSyncAndRegionA
             }
             idx++;
         }
+        // sync buffer and region barrier allcocations are taken from current use, not from kernel internal residency
         if (this->kernelDispatch->syncBuffer != nullptr) {
+            this->syncBufferSnapshotResidencyIndex = kernelResidencySnapshotContainer.size();
             kernelResidencySnapshotContainer.emplace_back(this->kernelDispatch->syncBuffer);
-            this->syncBufferSnapshotResidencyIndex = idx;
-            idx++;
         }
         if (this->kernelDispatch->regionBarrier != nullptr) {
+            this->regionBarrierSnapshotResidencyIndex = kernelResidencySnapshotContainer.size();
             kernelResidencySnapshotContainer.emplace_back(this->kernelDispatch->regionBarrier);
-            this->regionBarrierSnapshotResidencyIndex = idx;
-            idx++;
         }
     }
 

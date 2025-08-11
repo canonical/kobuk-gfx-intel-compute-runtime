@@ -96,7 +96,7 @@ class ProductHelperHw : public ProductHelper {
     bool isCooperativeEngineSupported(const HardwareInfo &hwInfo) const override;
     bool isTimestampWaitSupportedForEvents() const override;
     bool isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const override;
-    BcsSplitSettings getBcsSplitSettings() const override;
+    BcsSplitSettings getBcsSplitSettings(const HardwareInfo &hwInfo) const override;
     bool isInitDeviceWithFirstSubmissionRequired(const HardwareInfo &hwInfo) const override;
     bool allowMemoryPrefetch(const HardwareInfo &hwInfo) const override;
     bool isBcsReportWaRequired(const HardwareInfo &hwInfo) const override;
@@ -154,7 +154,6 @@ class ProductHelperHw : public ProductHelper {
     bool getPreemptionDbgPropertyStateSipSupport() const override;
     bool getPreemptionDbgPropertyCsrSurfaceSupport() const override;
 
-    bool getPipelineSelectPropertyMediaSamplerDopClockGateSupport() const override;
     bool getPipelineSelectPropertySystolicModeSupport() const override;
 
     void fillScmPropertiesSupportStructure(StateComputeModePropertiesSupport &propertiesSupport) const override;
@@ -208,9 +207,8 @@ class ProductHelperHw : public ProductHelper {
     bool isNonCoherentTimestampsModeEnabled() const override;
     bool getStorageInfoLocalOnlyFlag(LocalMemAllocationMode usmDeviceAllocationMode, bool defaultValue) const override;
     bool isPidFdOrSocketForIpcSupported() const override;
-    void adjustRTDispatchGlobals(RTDispatchGlobals &rtDispatchGlobals, const HardwareInfo &hwInfo) const override;
-    uint32_t getSyncNumRTStacksPerDss(const HardwareInfo &hwInfo) const override;
-    uint32_t getNumRtStacksPerDSSForAllocation(const HardwareInfo &hwInfo) const override;
+    bool checkBcsForDirectSubmissionStop() const override;
+    bool shouldRegisterEnqueuedWalkerWithProfiling() const override;
 
     ~ProductHelperHw() override = default;
 

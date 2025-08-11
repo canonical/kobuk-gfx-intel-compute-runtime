@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2020-2024 Intel Corporation
+# Copyright (C) 2020-2025 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 #
@@ -38,6 +38,7 @@ target_include_directories(${L0_BLACK_BOX_TEST_SHARED_LIB} PUBLIC
 set_target_properties(${L0_BLACK_BOX_TEST_SHARED_LIB} PROPERTIES FOLDER ${L0_BLACK_BOX_TEST_PROJECT_FOLDER})
 
 set(TEST_TARGETS
+    zello_arg_slm
     zello_atomic_inc
     zello_bindless_kernel
     zello_commandlist_immediate
@@ -56,6 +57,7 @@ set(TEST_TARGETS
     zello_fill
     zello_function_pointers_cl
     zello_global_bindless_kernel
+    zello_graph
     zello_host_pointer
     zello_image
     zello_image_view

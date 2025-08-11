@@ -10,7 +10,6 @@
 #include "shared/source/helpers/common_types.h"
 
 #include "aubstream/engine_node.h"
-#include "ocl_igc_shared/raytracing/ocl_raytracing_structures.h"
 
 #include <igfxfmid.h>
 #include <memory>
@@ -46,7 +45,6 @@ class MemoryManager;
 struct RootDeviceEnvironment;
 class OSInterface;
 class DriverModel;
-
 enum class DriverModelType;
 enum class EngineGroupType : uint32_t;
 enum class GfxMemoryAllocationMethod : uint32_t;
@@ -158,7 +156,7 @@ class ProductHelper {
     virtual bool isTilePlacementResourceWaRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool allowMemoryPrefetch(const HardwareInfo &hwInfo) const = 0;
     virtual bool isBcsReportWaRequired(const HardwareInfo &hwInfo) const = 0;
-    virtual BcsSplitSettings getBcsSplitSettings() const = 0;
+    virtual BcsSplitSettings getBcsSplitSettings(const HardwareInfo &hwInfo) const = 0;
     virtual bool isBlitCopyRequiredForLocalMemory(const RootDeviceEnvironment &rootDeviceEnvironment, const GraphicsAllocation &allocation) const = 0;
     virtual bool isInitDeviceWithFirstSubmissionRequired(const HardwareInfo &hwInfo) const = 0;
     virtual bool isImplicitScalingSupported(const HardwareInfo &hwInfo) const = 0;
@@ -215,7 +213,6 @@ class ProductHelper {
     virtual bool getPreemptionDbgPropertyStateSipSupport() const = 0;
     virtual bool getPreemptionDbgPropertyCsrSurfaceSupport() const = 0;
 
-    virtual bool getPipelineSelectPropertyMediaSamplerDopClockGateSupport() const = 0;
     virtual bool getPipelineSelectPropertySystolicModeSupport() const = 0;
 
     virtual void fillScmPropertiesSupportStructure(StateComputeModePropertiesSupport &propertiesSupport) const = 0;
@@ -271,9 +268,8 @@ class ProductHelper {
     virtual bool isNonCoherentTimestampsModeEnabled() const = 0;
     virtual bool isPackedCopyFormatSupported() const = 0;
     virtual bool isPidFdOrSocketForIpcSupported() const = 0;
-    virtual void adjustRTDispatchGlobals(RTDispatchGlobals &rtDispatchGlobals, const HardwareInfo &hwInfo) const = 0;
-    virtual uint32_t getSyncNumRTStacksPerDss(const HardwareInfo &hwInfo) const = 0;
-    virtual uint32_t getNumRtStacksPerDSSForAllocation(const HardwareInfo &hwInfo) const = 0;
+    virtual bool checkBcsForDirectSubmissionStop() const = 0;
+    virtual bool shouldRegisterEnqueuedWalkerWithProfiling() const = 0;
 
     virtual bool getStorageInfoLocalOnlyFlag(LocalMemAllocationMode usmDeviceAllocationMode, bool defaultValue) const = 0;
     virtual ~ProductHelper() = default;

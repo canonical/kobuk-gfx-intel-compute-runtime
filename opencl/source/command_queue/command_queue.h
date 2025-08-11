@@ -15,7 +15,6 @@
 #include "shared/source/memory_manager/graphics_allocation.h"
 #include "shared/source/sku_info/sku_info_base.h"
 #include "shared/source/unified_memory/unified_memory.h"
-#include "shared/source/utilities/range.h"
 
 #include "opencl/source/api/cl_types.h"
 #include "opencl/source/command_queue/copy_engine_state.h"
@@ -25,6 +24,11 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
+
+namespace aub_stream {
+enum EngineType : uint32_t;
+} // namespace aub_stream
 
 namespace NEO {
 class BarrierCommand;
@@ -46,6 +50,13 @@ struct CsrSelectionArgs;
 struct MultiDispatchInfo;
 struct TimestampPacketDependencies;
 struct StagingTransferStatus;
+class CommandStreamReceiver;
+class CsrDependencies;
+class Device;
+class MemObj;
+class TagNodeBase;
+enum class MapOperationType;
+struct EngineControl;
 
 enum class QueuePriority {
     low,
@@ -226,20 +237,20 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
 
     volatile TagAddressType *getHwTagAddress() const;
 
-    MOCKABLE_VIRTUAL bool isCompleted(TaskCountType gpgpuTaskCount, const Range<CopyEngineState> &bcsStates);
+    MOCKABLE_VIRTUAL bool isCompleted(TaskCountType gpgpuTaskCount, const std::span<CopyEngineState> &bcsStates);
 
     bool isWaitForTimestampsEnabled() const;
-    virtual bool waitForTimestamps(Range<CopyEngineState> copyEnginesToWait, WaitStatus &status, TimestampPacketContainer *mainContainer, TimestampPacketContainer *deferredContainer) = 0;
+    virtual bool waitForTimestamps(std::span<CopyEngineState> copyEnginesToWait, WaitStatus &status, TimestampPacketContainer *mainContainer, TimestampPacketContainer *deferredContainer) = 0;
 
     MOCKABLE_VIRTUAL bool isQueueBlocked();
 
-    MOCKABLE_VIRTUAL WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait);
-    MOCKABLE_VIRTUAL WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) {
+    MOCKABLE_VIRTUAL WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, std::span<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait);
+    MOCKABLE_VIRTUAL WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, std::span<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep) {
         return this->waitUntilComplete(gpgpuTaskCountToWait, copyEnginesToWait, flushStampToWait, useQuickKmdSleep, true, false);
     }
-    MOCKABLE_VIRTUAL WaitStatus waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler, bool cleanTemporaryAllocationsList);
-    MOCKABLE_VIRTUAL WaitStatus waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler) {
-        return this->waitForAllEngines(blockedQueue, printfHandler, true);
+    MOCKABLE_VIRTUAL WaitStatus waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler, bool cleanTemporaryAllocationsList, bool waitForTaskCountRequired);
+    MOCKABLE_VIRTUAL WaitStatus waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler, bool waitForTaskCountRequired) {
+        return this->waitForAllEngines(blockedQueue, printfHandler, true, waitForTaskCountRequired);
     }
 
     static TaskCountType getTaskLevelFromWaitList(TaskCountType taskLevel,
@@ -415,6 +426,13 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
         return this->isCacheFlushOnNextBcsWriteRequired && this->isImageWriteOperation(cmdType);
     }
 
+    void registerWalkerWithProfilingEnqueued(Event *event);
+    bool getAndClearIsWalkerWithProfilingEnqueued() {
+        bool retVal = this->isWalkerWithProfilingEnqueued;
+        this->isWalkerWithProfilingEnqueued = false;
+        return retVal;
+    }
+
   protected:
     void *enqueueReadMemObjForMap(TransferProperties &transferProperties, EventsRequest &eventsRequest, cl_int &errcodeRet);
     cl_int enqueueWriteMemObjForUnmap(MemObj *memObj, void *mappedPtr, EventsRequest &eventsRequest);
@@ -529,6 +547,8 @@ class CommandQueue : public BaseObject<_cl_command_queue> {
     bool isForceStateless = false;
     bool l3FlushedAfterCpuRead = true;
     bool l3FlushAfterPostSyncEnabled = false;
+    bool isWalkerWithProfilingEnqueued = false;
+    bool shouldRegisterEnqueuedWalkerWithProfiling = false;
 };
 
 static_assert(NEO::NonCopyableAndNonMovable<CommandQueue>);

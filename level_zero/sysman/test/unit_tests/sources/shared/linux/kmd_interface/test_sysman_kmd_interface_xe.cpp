@@ -10,6 +10,7 @@
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/variable_backup.h"
 
+#include "level_zero/sysman/source/api/engine/linux/sysman_os_engine_imp.h"
 #include "level_zero/sysman/test/unit_tests/sources/linux/mock_sysman_fixture.h"
 #include "level_zero/sysman/test/unit_tests/sources/shared/linux/kmd_interface/mock_sysman_kmd_interface_xe.h"
 #include "level_zero/sysman/test/unit_tests/sources/shared/linux/mock_pmu_interface.h"
@@ -23,6 +24,19 @@ namespace Sysman {
 namespace ult {
 
 using namespace NEO;
+
+static const MapOfEngineInfo mockMapEngineInfo = {
+    {ZES_ENGINE_GROUP_ALL, {{0, 0}}},
+    {ZES_ENGINE_GROUP_COMPUTE_ALL, {{0, 0}}},
+    {ZES_ENGINE_GROUP_MEDIA_ALL, {{0, 0}}},
+    {ZES_ENGINE_GROUP_COPY_ALL, {{0, 0}}},
+    {ZES_ENGINE_GROUP_RENDER_ALL, {{0, 0}}},
+    {ZES_ENGINE_GROUP_MEDIA_DECODE_SINGLE, {{1, 0}}},
+    {ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE, {{1, 0}}},
+    {ZES_ENGINE_GROUP_MEDIA_ENHANCEMENT_SINGLE, {{0, 0}}},
+    {ZES_ENGINE_GROUP_RENDER_SINGLE, {{1, 0}}},
+    {ZES_ENGINE_GROUP_COPY_SINGLE, {{0, 0}}},
+    {ZES_ENGINE_GROUP_COMPUTE_SINGLE, {{1, 0}}}};
 
 static const uint32_t mockReadVal = 23;
 
@@ -85,21 +99,50 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndReadSymLinkFailsWhenCall
 TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenGettingSysfsFileNamesThenProperPathsAreReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
     bool baseDirectoryExists = true;
-    EXPECT_STREQ("device/tile0/gt0/freq0/min_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameMinFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/max_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameMaxFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/cur_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameCurrentFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/act_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameActualFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/rpe_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameEfficientFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/rp0_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameMaxValueFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/rpn_freq", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameMinValueFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/throttle/status", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameThrottleReasonStatus, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/throttle/reason_pl1", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameThrottleReasonPL1, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/throttle/reason_pl2", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameThrottleReasonPL2, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/throttle/reason_pl4", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameThrottleReasonPL4, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq0/throttle/reason_thermal", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameThrottleReasonThermal, 0, baseDirectoryExists).c_str());
+    zes_freq_domain_t frequencyDomainNumber = ZES_FREQ_DOMAIN_GPU;
+    for (int index = 0; index < 2; index++) {
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/min_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMinFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/max_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMaxFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/cur_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameCurrentFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/act_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameActualFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/rpe_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameEfficientFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/rp0_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMaxValueFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/rpn_freq").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMinValueFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/throttle/status").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameThrottleReasonStatus, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/throttle/reason_pl1").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameThrottleReasonPL1, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/throttle/reason_pl2").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameThrottleReasonPL2, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/throttle/reason_pl4").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameThrottleReasonPL4, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq0/throttle/reason_thermal").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameThrottleReasonThermal, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq_vram_rp0").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMaxMemoryFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        EXPECT_STREQ(("device/tile0/gt" + std::to_string(index) + "/freq_vram_rpn").c_str(), pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMinMemoryFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+        frequencyDomainNumber = ZES_FREQ_DOMAIN_MEDIA;
+    }
+    EXPECT_STREQ("", pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMinDefaultFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
     EXPECT_STREQ("device/tile0/physical_vram_size_bytes", pSysmanKmdInterface->getSysfsFilePathForPhysicalMemorySize(0).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq_vram_rp0", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameMaxMemoryFrequency, 0, baseDirectoryExists).c_str());
-    EXPECT_STREQ("device/tile0/gt0/freq_vram_rpn", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameMinMemoryFrequency, 0, baseDirectoryExists).c_str());
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenGettingSysfsFileNameIfBaseDirectoryDoesNotExistThenEmptyPathIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    bool baseDirectoryExists = false;
+    zes_freq_domain_t frequencyDomainNumber = ZES_FREQ_DOMAIN_MEDIA;
+    EXPECT_STREQ("", pSysmanKmdInterface->getSysfsPathForFreqDomain(SysfsName::sysfsNameMaxFrequency, 0, baseDirectoryExists, frequencyDomainNumber).c_str());
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceInstanceWhenCallingGetPowerLimitFilePathsThenProperPathsAreReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->getSysmanKmdInterface();
+    bool baseDirectoryExists = false;
+    EXPECT_STREQ("power1_cap", pSysmanKmdInterface->getBurstPowerLimitFile(SysfsName::sysfsNameCardBurstPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power1_cap_interval", pSysmanKmdInterface->getBurstPowerLimitFile(SysfsName::sysfsNameCardBurstPowerLimitInterval, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power1_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameCardSustainedPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power1_max_interval", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameCardSustainedPowerLimitInterval, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power1_rated_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameCardDefaultPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power1_crit", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNameCardCriticalPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power2_cap", pSysmanKmdInterface->getBurstPowerLimitFile(SysfsName::sysfsNamePackageBurstPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power2_cap_interval", pSysmanKmdInterface->getBurstPowerLimitFile(SysfsName::sysfsNamePackageBurstPowerLimitInterval, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power2_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageSustainedPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power2_max_interval", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageSustainedPowerLimitInterval, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power2_rated_max", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageDefaultPowerLimit, 0, baseDirectoryExists).c_str());
+    EXPECT_STREQ("power2_crit", pSysmanKmdInterface->getSysfsFilePath(SysfsName::sysfsNamePackageCriticalPowerLimit, 0, baseDirectoryExists).c_str());
 }
 
 TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenGettingHwMonNameThenCorrectPathIsReturned) {
@@ -210,80 +253,136 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenGetEnergyCounterNodeFil
     EXPECT_EQ(expectedFilePath, pSysmanKmdInterface->getEnergyCounterNodeFile(ZES_POWER_DOMAIN_UNKNOWN));
 }
 
-TEST_F(SysmanFixtureDeviceXe, Given3DSingleEngineTypeAndSysmanKmdInterfaceWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenInvalidConfigFromEventFileForEngineActiveTicksWhenCallingGetPmuConfigsForSingleEnginesThenErrorIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_3D_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
-}
-
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGettingConfigFromEventFileFailsForEngineActiveTicksWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
-    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
     pPmuInterface->mockEventConfigReturnValue.push_back(-1);
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForSingleEngines(sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGettingConfigFromEventFileFailsForEngineTotalTicksWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenInvalidConfigFromEventFileForEngineActiveTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    pPmuInterface->mockEventConfigReturnValue.push_back(-1);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_MEDIA_ALL, 0, 0};
+    const MapOfEngineInfo mapEngineInfo = {
+        {ZES_ENGINE_GROUP_ALL, {{0, 0}}},
+        {ZES_ENGINE_GROUP_MEDIA_ALL, {{0, 0}}},
+        {ZES_ENGINE_GROUP_MEDIA_ENCODE_SINGLE, {{0, 0}}}};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
 
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
+TEST_F(SysmanFixtureDeviceXe, GivenInvalidConfigFromEventFileForEngineTotalTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
     pPmuInterface->mockEventConfigReturnValue.push_back(0);
     pPmuInterface->mockEventConfigReturnValue.push_back(-1);
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_MEDIA_ALL, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mockMapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGettingConfigAfterFormatFailsForEngineActiveTicksWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenInvalidConfigAfterFormatForEngineActiveTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
     pPmuInterface->mockFormatConfigReturnValue.push_back(-1);
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_MEDIA_ALL, 0, 0};
+    const MapOfEngineInfo mapEngineInfo = {
+        {ZES_ENGINE_GROUP_ALL, {{0, 0}}},
+        {ZES_ENGINE_GROUP_MEDIA_ALL, {{0, 0}}},
+        {ZES_ENGINE_GROUP_MEDIA_ENHANCEMENT_SINGLE, {{0, 0}}}};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGettingConfigAfterFormatFailsForEngineTotalTicksWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenMediaGroupEngineAndNoMediaSingleEnginesAvailableWhenCallingGetPmuConfigsForGroupEnginesThenNoPmuConfigsAreReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_MEDIA_ALL, 0, 0};
+    const MapOfEngineInfo mapEngineInfo = {{ZES_ENGINE_GROUP_MEDIA_ALL, {{0, 0}}}};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_SUCCESS);
+    EXPECT_TRUE(pmuConfigs.empty());
+}
 
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
+TEST_F(SysmanFixtureDeviceXe, GivenComputeGroupEngineAndInvalidConfigAfterFormatForEngineActiveTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    pPmuInterface->mockFormatConfigReturnValue.push_back(-1);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_COMPUTE_ALL, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mockMapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenCopyGroupEngineAndInvalidConfigAfterFormatForEngineActiveTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    pPmuInterface->mockFormatConfigReturnValue.push_back(-1);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_COPY_ALL, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mockMapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenRenderGroupEngineAndInvalidConfigAfterFormatForEngineActiveTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    pPmuInterface->mockFormatConfigReturnValue.push_back(-1);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_RENDER_ALL, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mockMapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenGroupAllEngineAndInvalidConfigAfterFormatForEngineActiveTicksWhenCallingGetPmuConfigsForGroupEnginesThenErrorIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    pPmuInterface->mockFormatConfigReturnValue.push_back(-1);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_ALL, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mockMapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenInvalidConfigAfterFormatForEngineTotalTicksWhenCallingGetPmuConfigsForSingleEnginesThenErrorIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
     pPmuInterface->mockFormatConfigReturnValue.push_back(0);
     pPmuInterface->mockFormatConfigReturnValue.push_back(-1);
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForSingleEngines(sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndPmuInterfaceOpenFailsForBusyTicksHandleWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
+TEST_F(SysmanFixtureDeviceXe, GivenMediaGroupEngineWhenCallingGetPmuConfigsForGroupEnginesThenSuccessIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
-
-    pPmuInterface->mockPerfEventOpenReadFail = true;
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    auto pDrm = pLinuxSysmanImp->getDrm();
+    std::vector<uint64_t> mockPmuConfigs = {1, 2, 1, 2, 1, 2};
+    std::vector<uint64_t> pmuConfigs = {};
+    const std::string sysmanDeviceDir = "/sys/devices/0000:aa:bb:cc";
+    EngineGroupInfo engineGroupInfo = {ZES_ENGINE_GROUP_MEDIA_ALL, 0, 0};
+    EXPECT_EQ(pSysmanKmdInterface->getPmuConfigsForGroupEngines(mockMapEngineInfo, sysmanDeviceDir, engineGroupInfo, pPmuInterface.get(), pDrm, pmuConfigs), ZE_RESULT_SUCCESS);
+    for (uint32_t i = 0; i < pmuConfigs.size(); i++) {
+        EXPECT_EQ(pmuConfigs[i], mockPmuConfigs[i]);
+    }
 }
 
-TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndPmuInterfaceOpenFailsForTotalTicksHandleWhenCallingGetEngineActivityFdListThenErrorIsReturned) {
-
-    VariableBackup<decltype(NEO::SysCalls::sysCallsPread)> mockPread(&NEO::SysCalls::sysCallsPread, [](int fd, void *buf, size_t count, off_t offset) -> ssize_t {
-        std::ostringstream oStream;
-        oStream << 23;
-        std::string value = oStream.str();
-        memcpy(buf, value.data(), count);
-        return count;
-    });
-
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndPmuReadFailsWhenCallingReadBusynessFromGroupFdThenErrorIsReturned) {
     auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
-
-    std::vector<std::pair<int64_t, int64_t>> fdList = {};
-    std::pair<uint64_t, uint64_t> configPair = {};
-
-    pPmuInterface->mockPerfEventOpenReadFail = true;
-    pPmuInterface->mockPerfEventOpenFailAtCount = 3;
-    pPmuInterface->mockPmuFd = 10;
-    EXPECT_EQ(pSysmanKmdInterface->getEngineActivityFdListAndConfigPair(ZES_ENGINE_GROUP_COMPUTE_SINGLE, 0, 0, pPmuInterface.get(), fdList, configPair), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+    std::vector<int64_t> fdList = {1, 2};
+    zes_engine_stats_t pStats = {};
+    pPmuInterface->mockPmuReadFailureReturnValue = -1;
+    EXPECT_EQ(pSysmanKmdInterface->readBusynessFromGroupFd(pPmuInterface.get(), fdList, &pStats), ZE_RESULT_ERROR_UNKNOWN);
 }
 
 TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceAndGetPmuConfigsFailsWhenCallingGetBusyAndTotalTicksConfigsForVfThenErrorIsReturned) {
@@ -307,6 +406,12 @@ TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenCallingGetBusyAndTotalT
     EXPECT_EQ(pSysmanKmdInterface->getBusyAndTotalTicksConfigsForVf(pPmuInterface.get(), 0, 0, 1, 0, configPair), ZE_RESULT_SUCCESS);
     EXPECT_EQ(pPmuInterface->mockActiveTicksConfig, configPair.first);
     EXPECT_EQ(pPmuInterface->mockTotalTicksConfig, configPair.second);
+}
+
+TEST_F(SysmanFixtureDeviceXe, GivenSysmanKmdInterfaceWhenCallingReadPcieDowngradeAttributeWithInvalidSysfsNodeThenUnsupportedIsReturned) {
+    auto pSysmanKmdInterface = pLinuxSysmanImp->pSysmanKmdInterface.get();
+    uint32_t val;
+    EXPECT_EQ(pSysmanKmdInterface->readPcieDowngradeAttribute("unknown", val), ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
 }
 
 } // namespace ult

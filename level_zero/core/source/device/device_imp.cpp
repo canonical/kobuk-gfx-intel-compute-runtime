@@ -46,6 +46,7 @@
 #include "level_zero/core/source/cmdlist/cmdlist_memory_copy_params.h"
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
 #include "level_zero/core/source/context/context_imp.h"
+#include "level_zero/core/source/device/bcs_split.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/fabric/fabric.h"
@@ -71,7 +72,13 @@
 
 namespace L0 {
 
-DeviceImp::DeviceImp() : bcsSplit(*this){};
+DeviceImp::DeviceImp() {
+    bcsSplit = std::make_unique<BcsSplit>(*this);
+};
+
+void DeviceImp::bcsSplitReleaseResources() {
+    bcsSplit->releaseResources();
+}
 
 DriverHandle *DeviceImp::getDriverHandle() {
     return this->driverHandle;
@@ -311,7 +318,7 @@ ze_result_t DeviceImp::createInternalCommandList(const ze_command_list_desc_t *d
 ze_result_t DeviceImp::createCommandListImmediate(const ze_command_queue_desc_t *desc,
                                                   ze_command_list_handle_t *phCommandList) {
 
-    ze_command_queue_desc_t commandQueueDesc = DefaultDescriptors::commandQueueDesc;
+    ze_command_queue_desc_t commandQueueDesc = defaultCommandQueueDesc;
 
     if (desc) {
         commandQueueDesc = *desc;
@@ -1713,6 +1720,8 @@ void DeviceImp::releaseResources() {
 
     UNRECOVERABLE_IF(neoDevice == nullptr);
 
+    neoDevice->stopDirectSubmissionAndWaitForCompletion();
+
     if (this->globalTimestampAllocation) {
         driverHandle->getSvmAllocsManager()->freeSVMAlloc(this->globalTimestampAllocation);
     }
@@ -1724,7 +1733,7 @@ void DeviceImp::releaseResources() {
 
     getNEODevice()->cleanupUsmAllocationPool();
 
-    this->bcsSplit.releaseResources();
+    this->bcsSplit->releaseResources();
 
     if (neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->debugger.get()) {
         neoDevice->getExecutionEnvironment()->rootDeviceEnvironments[neoDevice->getRootDeviceIndex()]->debugger.reset(nullptr);
@@ -1764,6 +1773,7 @@ void DeviceImp::releaseResources() {
         allocationsForReuse->freeAllGraphicsAllocations(neoDevice);
         allocationsForReuse.reset();
     }
+    neoDevice->pollForCompletion();
 
     neoDevice->decRefInternal();
     neoDevice = nullptr;
@@ -2240,23 +2250,27 @@ uint32_t DeviceImp::getEventMaxKernelCount() const {
 
 ze_result_t DeviceImp::synchronize() {
     for (auto &engine : neoDevice->getAllEngines()) {
-        auto waitStatus = engine.commandStreamReceiver->waitForTaskCountWithKmdNotifyFallback(
-            engine.commandStreamReceiver->peekTaskCount(),
-            engine.commandStreamReceiver->obtainCurrentFlushStamp(),
-            false,
-            NEO::QueueThrottle::MEDIUM);
-        if (waitStatus == NEO::WaitStatus::gpuHang) {
-            return ZE_RESULT_ERROR_DEVICE_LOST;
+        if (engine.commandStreamReceiver->isInitialized()) {
+            auto waitStatus = engine.commandStreamReceiver->waitForTaskCountWithKmdNotifyFallback(
+                engine.commandStreamReceiver->peekTaskCount(),
+                engine.commandStreamReceiver->obtainCurrentFlushStamp(),
+                false,
+                NEO::QueueThrottle::MEDIUM);
+            if (waitStatus == NEO::WaitStatus::gpuHang) {
+                return ZE_RESULT_ERROR_DEVICE_LOST;
+            }
         }
     }
     for (auto &secondaryCsr : neoDevice->getSecondaryCsrs()) {
-        auto waitStatus = secondaryCsr->waitForTaskCountWithKmdNotifyFallback(
-            secondaryCsr->peekTaskCount(),
-            secondaryCsr->obtainCurrentFlushStamp(),
-            false,
-            NEO::QueueThrottle::MEDIUM);
-        if (waitStatus == NEO::WaitStatus::gpuHang) {
-            return ZE_RESULT_ERROR_DEVICE_LOST;
+        if (secondaryCsr->isInitialized()) {
+            auto waitStatus = secondaryCsr->waitForTaskCountWithKmdNotifyFallback(
+                secondaryCsr->peekTaskCount(),
+                secondaryCsr->obtainCurrentFlushStamp(),
+                false,
+                NEO::QueueThrottle::MEDIUM);
+            if (waitStatus == NEO::WaitStatus::gpuHang) {
+                return ZE_RESULT_ERROR_DEVICE_LOST;
+            }
         }
     }
 

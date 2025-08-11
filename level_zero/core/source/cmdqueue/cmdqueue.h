@@ -18,7 +18,7 @@
 #include <mutex>
 #include <vector>
 
-struct _ze_command_queue_handle_t : BaseHandle {};
+struct _ze_command_queue_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_COMMAND_QUEUE> {};
 static_assert(IsCompliantWithDdiHandlesExt<_ze_command_queue_handle_t>);
 
 namespace NEO {
@@ -84,6 +84,12 @@ struct CommandQueue : _ze_command_queue_handle_t {
     TaskCountType getTaskCount() const { return taskCount; }
     void setTaskCount(TaskCountType newTaskCount) { taskCount = newTaskCount; }
 
+    inline bool getAndClearIsWalkerWithProfilingEnqueued() {
+        bool retVal = this->isWalkerWithProfilingEnqueued;
+        this->isWalkerWithProfilingEnqueued = false;
+        return retVal;
+    }
+
   protected:
     bool frontEndTrackingEnabled() const;
 
@@ -104,6 +110,7 @@ struct CommandQueue : _ze_command_queue_handle_t {
     bool dispatchCmdListBatchBufferAsPrimary = false;
     bool heaplessModeEnabled = false;
     bool heaplessStateInitEnabled = false;
+    bool isWalkerWithProfilingEnqueued = false;
 };
 
 using CommandQueueAllocatorFn = CommandQueue *(*)(Device *device, NEO::CommandStreamReceiver *csr,

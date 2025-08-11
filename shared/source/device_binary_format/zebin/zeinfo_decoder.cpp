@@ -15,7 +15,6 @@
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/kernel/kernel_arg_descriptor.h"
-#include "shared/source/kernel/kernel_arg_descriptor_extended_vme.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/program/program_info.h"
@@ -1108,7 +1107,8 @@ DecodeError readZeInfoPayloadArguments(const Yaml::YamlParser &parser, const Yam
         for (const auto &payloadArgumentMemberNd : parser.createChildrenRange(payloadArgumentNd)) {
             auto key = parser.readKey(payloadArgumentMemberNd);
             if (Tags::Kernel::PayloadArgument::argType == key) {
-                validPayload &= readZeInfoEnumChecked(parser, payloadArgumentMemberNd, payloadArgMetadata.argType, context, outErrReason);
+                validPayload &= readZeInfoArgTypeNameCheckedExt(parser, payloadArgumentMemberNd, payloadArgMetadata) ||
+                                readZeInfoEnumChecked(parser, payloadArgumentMemberNd, payloadArgMetadata.argType, context, outErrReason);
             } else if (Tags::Kernel::PayloadArgument::argIndex == key) {
                 validPayload &= parser.readValueChecked(payloadArgumentMemberNd, payloadArgMetadata.argIndex);
                 outMaxPayloadArgumentIndex = std::max<int32_t>(outMaxPayloadArgumentIndex, payloadArgMetadata.argIndex);
@@ -1156,14 +1156,6 @@ DecodeError populateKernelPayloadArgument(NEO::KernelDescriptor &dst, const Kern
     }
 
     auto &explicitArgs = dst.payloadMappings.explicitArgs;
-    auto getVmeDescriptor = [&src, &dst]() {
-        auto &argsExt = dst.payloadMappings.explicitArgsExtendedDescriptors;
-        argsExt.resize(dst.payloadMappings.explicitArgs.size());
-        if (argsExt[src.argIndex] == nullptr) {
-            argsExt[src.argIndex] = std::make_unique<ArgDescVme>();
-        }
-        return static_cast<ArgDescVme *>(argsExt[src.argIndex].get());
-    };
 
     const auto &kernelName = dst.kernelMetadata.kernelName;
     auto populateArgPointerStateless = [&src](auto &arg) {
@@ -1216,6 +1208,9 @@ DecodeError populateKernelPayloadArgument(NEO::KernelDescriptor &dst, const Kern
 
     switch (src.argType) {
     default:
+        if (DecodeError::success == populateKernelPayloadArgumentExt(dst, src, outErrReason)) {
+            return DecodeError::success;
+        }
         outErrReason.append("DeviceBinaryFormat::zebin : Invalid arg type in cross thread data section in context of : " + kernelName + ".\n");
         return DecodeError::invalidBinary; // unsupported
 
@@ -1255,12 +1250,7 @@ DecodeError populateKernelPayloadArgument(NEO::KernelDescriptor &dst, const Kern
         case Types::Kernel::PayloadArgument::addressSpaceSampler: {
             using SamplerType = Types::Kernel::PayloadArgument::SamplerType;
             dst.payloadMappings.explicitArgs[src.argIndex].as<ArgDescSampler>(true);
-            auto &extendedInfo = arg.getExtendedTypeInfo();
-            extendedInfo.isAccelerator = (src.samplerType == SamplerType::samplerTypeVME) ||
-                                         (src.samplerType == SamplerType::samplerTypeVE) ||
-                                         (src.samplerType == SamplerType::samplerTypeVD);
             const bool usesVme = src.samplerType == SamplerType::samplerTypeVME;
-            extendedInfo.hasVmeExtendedDescriptor = usesVme;
             dst.kernelAttributes.flags.usesVme = usesVme;
             dst.kernelAttributes.flags.usesSamplers = true;
         } break;
@@ -1477,18 +1467,6 @@ DecodeError populateKernelPayloadArgument(NEO::KernelDescriptor &dst, const Kern
 
     case Types::Kernel::argTypeSamplerSnapWa:
         return populateWithOffset(explicitArgs[src.argIndex].as<ArgDescSampler>(true).metadataPayload.samplerSnapWa);
-
-    case Types::Kernel::argTypeVmeMbBlockType:
-        return populateWithOffset(getVmeDescriptor()->mbBlockType);
-
-    case Types::Kernel::argTypeVmeSubpixelMode:
-        return populateWithOffset(getVmeDescriptor()->subpixelMode);
-
-    case Types::Kernel::argTypeVmeSadAdjustMode:
-        return populateWithOffset(getVmeDescriptor()->sadAdjustMode);
-
-    case Types::Kernel::argTypeVmeSearchPathType:
-        return populateWithOffset(getVmeDescriptor()->searchPathType);
 
     case Types::Kernel::argTypeRegionGroupSize:
         return populateArgVec(dst.payloadMappings.dispatchTraits.regionGroupSize, Tags::Kernel::PayloadArgument::ArgType::regionGroupSize);

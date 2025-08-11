@@ -28,7 +28,7 @@
 struct _ze_event_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_EVENT> {};
 static_assert(IsCompliantWithDdiHandlesExt<_ze_event_handle_t>);
 
-struct _ze_event_pool_handle_t : BaseHandle {};
+struct _ze_event_pool_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_EVENT_POOL> {};
 static_assert(IsCompliantWithDdiHandlesExt<_ze_event_pool_handle_t>);
 
 namespace NEO {
@@ -50,6 +50,7 @@ struct DriverHandle;
 struct DriverHandleImp;
 struct Device;
 struct Kernel;
+struct CommandList;
 
 #pragma pack(1)
 struct IpcEventPoolData {
@@ -343,6 +344,20 @@ struct Event : _ze_event_handle_t {
     size_t getOffsetInSharedAlloc() const { return offsetInSharedAlloc; }
     void setReportEmptyCbEventAsReady(bool reportEmptyCbEventAsReady) { this->reportEmptyCbEventAsReady = reportEmptyCbEventAsReady; }
 
+    void setEventOnBarrierOptimized(bool value) {
+        this->isEventOnBarrierOptimized = value;
+    }
+
+    static bool isAggregatedEvent(const Event *event) { return (event && event->getInOrderIncrementValue() > 0); }
+
+    CommandList *getRecordedSignalFrom() const {
+        return this->recordedSignalFrom;
+    }
+
+    void setRecordedSignalFrom(CommandList *cmdlist) {
+        this->recordedSignalFrom = cmdlist;
+    }
+
   protected:
     Event(int index, Device *device) : device(device), index(index) {}
 
@@ -420,8 +435,11 @@ struct Event : _ze_event_handle_t {
     bool isSharableCounterBased = false;
     bool mitigateHostVisibleSignal = false;
     bool reportEmptyCbEventAsReady = true;
+    bool isEventOnBarrierOptimized = false;
 
     static const uint64_t completionTimeoutMs;
+
+    CommandList *recordedSignalFrom = nullptr;
 };
 
 struct EventPool : _ze_event_pool_handle_t {

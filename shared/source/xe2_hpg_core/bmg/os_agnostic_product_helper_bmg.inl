@@ -53,6 +53,11 @@ void ProductHelperHw<gfxProduct>::adjustScratchSize(size_t &requiredScratchSize)
 }
 
 template <>
+bool ProductHelperHw<gfxProduct>::checkBcsForDirectSubmissionStop() const {
+    return true;
+}
+
+template <>
 bool ProductHelperHw<gfxProduct>::isDeviceUsmPoolAllocatorSupported() const {
     return ApiSpecificConfig::OCL == ApiSpecificConfig::getApiType();
 }

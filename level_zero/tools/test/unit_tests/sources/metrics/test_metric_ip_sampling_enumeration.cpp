@@ -305,14 +305,14 @@ HWTEST2_F(MetricIpSamplingEnumerationTest, GivenEnumerationIsSuccessfulWhenMetri
         static_cast<DeviceImp *>(device)->activateMetricGroups();
 
         // Disable Metrics
-        EXPECT_EQ(zetIntelDeviceDisableMetricsExp(device->toHandle()), ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
+        EXPECT_EQ(zetDeviceDisableMetricsExp(device->toHandle()), ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
         // De-Activate all metric groups.
         EXPECT_EQ(zetContextActivateMetricGroups(context->toHandle(), device->toHandle(), 0, nullptr), ZE_RESULT_SUCCESS);
         // Disable Metrics with all groups deactivated should return success
-        EXPECT_EQ(zetIntelDeviceDisableMetricsExp(device->toHandle()), ZE_RESULT_SUCCESS);
+        EXPECT_EQ(zetDeviceDisableMetricsExp(device->toHandle()), ZE_RESULT_SUCCESS);
         // Activate metric group on a disabled device should be failure.
         EXPECT_EQ(zetContextActivateMetricGroups(context->toHandle(), device->toHandle(), 1, &metricGroups[0]), ZE_RESULT_ERROR_UNINITIALIZED);
-        EXPECT_EQ(zetIntelDeviceEnableMetricsExp(device->toHandle()), ZE_RESULT_SUCCESS);
+        EXPECT_EQ(zetDeviceEnableMetricsExp(device->toHandle()), ZE_RESULT_SUCCESS);
     }
 }
 
@@ -1330,6 +1330,21 @@ HWTEST2_F(MetricIpSamplingEnumerationTest, GivenEnumerationIsSuccessfulWhenUnsup
                                          &count, nullptr));
         EXPECT_EQ(count, 0u);
     }
+}
+
+HWTEST2_F(MetricIpSamplingEnumerationTest, GivenValidIpSamplingSourceComputeMetricScopesAreEnumeratedOnce, EustallSupportedPlatforms) {
+
+    MetricDeviceContext &metricsDevContext = testDevices[0]->getMetricDeviceContext();
+    EXPECT_EQ(ZE_RESULT_SUCCESS, metricsDevContext.enableMetricApi());
+
+    metricsDevContext.setComputeMetricScopeInitialized();
+
+    auto &metricSource = metricsDevContext.getMetricSource<IpSamplingMetricSourceImp>();
+    EXPECT_EQ(metricSource.isAvailable(), true);
+
+    uint32_t metricScopesCount = 0;
+    metricsDevContext.metricScopesGet(context->toHandle(), &metricScopesCount, nullptr);
+    EXPECT_EQ(metricScopesCount, 0u);
 }
 
 } // namespace ult

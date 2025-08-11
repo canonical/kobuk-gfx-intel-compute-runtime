@@ -21,6 +21,7 @@
 #include "level_zero/core/source/module/module.h"
 
 #include "encode_surface_state_args.h"
+#include "implicit_args.h"
 #include "neo_igfxfmid.h"
 
 namespace L0 {
@@ -32,10 +33,9 @@ struct KernelHw : public KernelImp {
 
     void setBufferSurfaceState(uint32_t argIndex, void *address, NEO::GraphicsAllocation *alloc) override {
         uint64_t baseAddress = alloc->getGpuAddressToPatch();
-        auto sshAlignmentMask = NEO::EncodeSurfaceState<GfxFamily>::getSurfaceBaseAddressAlignmentMask();
 
         // Remove misaligned bytes, accounted for in bufferOffset patch token
-        baseAddress &= sshAlignmentMask;
+        baseAddress &= this->surfaceStateAlignmentMask;
         auto misalignedSize = ptrDiff(alloc->getGpuAddressToPatch(), baseAddress);
         auto offset = ptrDiff(address, reinterpret_cast<void *>(baseAddress));
         size_t bufferSizeForSsh = alloc->getUnderlyingBufferSize();
@@ -44,7 +44,7 @@ struct KernelHw : public KernelImp {
         auto allocData = device->getDriverHandle()->getSvmAllocsManager()->getSVMAlloc(reinterpret_cast<void *>(alloc->getGpuAddress()));
 
         auto argInfo = kernelImmData->getDescriptor().payloadMappings.explicitArgs[argIndex].as<NEO::ArgDescPointer>();
-        bool offsetWasPatched = NEO::patchNonPointer<uint32_t, uint32_t>(ArrayRef<uint8_t>(this->crossThreadData.get(), this->crossThreadDataSize),
+        bool offsetWasPatched = NEO::patchNonPointer<uint32_t, uint32_t>(getCrossThreadDataSpan(),
                                                                          argInfo.bufferOffset, static_cast<uint32_t>(offset));
         bool offsetedAddress = false;
         if (false == offsetWasPatched) {
@@ -52,7 +52,7 @@ struct KernelHw : public KernelImp {
             offsetedAddress = baseAddress != reinterpret_cast<uintptr_t>(address);
             baseAddress = reinterpret_cast<uintptr_t>(address);
             bufferSizeForSsh -= offset;
-            DEBUG_BREAK_IF(baseAddress != (baseAddress & sshAlignmentMask));
+            DEBUG_BREAK_IF(baseAddress != (baseAddress & this->surfaceStateAlignmentMask));
 
             offset = 0;
         }
@@ -60,25 +60,24 @@ struct KernelHw : public KernelImp {
         auto surfaceState = GfxFamily::cmdInitRenderSurfaceState;
 
         if (NEO::isValidOffset(argInfo.bindful)) {
-            surfaceStateAddress = ptrOffset(surfaceStateHeapData.get(), argInfo.bindful);
+            surfaceStateAddress = ptrOffset(state.surfaceStateHeapData.get(), argInfo.bindful);
             surfaceState = *reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(surfaceStateAddress);
 
         } else if (NEO::isValidOffset(argInfo.bindless)) {
-            isBindlessOffsetSet[argIndex] = false;
-            usingSurfaceStateHeap[argIndex] = false;
+            state.isBindlessOffsetSet[argIndex] = false;
+            state.usingSurfaceStateHeap[argIndex] = false;
             if (this->module->getDevice()->getNEODevice()->getBindlessHeapsHelper() && !offsetedAddress) {
                 surfaceStateAddress = patchBindlessSurfaceState(alloc, argInfo.bindless);
-                isBindlessOffsetSet[argIndex] = true;
+                state.isBindlessOffsetSet[argIndex] = true;
             } else {
-                usingSurfaceStateHeap[argIndex] = true;
-                surfaceStateAddress = ptrOffset(surfaceStateHeapData.get(), getSurfaceStateIndexForBindlessOffset(argInfo.bindless) * sizeof(typename GfxFamily::RENDER_SURFACE_STATE));
+                state.usingSurfaceStateHeap[argIndex] = true;
+                surfaceStateAddress = ptrOffset(state.surfaceStateHeapData.get(), getSurfaceStateIndexForBindlessOffset(argInfo.bindless) * sizeof(typename GfxFamily::RENDER_SURFACE_STATE));
             }
         }
 
         uint64_t bufferAddressForSsh = baseAddress;
-        auto alignment = NEO::EncodeSurfaceState<GfxFamily>::getSurfaceBaseAddressAlignment();
         bufferSizeForSsh += misalignedSize;
-        bufferSizeForSsh = alignUp(bufferSizeForSsh, alignment);
+        bufferSizeForSsh = alignUp(bufferSizeForSsh, this->surfaceStateAlignment);
 
         bool l3Enabled = true;
         // Allocation MUST be cacheline (64 byte) aligned in order to enable L3 caching otherwise Heap corruption will occur coming from the KMD.
@@ -92,7 +91,7 @@ struct KernelHw : public KernelImp {
         }
 
         if (l3Enabled == false) {
-            this->kernelRequiresQueueUncachedMocsCount++;
+            this->state.kernelRequiresQueueUncachedMocsCount++;
         }
         auto isDebuggerActive = neoDevice->getDebugger() != nullptr;
         NEO::EncodeSurfaceStateArgs args;
@@ -113,38 +112,6 @@ struct KernelHw : public KernelImp {
         NEO::EncodeSurfaceState<GfxFamily>::encodeBuffer(args);
         UNRECOVERABLE_IF(surfaceStateAddress == nullptr);
         *reinterpret_cast<typename GfxFamily::RENDER_SURFACE_STATE *>(surfaceStateAddress) = surfaceState;
-    }
-
-    void evaluateIfRequiresGenerationOfLocalIdsByRuntime(const NEO::KernelDescriptor &kernelDescriptor) override {
-        size_t localWorkSizes[3];
-        localWorkSizes[0] = this->groupSize[0];
-        localWorkSizes[1] = this->groupSize[1];
-        localWorkSizes[2] = this->groupSize[2];
-
-        kernelRequiresGenerationOfLocalIdsByRuntime = NEO::EncodeDispatchKernel<GfxFamily>::isRuntimeLocalIdsGenerationRequired(
-            kernelDescriptor.kernelAttributes.numLocalIdChannels,
-            localWorkSizes,
-            std::array<uint8_t, 3>{
-                {kernelDescriptor.kernelAttributes.workgroupWalkOrder[0],
-                 kernelDescriptor.kernelAttributes.workgroupWalkOrder[1],
-                 kernelDescriptor.kernelAttributes.workgroupWalkOrder[2]}},
-            kernelDescriptor.kernelAttributes.flags.requiresWorkgroupWalkOrder,
-            requiredWorkgroupOrder,
-            kernelDescriptor.kernelAttributes.simdSize);
-    }
-
-    uint32_t getIndirectSize() const override {
-        uint32_t totalPayloadSize = getCrossThreadDataSize() + getPerThreadDataSizeForWholeThreadGroup();
-
-        if (getKernelDescriptor().kernelAttributes.flags.passInlineData) {
-            if (totalPayloadSize > GfxFamily::DefaultWalkerType::getInlineDataSize()) {
-                totalPayloadSize -= GfxFamily::DefaultWalkerType::getInlineDataSize();
-            } else {
-                totalPayloadSize = 0;
-            }
-        }
-
-        return totalPayloadSize;
     }
 };
 

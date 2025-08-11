@@ -137,6 +137,7 @@ CommandQueue::CommandQueue(Context *context, ClDevice *device, const cl_queue_pr
         this->heaplessStateInitEnabled = compilerProductHelper.isHeaplessStateInitEnabled(this->heaplessModeEnabled);
         this->isForceStateless = compilerProductHelper.isForceToStatelessRequired();
         this->l3FlushAfterPostSyncEnabled = productHelper.isL3FlushAfterPostSyncRequired(this->heaplessModeEnabled);
+        this->shouldRegisterEnqueuedWalkerWithProfiling = productHelper.shouldRegisterEnqueuedWalkerWithProfiling();
     }
 }
 
@@ -461,7 +462,7 @@ volatile TagAddressType *CommandQueue::getHwTagAddress() const {
     return getGpgpuCommandStreamReceiver().getTagAddress();
 }
 
-bool CommandQueue::isCompleted(TaskCountType gpgpuTaskCount, const Range<CopyEngineState> &bcsStates) {
+bool CommandQueue::isCompleted(TaskCountType gpgpuTaskCount, const std::span<CopyEngineState> &bcsStates) {
     DEBUG_BREAK_IF(getHwTag() == CompletionStamp::notReady);
 
     if (getGpgpuCommandStreamReceiver().testTaskCountReady(getHwTagAddress(), gpgpuTaskCount)) {
@@ -480,7 +481,7 @@ bool CommandQueue::isCompleted(TaskCountType gpgpuTaskCount, const Range<CopyEng
     return false;
 }
 
-WaitStatus CommandQueue::waitUntilComplete(TaskCountType gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) {
+WaitStatus CommandQueue::waitUntilComplete(TaskCountType gpgpuTaskCountToWait, std::span<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) {
     WAIT_ENTER()
 
     WaitStatus waitStatus{WaitStatus::ready};
@@ -1361,7 +1362,7 @@ bool CommandQueue::isWaitForTimestampsEnabled() const {
     return enabled;
 }
 
-WaitStatus CommandQueue::waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler, bool cleanTemporaryAllocationsList) {
+WaitStatus CommandQueue::waitForAllEngines(bool blockedQueue, PrintfHandler *printfHandler, bool cleanTemporaryAllocationsList, bool waitForTaskCountRequired) {
     if (blockedQueue) {
         while (isQueueBlocked()) {
         }
@@ -1387,7 +1388,12 @@ WaitStatus CommandQueue::waitForAllEngines(bool blockedQueue, PrintfHandler *pri
     auto taskCountToWait = taskCount;
     queueOwnership.unlock();
 
-    waitStatus = waitUntilComplete(taskCountToWait, activeBcsStates, flushStamp->peekStamp(), false, cleanTemporaryAllocationsList, waitedOnTimestamps);
+    bool skipWaitOnTaskCount = waitedOnTimestamps;
+    if (waitForTaskCountRequired) {
+        skipWaitOnTaskCount = false; // PC with L3 flush is required after CPU read if L3 Flush After Post Sync is enabled, so we need to wait for task count
+    }
+
+    waitStatus = waitUntilComplete(taskCountToWait, activeBcsStates, flushStamp->peekStamp(), false, cleanTemporaryAllocationsList, skipWaitOnTaskCount);
 
     {
         queueOwnership.lock();
@@ -1566,6 +1572,12 @@ size_t CommandQueue::calculateHostPtrSizeForImage(const size_t *region, size_t r
     auto dstSlicePitch = slicePitch ? slicePitch : ((image->getImageDesc().image_type == CL_MEM_OBJECT_IMAGE1D_ARRAY ? 1 : region[1]) * dstRowPitch);
 
     return Image::calculateHostPtrSize(region, dstRowPitch, dstSlicePitch, bytesPerPixel, image->getImageDesc().image_type);
+}
+
+void CommandQueue::registerWalkerWithProfilingEnqueued(Event *event) {
+    if (this->shouldRegisterEnqueuedWalkerWithProfiling && isProfilingEnabled() && event) {
+        this->isWalkerWithProfilingEnqueued = true;
+    }
 }
 
 } // namespace NEO

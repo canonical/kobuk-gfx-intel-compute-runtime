@@ -5,6 +5,7 @@
  *
  */
 
+#include "shared/source/command_stream/linear_stream.h"
 #include "shared/source/xe_hpc_core/hw_cmds_pvc.h"
 #include "shared/source/xe_hpc_core/pvc/device_ids_configs_pvc.h"
 #include "shared/test/common/cmd_parse/gen_cmd_parse.h"
@@ -14,6 +15,8 @@
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_cmdlist.h"
 #include "level_zero/core/test/unit_tests/xe_hpc_core/xe_hpc_core_test_l0_fixtures.h"
+
+#include "implicit_args.h"
 
 namespace L0 {
 namespace ult {

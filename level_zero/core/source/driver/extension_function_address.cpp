@@ -32,6 +32,7 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
     RETURN_FUNC_PTR_IF_EXIST(zexDriverGetHostPointerBaseAddress);
     RETURN_FUNC_PTR_IF_EXIST(zeDriverGetDefaultContext);
     RETURN_FUNC_PTR_IF_EXIST(zerDriverGetDefaultContext);
+    RETURN_FUNC_PTR_IF_EXIST(zerDriverGetLastErrorDescription);
 
     RETURN_FUNC_PTR_IF_EXIST(zerDeviceTranslateToIdentifier);
     RETURN_FUNC_PTR_IF_EXIST(zerIdentifierTranslateToDeviceHandle);
@@ -72,8 +73,8 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
     RETURN_FUNC_PTR_IF_EXIST(zexIntelReleaseNetworkInterrupt);
 
     RETURN_FUNC_PTR_IF_EXIST(zetIntelCommandListAppendMarkerExp);
-    RETURN_FUNC_PTR_IF_EXIST(zetIntelDeviceEnableMetricsExp);
-    RETURN_FUNC_PTR_IF_EXIST(zetIntelDeviceDisableMetricsExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetDeviceEnableMetricsExp);
+    RETURN_FUNC_PTR_IF_EXIST(zetDeviceDisableMetricsExp);
 
     // mutable command list extension
     RETURN_FUNC_PTR_IF_EXIST(zeCommandListGetNextCommandIdExp);
@@ -100,6 +101,11 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
     RETURN_FUNC_PTR_IF_EXIST(zexKernelSetVariableGroupSize);
     RETURN_FUNC_PTR_IF_EXIST(zexVariableGetInfo);
     RETURN_FUNC_PTR_IF_EXIST(zexCommandListGetVariablesList);
+    RETURN_FUNC_PTR_IF_EXIST(zexCommandListAppendMILoadRegReg);
+    RETURN_FUNC_PTR_IF_EXIST(zexCommandListAppendMILoadRegMem);
+    RETURN_FUNC_PTR_IF_EXIST(zexCommandListAppendMILoadRegImm);
+    RETURN_FUNC_PTR_IF_EXIST(zexCommandListAppendMIStoreRegMem);
+    RETURN_FUNC_PTR_IF_EXIST(zexCommandListAppendMIMath);
 
     // Metrics
     RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricTracerCreateExp);
@@ -117,6 +123,19 @@ void *ExtensionFunctionAddressHelper::getExtensionFunctionAddress(const std::str
     RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricDecodeCalculateMultipleValuesExp);
     RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricCalculateMultipleValuesExp);
     RETURN_FUNC_PTR_IF_EXIST(zetIntelMetricCalculateValuesExp);
+
+    // Graphs
+    RETURN_FUNC_PTR_IF_EXIST(zeGraphCreateExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeCommandListBeginGraphCaptureExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeCommandListBeginCaptureIntoGraphExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeCommandListEndGraphCaptureExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeCommandListInstantiateGraphExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeCommandListAppendGraphExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeGraphDestroyExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeExecutableGraphDestroyExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeCommandListIsGraphCaptureEnabledExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeGraphIsEmptyExp);
+    RETURN_FUNC_PTR_IF_EXIST(zeGraphDumpContentsExp);
 
 #undef RETURN_FUNC_PTR_IF_EXIST
 

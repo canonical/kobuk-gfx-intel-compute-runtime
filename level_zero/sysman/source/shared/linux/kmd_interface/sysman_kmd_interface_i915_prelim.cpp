@@ -8,6 +8,7 @@
 #include "shared/source/helpers/debug_helpers.h"
 #include "shared/source/os_interface/linux/i915_prelim.h"
 
+#include "level_zero/sysman/source/api/engine/linux/sysman_os_engine_imp.h"
 #include "level_zero/sysman/source/shared/linux/kmd_interface/sysman_kmd_interface.h"
 #include "level_zero/sysman/source/shared/linux/pmu/sysman_pmu_imp.h"
 #include "level_zero/sysman/source/shared/linux/product_helper/sysman_product_helper.h"
@@ -90,6 +91,15 @@ std::string SysmanKmdInterfaceI915Prelim::getSysfsFilePath(SysfsName sysfsName, 
     return {};
 }
 
+std::string SysmanKmdInterfaceI915Prelim::getSysfsPathForFreqDomain(SysfsName sysfsName, uint32_t subDeviceId, bool prefixBaseDirectory,
+                                                                    zes_freq_domain_t frequencyDomainNumber) {
+    return getSysfsFilePath(sysfsName, subDeviceId, prefixBaseDirectory);
+}
+
+std::string SysmanKmdInterfaceI915Prelim::getBasePathForFreqDomain(uint32_t subDeviceId, zes_freq_domain_t frequencyDomainNumber) const {
+    return getBasePath(subDeviceId);
+}
+
 std::string SysmanKmdInterfaceI915Prelim::getSysfsFilePathForPhysicalMemorySize(uint32_t subDeviceId) {
     std::string filePathPhysicalMemorySize = getBasePath(subDeviceId) +
                                              sysfsNameToFileMap[SysfsName::sysfsNameMemoryAddressRange].first;
@@ -104,63 +114,68 @@ std::string SysmanKmdInterfaceI915Prelim::getEnergyCounterNodeFile(zes_power_dom
     return filePath;
 }
 
-ze_result_t SysmanKmdInterfaceI915Prelim::getEngineActivityFdListAndConfigPair(zes_engine_group_t engineGroup,
-                                                                               uint32_t engineInstance,
-                                                                               uint32_t gtId,
-                                                                               PmuInterface *const &pPmuInterface,
-                                                                               std::vector<std::pair<int64_t, int64_t>> &fdList,
-                                                                               std::pair<uint64_t, uint64_t> &configPair) {
-    uint64_t config = UINT64_MAX;
-    switch (engineGroup) {
+std::string SysmanKmdInterfaceI915Prelim::getBurstPowerLimitFile(SysfsName sysfsName, uint32_t subDeviceId, bool baseDirectoryExists) {
+    return "";
+}
+
+ze_result_t SysmanKmdInterfaceI915Prelim::getPmuConfigsForGroupEngines(const MapOfEngineInfo &mapEngineInfo,
+                                                                       const std::string &sysmanDeviceDir,
+                                                                       const EngineGroupInfo &engineInfo,
+                                                                       PmuInterface *const &pPmuInterface,
+                                                                       const NEO::Drm *pDrm,
+                                                                       std::vector<uint64_t> &pmuConfigs) {
+    uint64_t busyTicksConfig = UINT64_MAX;
+    uint64_t totalTicksConfig = UINT64_MAX;
+
+    switch (engineInfo.engineGroup) {
     case ZES_ENGINE_GROUP_ALL:
-        config = __PRELIM_I915_PMU_ANY_ENGINE_GROUP_BUSY_TICKS(gtId);
+        busyTicksConfig = __PRELIM_I915_PMU_ANY_ENGINE_GROUP_BUSY_TICKS(engineInfo.tileId);
         break;
     case ZES_ENGINE_GROUP_COMPUTE_ALL:
     case ZES_ENGINE_GROUP_RENDER_ALL:
-        config = __PRELIM_I915_PMU_RENDER_GROUP_BUSY_TICKS(gtId);
+        busyTicksConfig = __PRELIM_I915_PMU_RENDER_GROUP_BUSY_TICKS(engineInfo.tileId);
         break;
     case ZES_ENGINE_GROUP_COPY_ALL:
-        config = __PRELIM_I915_PMU_COPY_GROUP_BUSY_TICKS(gtId);
+        busyTicksConfig = __PRELIM_I915_PMU_COPY_GROUP_BUSY_TICKS(engineInfo.tileId);
         break;
     case ZES_ENGINE_GROUP_MEDIA_ALL:
-        config = __PRELIM_I915_PMU_MEDIA_GROUP_BUSY_TICKS(gtId);
+        busyTicksConfig = __PRELIM_I915_PMU_MEDIA_GROUP_BUSY_TICKS(engineInfo.tileId);
         break;
     default:
-        auto i915EngineClass = engineGroupToEngineClass.find(engineGroup);
-        config = PRELIM_I915_PMU_ENGINE_BUSY_TICKS(i915EngineClass->second, engineInstance);
-        break;
+        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Engine Group Not Supported and returning error:0x%x \n", __FUNCTION__, ZE_RESULT_ERROR_UNSUPPORTED_FEATURE);
+        return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
     }
 
-    int64_t fd[2];
+    totalTicksConfig = __PRELIM_I915_PMU_TOTAL_ACTIVE_TICKS(engineInfo.tileId);
 
-    if (isGroupEngineHandle(engineGroup)) {
-        configPair = std::make_pair(config, __PRELIM_I915_PMU_TOTAL_ACTIVE_TICKS(gtId));
-    } else {
-        auto i915EngineClass = engineGroupToEngineClass.find(engineGroup);
-        configPair = std::make_pair(config, PRELIM_I915_PMU_ENGINE_TOTAL_TICKS(i915EngineClass->second, engineInstance));
-    }
+    pmuConfigs.push_back(busyTicksConfig);
+    pmuConfigs.push_back(totalTicksConfig);
 
-    fd[0] = pPmuInterface->pmuInterfaceOpen(configPair.first, -1, PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_GROUP);
-    if (fd[0] < 0) {
-        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Could not open Busy Ticks Handle \n", __FUNCTION__);
-        return checkErrorNumberAndReturnStatus();
-    }
-
-    fd[1] = pPmuInterface->pmuInterfaceOpen(configPair.second, static_cast<int>(fd[0]), PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_GROUP);
-    if (fd[1] < 0) {
-        NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s(): Could not open Total Active Ticks Handle \n", __FUNCTION__);
-        close(static_cast<int>(fd[0]));
-        return checkErrorNumberAndReturnStatus();
-    }
-
-    fdList.push_back(std::make_pair(fd[0], fd[1]));
     return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t SysmanKmdInterfaceI915Prelim::readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::pair<int64_t, int64_t> &fdPair, zes_engine_stats_t *pStats) {
+ze_result_t SysmanKmdInterfaceI915Prelim::getPmuConfigsForSingleEngines(const std::string &sysmanDeviceDir,
+                                                                        const EngineGroupInfo &engineInfo,
+                                                                        PmuInterface *const &pPmuInterface,
+                                                                        const NEO::Drm *pDrm,
+                                                                        std::vector<uint64_t> &pmuConfigs) {
+    uint64_t busyTicksConfig = UINT64_MAX;
+    uint64_t totalTicksConfig = UINT64_MAX;
+
+    auto i915EngineClass = engineGroupToEngineClass.find(engineInfo.engineGroup);
+    busyTicksConfig = PRELIM_I915_PMU_ENGINE_BUSY_TICKS(i915EngineClass->second, engineInfo.engineInstance);
+    totalTicksConfig = PRELIM_I915_PMU_ENGINE_TOTAL_TICKS(i915EngineClass->second, engineInfo.engineInstance);
+
+    pmuConfigs.push_back(busyTicksConfig);
+    pmuConfigs.push_back(totalTicksConfig);
+
+    return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t SysmanKmdInterfaceI915Prelim::readBusynessFromGroupFd(PmuInterface *const &pPmuInterface, std::vector<int64_t> &fdList, zes_engine_stats_t *pStats) {
     uint64_t data[4] = {};
 
-    auto ret = pPmuInterface->pmuRead(static_cast<int>(fdPair.first), data, sizeof(data));
+    auto ret = pPmuInterface->pmuRead(static_cast<int>(fdList[0]), data, sizeof(data));
     if (ret < 0) {
         NEO::printDebugString(NEO::debugManager.flags.PrintDebugMessages.get(), stderr, "Error@ %s():pmuRead is returning value:%d and error:0x%x \n", __FUNCTION__, ret, ZE_RESULT_ERROR_UNKNOWN);
         return ZE_RESULT_ERROR_UNKNOWN;
@@ -244,6 +259,10 @@ void SysmanKmdInterfaceI915Prelim::setSysmanDeviceDirName(const bool isIntegrate
     if (!isIntegratedDevice) {
         updateSysmanDeviceDirName(sysmanDeviceDirName);
     }
+}
+
+std::string SysmanKmdInterfaceI915Prelim::getFreqMediaDomainBasePath() {
+    return "gt/gt1/";
 }
 
 } // namespace Sysman

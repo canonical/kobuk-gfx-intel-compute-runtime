@@ -100,20 +100,24 @@ GfxMemoryAllocationMethod WddmMemoryManager::getPreferredAllocationMethod(const 
     return preferredAllocationMethod;
 }
 
-void WddmMemoryManager::unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) {
+bool WddmMemoryManager::unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) {
     const auto wddm = static_cast<OsContextWin *>(osContext)->getWddm();
     wddm->freeGpuVirtualAddress(gpuRange, bufferSize);
     auto gfxPartition = getGfxPartition(rootDeviceIndex);
     uint64_t reservedAddress = 0u;
     auto status = wddm->reserveGpuVirtualAddress(gpuRange, gfxPartition->getHeapMinimalAddress(HeapIndex::heapStandard64KB), gfxPartition->getHeapLimit(HeapIndex::heapStandard64KB), bufferSize, &reservedAddress);
-    UNRECOVERABLE_IF(status != STATUS_SUCCESS);
+    if (status != STATUS_SUCCESS) {
+        return false;
+    }
     physicalAllocation->setCpuPtrAndGpuAddress(nullptr, 0u);
     physicalAllocation->setReservedAddressRange(nullptr, 0u);
     WddmAllocation *wddmAllocation = reinterpret_cast<WddmAllocation *>(physicalAllocation);
     wddmAllocation->setMappedPhysicalMemoryReservation(false);
+    return true;
 }
 
-void WddmMemoryManager::unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
+bool WddmMemoryManager::unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
+    return true;
 }
 
 bool WddmMemoryManager::mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) {
@@ -202,7 +206,7 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryForImageImpl(const 
 
 GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemory64kb(const AllocationData &allocationData) {
     AllocationData allocationData64KbAlignment = allocationData;
-    allocationData64KbAlignment.alignment = MemoryConstants::pageSize64k;
+    allocationData64KbAlignment.alignment = MemoryConstants::pageSize64k > allocationData64KbAlignment.alignment ? MemoryConstants::pageSize64k : allocationData64KbAlignment.alignment;
     return allocateGraphicsMemoryUsingKmdAndMapItToCpuVA(allocationData64KbAlignment, true);
 }
 
@@ -248,7 +252,7 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryUsingKmdAndMapItToC
     }
 
     auto gmm = new Gmm(executionEnvironment.rootDeviceEnvironments[allocationData.rootDeviceIndex]->getGmmHelper(), nullptr,
-                       sizeAligned, 0u,
+                       sizeAligned, allocationData.alignment,
                        CacheSettingsHelper::getGmmUsageType(wddmAllocation->getAllocationType(), !!allocationData.flags.uncacheable, productHelper, hwInfo),
                        storageInfo,
                        gmmRequirements);
@@ -1429,7 +1433,7 @@ GraphicsAllocation *WddmMemoryManager::allocateGraphicsMemoryInDevicePool(const 
         alignment = MemoryConstants::pageSize64k;
         sizeAligned = allocationData.imgInfo->size;
     } else {
-        alignment = allocationData.type == AllocationType::svmGpu ? allocationData.alignment : alignmentSelector.selectAlignment(allocationData.size).alignment;
+        alignment = (allocationData.type == AllocationType::svmGpu && allocationData.allocationMethod == NEO::GfxMemoryAllocationMethod::allocateByKmd) ? allocationData.alignment : alignmentSelector.selectAlignment(allocationData.size).alignment;
         sizeAligned = alignUp(allocationData.size, alignment);
 
         if (debugManager.flags.ExperimentalAlignLocalMemorySizeTo2MB.get()) {

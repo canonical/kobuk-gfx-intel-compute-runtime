@@ -41,7 +41,9 @@ using namespace NEO;
 
 namespace NEO {
 extern bool returnEmptyFilesVector;
-}
+extern int setErrno;
+extern std::map<std::string, std::vector<std::string>> directoryFilesMap;
+} // namespace NEO
 
 std::string getLinuxDevicesPath(const char *file) {
     std::string resultString(Os::sysFsPciPathPrefix);
@@ -170,9 +172,10 @@ TEST(DrmTest, givenSmallBarDetectedInMemoryInfoAndNotSupportedWhenSetupHardwareI
 
     drm.ioctlHelper.reset(mockIoctlHelper.release());
 
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
     EXPECT_EQ(-1, drm.setupHardwareInfo(&device, false));
-    std::string output = testing::internal::GetCapturedStderr();
+    std::string output = capture.getCapturedStderr();
     EXPECT_STREQ("WARNING: Small BAR detected for device 0000:ab:cd.e\n", output.c_str());
 }
 
@@ -189,9 +192,10 @@ TEST(DrmTest, givenSmallBarDetectedInMemoryInfoAndSupportedWhenSetupHardwareInfo
 
     drm.ioctlHelper.reset(mockIoctlHelper.release());
 
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
     EXPECT_EQ(0, drm.setupHardwareInfo(&device, false));
-    std::string output = testing::internal::GetCapturedStderr();
+    std::string output = capture.getCapturedStderr();
     EXPECT_STREQ("WARNING: Small BAR detected for device 0000:ab:cd.e\n", output.c_str());
 }
 
@@ -1563,11 +1567,11 @@ TEST(DrmDeathTest, GivenResetStatsWithValidFaultWhenIsGpuHangIsCalledThenProcess
 
     std::string expectedString = std::string(buf.get());
 
-    ::testing::internal::CaptureStderr();
     StreamCapture capture;
+    capture.captureStderr();
     capture.captureStdout();
     EXPECT_THROW(drm.isGpuHangDetected(mockOsContextLinux), std::runtime_error);
-    auto stderrString = ::testing::internal::GetCapturedStderr();
+    auto stderrString = capture.getCapturedStderr();
     auto stdoutString = capture.getCapturedStdout();
     EXPECT_EQ(expectedString, stderrString);
     EXPECT_EQ(expectedString, stdoutString);
@@ -1806,6 +1810,186 @@ TEST(DrmTest, GivenDrmWhenDiscoveringDevicesThenCloseOnExecFlagIsPassedToFdOpen)
     SysCalls::openFuncCalled = 0;
     VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
     devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+}
+
+TEST(DrmTest, GivenAccessDeniedWhenDiscoveringDevicesThenDevicePermissionErrorIsSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = EACCES;
+        return -1;
+    });
+    VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_TRUE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+}
+
+TEST(DrmTest, GivenInufficientPermissionsWhenDiscoveringDevicesThenDevicePermissionErrorIsSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = EPERM;
+        return -1;
+    });
+    VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_TRUE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+}
+
+TEST(DrmTest, GivenOtherErrorWhenDiscoveringDevicesThenDevicePermissionErrorIsNotSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = ENOENT;
+        return -1;
+    });
+    VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+}
+
+TEST(DrmTest, GivenAccessDeniedWithNonEmptyFilesListWhenDiscoveringDevicesThenDevicePermissionErrorIsSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = EACCES;
+        return -1;
+    });
+
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:01.0-render", {"unknown"}});
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:02.0-render", {"unknown"}});
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:03.0-render", {"unknown"}});
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_TRUE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+
+    NEO::directoryFilesMap.clear();
+}
+
+TEST(DrmTest, GivenInufficientPermissionsWithNonEmptyFilesListWhenDiscoveringDevicesThenDevicePermissionErrorIsSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = EPERM;
+        return -1;
+    });
+
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:01.0-render", {"unknown"}});
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:02.0-render", {"unknown"}});
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:03.0-render", {"unknown"}});
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_TRUE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+
+    NEO::directoryFilesMap.clear();
+}
+
+TEST(DrmTest, GivenOtherErrorWithNonEmptyFilesListWhenDiscoveringDevicesThenDevicePermissionErrorIsNotSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = ENOENT;
+        return -1;
+    });
+
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:01.0-render", {"unknown"}});
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:02.0-render", {"unknown"}});
+    NEO::directoryFilesMap.insert({"/dev/dri/by-path/pci-0000:00:03.0-render", {"unknown"}});
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+
+    NEO::directoryFilesMap.clear();
+}
+
+TEST(DrmTest, GivenAccessDeniedForDirectoryWhenDiscoveringDevicesThenDevicePermissionErrorIsSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = ENOENT;
+        return -1;
+    });
+    VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
+    VariableBackup<int> errnoNumber(&NEO::setErrno, EACCES);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_TRUE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+}
+
+TEST(DrmTest, GivenInufficientPermissionsForDirectoryWhenDiscoveringDevicesThenDevicePermissionErrorIsSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = ENOENT;
+        return -1;
+    });
+    VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
+    VariableBackup<int> errnoNumber(&NEO::setErrno, EPERM);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_TRUE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
+    EXPECT_NE(0u, SysCalls::openFuncCalled);
+}
+
+TEST(DrmTest, GivenOtherErrorForDirectoryWhenDiscoveringDevicesThenDevicePermissionErrorIsNotSet) {
+    SysCalls::openFuncCalled = 0;
+    VariableBackup<decltype(SysCalls::openFuncCalled)> openCounter(&SysCalls::openFuncCalled);
+    VariableBackup<decltype(SysCalls::sysCallsOpen)> mockOpen(&SysCalls::sysCallsOpen, [](const char *pathname, int flags) -> int {
+        errno = ENOENT;
+        return -1;
+    });
+    VariableBackup<bool> emptyDir(&NEO::returnEmptyFilesVector, true);
+    VariableBackup<int> errnoNumber(&NEO::setErrno, ENOENT);
+
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    auto devices = Drm::discoverDevices(*executionEnvironment);
+    EXPECT_FALSE(executionEnvironment->isDevicePermissionError());
+    EXPECT_TRUE(devices.empty());
     EXPECT_NE(0u, SysCalls::openFuncCalled);
 }
 

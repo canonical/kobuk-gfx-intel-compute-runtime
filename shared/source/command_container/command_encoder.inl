@@ -614,7 +614,7 @@ void EncodeIndirectParams<Family>::encode(CommandContainer &container, uint64_t 
     UNRECOVERABLE_IF(NEO::isValidOffset(kernelDescriptor.payloadMappings.dispatchTraits.workDim) && (kernelDescriptor.payloadMappings.dispatchTraits.workDim & 0b11) != 0u);
     setWorkDimIndirect(container, kernelDescriptor.payloadMappings.dispatchTraits.workDim, crossThreadDataGpuVa, dispatchInterface->getGroupSize(), outArgs);
     if (implicitArgsGpuPtr) {
-        const auto version = container.getDevice()->getGfxCoreHelper().getImplicitArgsVersion();
+        const auto version = dispatchInterface->getImplicitArgs()->v0.header.structVersion;
         if (version == 0) {
             constexpr CrossThreadDataOffset groupCountOffset[] = {offsetof(ImplicitArgsV0, groupCountX), offsetof(ImplicitArgsV0, groupCountY), offsetof(ImplicitArgsV0, groupCountZ)};
             constexpr CrossThreadDataOffset globalSizeOffset[] = {offsetof(ImplicitArgsV0, globalSizeX), offsetof(ImplicitArgsV0, globalSizeY), offsetof(ImplicitArgsV0, globalSizeZ)};
@@ -629,6 +629,15 @@ void EncodeIndirectParams<Family>::encode(CommandContainer &container, uint64_t 
             setGroupCountIndirect(container, groupCountOffsetV1, implicitArgsGpuPtr, nullptr);
             setGlobalWorkSizeIndirect(container, globalSizeOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
             setWorkDimIndirect(container, numWorkDimOffsetV1, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
+        } else if (version == 2) {
+            constexpr CrossThreadDataOffset groupCountOffsetV2[] = {offsetof(ImplicitArgsV2, groupCountX), offsetof(ImplicitArgsV2, groupCountY), offsetof(ImplicitArgsV2, groupCountZ)};
+            constexpr CrossThreadDataOffset globalSizeOffsetV2[] = {offsetof(ImplicitArgsV2, globalSizeX), offsetof(ImplicitArgsV2, globalSizeY), offsetof(ImplicitArgsV2, globalSizeZ)};
+            constexpr auto numWorkDimOffsetV2 = offsetof(ImplicitArgsV2, numWorkDim);
+            setGroupCountIndirect(container, groupCountOffsetV2, implicitArgsGpuPtr, nullptr);
+            setGlobalWorkSizeIndirect(container, globalSizeOffsetV2, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
+            setWorkDimIndirect(container, numWorkDimOffsetV2, implicitArgsGpuPtr, dispatchInterface->getGroupSize(), nullptr);
+        } else {
+            UNRECOVERABLE_IF(true);
         }
     }
     if (outArgs && !outArgs->commandsToPatch.empty()) {
@@ -1153,7 +1162,7 @@ void EncodeMiPredicate<Family>::encode(LinearStream &cmdStream, [[maybe_unused]]
 }
 
 template <typename Family>
-void EnodeUserInterrupt<Family>::encode(LinearStream &commandStream) {
+void EncodeUserInterrupt<Family>::encode(LinearStream &commandStream) {
     *commandStream.getSpaceForCmd<typename Family::MI_USER_INTERRUPT>() = Family::cmdInitUserInterrupt;
 }
 

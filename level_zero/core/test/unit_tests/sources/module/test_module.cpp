@@ -26,6 +26,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/implicit_args_test_helper.h"
 #include "shared/test/common/helpers/mock_file_io.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_compiler_product_helper.h"
 #include "shared/test/common/mocks/mock_compilers.h"
@@ -537,7 +538,7 @@ HWTEST_F(ModuleTest, givenUnalignedHostBufferWhenSurfaceStateProgrammedThenUnali
 using ModuleUncachedBufferTest = Test<ModuleFixture>;
 
 struct KernelImpUncachedTest : public KernelImp {
-    using KernelImp::kernelRequiresUncachedMocsCount;
+    using KernelImp::state;
 };
 
 HWTEST2_F(ModuleUncachedBufferTest,
@@ -601,7 +602,7 @@ HWTEST2_F(ModuleUncachedBufferTest,
 
     uint32_t argIndex = 0u;
     kernelImp->setKernelArgUncached(argIndex, true);
-    kernelImp->kernelRequiresUncachedMocsCount++;
+    kernelImp->state.kernelRequiresUncachedMocsCount++;
     kernelImp->setArgBufferWithAlloc(argIndex, reinterpret_cast<uintptr_t>(devicePtr), gpuAlloc, nullptr);
     EXPECT_FALSE(kernelImp->getKernelRequiresUncachedMocs());
 
@@ -674,7 +675,7 @@ HWTEST2_F(ModuleUncachedBufferTest,
 
     uint32_t argIndex = 0u;
     kernelImp->setKernelArgUncached(argIndex, true);
-    kernelImp->kernelRequiresUncachedMocsCount++;
+    kernelImp->state.kernelRequiresUncachedMocsCount++;
     kernelImp->setArgBufferWithAlloc(argIndex, reinterpret_cast<uintptr_t>(devicePtr), gpuAlloc, nullptr);
     EXPECT_TRUE(kernelImp->getKernelRequiresUncachedMocs());
 
@@ -3051,9 +3052,17 @@ struct MockModuleTU : public L0::ModuleTranslationUnit {
         return L0::ModuleTranslationUnit::createFromNativeBinary(input, inputSize, internalBuildOptions);
     }
 
+    ze_result_t processUnpackedBinary() override {
+        if (processUnpackedBinaryReturnSuccess) {
+            return ZE_RESULT_SUCCESS;
+        }
+        return L0::ModuleTranslationUnit::processUnpackedBinary();
+    }
+
     bool callRealBuildFromSpirv = false;
     bool wasBuildFromSpirVCalled = false;
     bool wasCreateFromNativeBinaryCalled = false;
+    bool processUnpackedBinaryReturnSuccess = false;
     DebugManagerStateRestore restore;
 };
 
@@ -3347,6 +3356,78 @@ HWTEST_F(ModuleTranslationUnitTest, WhenCreatingFromZebinThenDontAppendAllowZebi
 
     auto expectedOptions = "";
     EXPECT_STREQ(expectedOptions, moduleTu.options.c_str());
+}
+
+HWTEST_F(ModuleTranslationUnitTest, GivenOneApiPvcSendWarWaEnvFalseAndFileWithIntermediateCodeWhenCreatingModuleFromNativeBinaryThenModuleIsRecompiledWithInternalOption) {
+
+    auto pMockCompilerInterface = new MockCompilerInterface;
+    auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
+    rootDeviceEnvironment->compilerInterface.reset(pMockCompilerInterface);
+    this->neoDevice->executionEnvironment->setOneApiPvcWaEnv(false);
+
+    auto additionalSections = {ZebinTestData::AppendElfAdditionalSection::spirv};
+    auto zebinData = std::make_unique<ZebinTestData::ZebinWithL0TestCommonModule>(device->getHwInfo(), additionalSections);
+    const auto &src = zebinData->storage;
+
+    ze_module_desc_t moduleDesc = {};
+    moduleDesc.format = ZE_MODULE_FORMAT_NATIVE;
+    moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(src.data());
+    moduleDesc.inputSize = src.size();
+
+    Module module(device, nullptr, ModuleType::user);
+    MockModuleTU *tu = new MockModuleTU(device);
+    tu->callRealBuildFromSpirv = true;
+    tu->processUnpackedBinaryReturnSuccess = true;
+    module.translationUnit.reset(tu);
+
+    ze_result_t result = ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    result = module.initialize(&moduleDesc, neoDevice);
+    EXPECT_EQ(result, ZE_RESULT_SUCCESS);
+    EXPECT_TRUE(tu->wasCreateFromNativeBinaryCalled);
+    EXPECT_TRUE(tu->wasBuildFromSpirVCalled);
+    EXPECT_NE(pMockCompilerInterface->inputInternalOptions.find("-ze-opt-disable-sendwarwa"), std::string::npos);
+}
+
+HWTEST_F(ModuleTranslationUnitTest, GivenOneApiPvcSendWarWaEnvFalseWhenCreatingModuleFromSpirvBinaryThenModuleIsCompiledWithInternalOption) {
+
+    auto pMockCompilerInterface = new MockCompilerInterface;
+    auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
+    rootDeviceEnvironment->compilerInterface.reset(pMockCompilerInterface);
+    this->neoDevice->executionEnvironment->setOneApiPvcWaEnv(false);
+
+    uint8_t binary[10];
+    ze_module_desc_t moduleDesc = {};
+    moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+    moduleDesc.pInputModule = binary;
+    moduleDesc.inputSize = 10;
+
+    ModuleBuildLog *moduleBuildLog = nullptr;
+
+    auto module = std::unique_ptr<L0::ModuleImp>(new L0::ModuleImp(device, moduleBuildLog, ModuleType::user));
+    ASSERT_NE(nullptr, module.get());
+    module->initialize(&moduleDesc, device->getNEODevice());
+
+    EXPECT_TRUE(CompilerOptions::contains(pMockCompilerInterface->inputInternalOptions, "-ze-opt-disable-sendwarwa"));
+}
+
+HWTEST_F(ModuleTranslationUnitTest, GivenDefaultOneApiPvcSendWarWaEnvWhenCreatingModuleFromSpirvBinaryThenModuleIsCompiledWithoutInternalOption) {
+    auto pMockCompilerInterface = new MockCompilerInterface;
+    auto &rootDeviceEnvironment = this->neoDevice->executionEnvironment->rootDeviceEnvironments[this->neoDevice->getRootDeviceIndex()];
+    rootDeviceEnvironment->compilerInterface.reset(pMockCompilerInterface);
+
+    uint8_t binary[10];
+    ze_module_desc_t moduleDesc = {};
+    moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+    moduleDesc.pInputModule = binary;
+    moduleDesc.inputSize = 10;
+
+    ModuleBuildLog *moduleBuildLog = nullptr;
+
+    auto module = std::unique_ptr<L0::ModuleImp>(new L0::ModuleImp(device, moduleBuildLog, ModuleType::user));
+    ASSERT_NE(nullptr, module.get());
+    module->initialize(&moduleDesc, device->getNEODevice());
+
+    EXPECT_FALSE(CompilerOptions::contains(pMockCompilerInterface->inputInternalOptions, "-ze-opt-disable-sendwarwa"));
 }
 
 HWTEST2_F(ModuleTranslationUnitTest, givenLargeGrfAndSimd16WhenProcessingBinaryThenKernelGroupSizeReducedToFitWithinSubslice, IsXeCore) {
@@ -3803,7 +3884,7 @@ HWTEST_F(PrintfModuleTest, GivenModuleWithPrintfWhenKernelIsCreatedThenPrintfAll
     kernelDesc.pKernelName = "test";
     kernel->initialize(&kernelDesc);
 
-    auto &container = kernel->internalResidencyContainer;
+    auto &container = kernel->state.internalResidencyContainer;
     auto printfPos = std::find(container.begin(), container.end(), kernel->getPrintfBufferAllocation());
     EXPECT_NE(container.end(), printfPos);
 }
@@ -4682,7 +4763,8 @@ TEST_F(ModuleTests, givenFullyLinkedModuleAndSlmSizeExceedingLocalMemorySizeWhen
     auto status = pModule->linkBinary();
     EXPECT_TRUE(status);
 
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
 
     ze_kernel_handle_t kernelHandle;
 
@@ -4693,7 +4775,7 @@ TEST_F(ModuleTests, givenFullyLinkedModuleAndSlmSizeExceedingLocalMemorySizeWhen
 
     EXPECT_EQ(ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY, res);
 
-    std::string output = testing::internal::GetCapturedStderr();
+    std::string output = capture.getCapturedStderr();
     const std::string expectedPart = "Size of SLM (" + std::to_string(slmInlineSizeCopy) + ") larger than available (" + std::to_string(localMemSize) + ")\n";
     EXPECT_NE(std::string::npos, output.find(expectedPart));
 }
@@ -4723,7 +4805,8 @@ TEST_F(ModuleTests, givenFullyLinkedModuleWhenCreatingKernelThenDebugMsgOnPrivat
     auto status = pModule->linkBinary();
     EXPECT_TRUE(status);
 
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
 
     ze_kernel_handle_t kernelHandle;
 
@@ -4734,7 +4817,7 @@ TEST_F(ModuleTests, givenFullyLinkedModuleWhenCreatingKernelThenDebugMsgOnPrivat
 
     EXPECT_EQ(ZE_RESULT_SUCCESS, res);
 
-    std::string output = testing::internal::GetCapturedStderr();
+    std::string output = capture.getCapturedStderr();
     std::ostringstream expectedOutput;
     expectedOutput << "computeUnits for each thread: " << std::to_string(this->device->getDeviceInfo().computeUnitsUsedForScratch) << "\n"
                    << "global memory size: " << std::to_string(this->device->getDeviceInfo().globalMemSize) << "\n"

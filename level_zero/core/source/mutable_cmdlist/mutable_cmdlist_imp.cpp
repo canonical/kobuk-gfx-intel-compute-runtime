@@ -18,11 +18,14 @@
 #include "level_zero/core/source/cmdlist/cmdlist.h"
 #include "level_zero/core/source/context/context.h"
 #include "level_zero/core/source/device/device_imp.h"
+#include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/core/source/kernel/kernel_imp.h"
 #include "level_zero/core/source/mutable_cmdlist/helper.h"
 #include "level_zero/core/source/mutable_cmdlist/mcl_kernel_ext.h"
 #include "level_zero/core/source/mutable_cmdlist/mutable_kernel_dispatch.h"
+
+#include "implicit_args.h"
 
 #include <algorithm>
 #include <memory>
@@ -133,36 +136,6 @@ CommandList *MutableCommandListImp::getBase() {
     return base;
 }
 
-ze_result_t MutableCommandListImp::getVariable(const InterfaceVariableDescriptor *varDesc, Variable **outVariable) {
-    *outVariable = nullptr;
-
-    std::string varName = varDesc->name == nullptr ? "" : std::string(varDesc->name);
-
-    if (false == varName.empty()) {
-        auto it = variableMap.find(varName);
-        if (it != variableMap.end()) {
-            *outVariable = it->second;
-            return ZE_RESULT_SUCCESS;
-        }
-    }
-
-    auto var = std::unique_ptr<Variable>(Variable::create(this->base, varDesc));
-    if (false == varName.empty()) {
-        variableMap.insert(std::make_pair(varName, var.get()));
-    }
-
-    if (var->getDesc().isTemporary) {
-        tempMem.variables.push_back(var.get());
-    }
-
-    *outVariable = var.get();
-    variableStorage.push_back(std::move(var));
-
-    this->hasStageCommitVariables |= varDesc->isStageCommit;
-
-    return ZE_RESULT_SUCCESS;
-}
-
 void MutableCommandListImp::processResidencyContainer(bool baseCmdListClosed) {
     if (this->finalizeCommandListResidency) {
         auto &cmdListResidency = this->base->getCmdContainer().getResidencyContainer();
@@ -216,7 +189,7 @@ ze_result_t MutableCommandListImp::addVariableDispatch(const NEO::KernelDescript
         perThreadData = {reinterpret_cast<uint8_t *>(ptrOffset(iohCpuBase, kernelDispatch.offsets.perThreadOffset)), perThreadDataSize};
     }
 
-    bool calcRegion = base->isHeaplessModeEnabled() && base->getLocalDispatchSupport();
+    bool calcRegion = false;
     auto mutableIndirectData = std::make_unique<MutableIndirectData>(std::move(offsets), crossThreadData, perThreadData, inlineData);
     kernelDispatch.varDispatch = std::make_unique<VariableDispatch>(&kernelDispatch, std::move(mutableIndirectData), mutableComputeWalker,
                                                                     groupSize, groupCount, globalOffset, lastSlmArgumentVariable,
@@ -381,23 +354,24 @@ ze_result_t MutableCommandListImp::parseDispatchedKernel(L0::Kernel *kernel, Mut
 
 ze_result_t MutableCommandListImp::getNextCommandId(const ze_mutable_command_id_exp_desc_t *desc, uint32_t numKernels, ze_kernel_handle_t *phKernels, uint64_t *pCommandId) {
     PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL getNextCommandId cmdlist: %p, flags: %u, numKernels: %u\n", this, desc->flags, numKernels);
-    AppendMutation nextAppend;
+    AppendKernelMutation nextAppendKernel;
+    AppendEventMutation nextAppendEvents;
     if (desc->flags == 0) {
-        nextAppend.mutationFlags = ZE_MUTABLE_COMMAND_EXP_FLAG_FORCE_UINT32 & (~ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_INSTRUCTION);
+        this->nextMutationFlags = ZE_MUTABLE_COMMAND_EXP_FLAG_FORCE_UINT32 & (~ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_INSTRUCTION);
     } else {
-        nextAppend.mutationFlags = desc->flags;
+        this->nextMutationFlags = desc->flags;
     }
-    if (kernelInstructionMutationEnabled(nextAppend.mutationFlags)) {
+    if (kernelInstructionMutationEnabled(this->nextMutationFlags)) {
         if (numKernels == 0) {
             return ZE_RESULT_ERROR_INVALID_ARGUMENT;
         }
         auto mutableKernelGroup = std::make_unique<MutableKernelGroup>(numKernels, phKernels, this->inlineDataSize, this->maxPerThreadDataSize);
         this->mutableKernelGroups.emplace_back(std::move(mutableKernelGroup));
-        nextAppend.kernelGroup = (*this->mutableKernelGroups.rbegin()).get();
+        nextAppendKernel.kernelGroup = (*this->mutableKernelGroups.rbegin()).get();
 
         // prepare kernel data for the whole kernel group - next append call will have them all ready
         bool allocateSyncBufferHandler = false;
-        auto &mutableKernels = nextAppend.kernelGroup->getKernelsInGroup();
+        auto &mutableKernels = nextAppendKernel.kernelGroup->getKernelsInGroup();
         for (uint32_t i = 0; i < numKernels; i++) {
             auto kernelData = getKernelData(Kernel::fromHandle(phKernels[i]));
             allocateSyncBufferHandler |= (kernelData->usesSyncBuffer || kernelData->usesRegionGroupBarrier);
@@ -411,7 +385,8 @@ ze_result_t MutableCommandListImp::getNextCommandId(const ze_mutable_command_id_
         }
     }
 
-    mutations.push_back(nextAppend);
+    kernelMutations.push_back(std::move(nextAppendKernel));
+    eventMutations.push_back(std::move(nextAppendEvents));
 
     *pCommandId = ++nextCommandId;
     nextAppendKernelMutable = true;
@@ -424,73 +399,55 @@ ze_result_t MutableCommandListImp::updateMutableCommandsExp(const ze_mutable_com
     ze_result_t result = ZE_RESULT_SUCCESS;
     const void *next = desc->pNext;
     while (next != nullptr) {
-        MutationVariables *currentVariables = nullptr;
+        KernelVariableDescriptor *currentVariables = nullptr;
         const ze_base_desc_t *extendedDesc = reinterpret_cast<const ze_base_desc_t *>(next);
         if (extendedDesc->stype == ZE_STRUCTURE_TYPE_MUTABLE_KERNEL_ARGUMENT_EXP_DESC) {
-            const ze_mutable_kernel_argument_exp_desc_t *kernelArgumentDesc = reinterpret_cast<const ze_mutable_kernel_argument_exp_desc_t *>(next);
-            AppendMutation &selectedAppend = this->mutations[(kernelArgumentDesc->commandId - 1)];
-            if ((selectedAppend.mutationFlags & ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_ARGUMENTS) == 0) {
-                return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-            }
+            const ze_mutable_kernel_argument_exp_desc_t *apiKernelArgumentDesc = reinterpret_cast<const ze_mutable_kernel_argument_exp_desc_t *>(next);
+            AppendKernelMutation &selectedAppend = this->kernelMutations[(apiKernelArgumentDesc->commandId - 1)];
             currentVariables = getVariableDescriptorContainer(selectedAppend);
-            MutableVariableDescriptor *mutableKernelArgumentDesc = nullptr;
-            for (auto &mutableTypeDescriptor : *currentVariables) {
-                if (mutableTypeDescriptor.varType != ZE_MUTABLE_COMMAND_EXP_FLAG_KERNEL_ARGUMENTS ||
-                    mutableTypeDescriptor.kernelArguments.argIndex != kernelArgumentDesc->argIndex) {
-                    continue;
-                }
-                mutableKernelArgumentDesc = &mutableTypeDescriptor;
-                break;
-            }
-            if (mutableKernelArgumentDesc == nullptr) {
+            if (apiKernelArgumentDesc->argIndex + 1 > currentVariables->kernelArguments.size()) {
                 return ZE_RESULT_ERROR_INVALID_ARGUMENT;
             }
-            if (mutableKernelArgumentDesc->var->getType() == VariableType::buffer) {
-                auto argValue = kernelArgumentDesc->pArgValue == nullptr ? nullptr : *reinterpret_cast<void *const *>(kernelArgumentDesc->pArgValue);
-                if (mutableKernelArgumentDesc->var->getDesc().argValue == argValue) {
+            KernelArgumentVariableDescriptor &kernelArgDesc = currentVariables->kernelArguments[apiKernelArgumentDesc->argIndex];
+            UNRECOVERABLE_IF(kernelArgDesc.argIndex != apiKernelArgumentDesc->argIndex);
+            if (kernelArgDesc.kernelArgumentVariable == nullptr) {
+                return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+            }
+            if (kernelArgDesc.kernelArgumentVariable->getType() == VariableType::buffer) {
+                auto argValue = apiKernelArgumentDesc->pArgValue == nullptr ? nullptr : *reinterpret_cast<void *const *>(apiKernelArgumentDesc->pArgValue);
+                if (kernelArgDesc.kernelArgumentVariable->getDesc().argValue == argValue) {
                     PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL update kernel arg commandId: %" PRIu64 " argument idx: %u, buffer - same value: %p\n",
-                                       kernelArgumentDesc->commandId, kernelArgumentDesc->argIndex, argValue);
+                                       apiKernelArgumentDesc->commandId, apiKernelArgumentDesc->argIndex, argValue);
                     next = extendedDesc->pNext;
                     continue;
                 }
             }
-            result = mutableKernelArgumentDesc->var->setValue(kernelArgumentDesc->argSize, 0, kernelArgumentDesc->pArgValue);
+            result = kernelArgDesc.kernelArgumentVariable->setValue(apiKernelArgumentDesc->argSize, 0, apiKernelArgumentDesc->pArgValue);
             if (result != ZE_RESULT_SUCCESS) {
                 return result;
             }
             this->updatedCommandList = true;
-            if (mutableKernelArgumentDesc->var->getType() == VariableType::slmBuffer && mutableKernelArgumentDesc->var->isCooperativeVariable()) {
-                auto varDispatch = mutableKernelArgumentDesc->var->getInitialVariableDispatch();
+            if (kernelArgDesc.kernelArgumentVariable->getType() == VariableType::slmBuffer && kernelArgDesc.kernelArgumentVariable->isCooperativeVariable()) {
+                auto varDispatch = kernelArgDesc.kernelArgumentVariable->getInitialVariableDispatch();
                 cooperativeKernelVariableDispatches.insert(varDispatch);
             }
             PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL update kernel arg commandId: %" PRIu64 " argument idx: %u, size: %zu, val: %p\n",
-                               kernelArgumentDesc->commandId, kernelArgumentDesc->argIndex, kernelArgumentDesc->argSize, mutableKernelArgumentDesc->var->getDesc().argValue);
+                               apiKernelArgumentDesc->commandId, apiKernelArgumentDesc->argIndex, apiKernelArgumentDesc->argSize, kernelArgDesc.kernelArgumentVariable->getDesc().argValue);
         }
         if (extendedDesc->stype == ZE_STRUCTURE_TYPE_MUTABLE_GROUP_COUNT_EXP_DESC) {
             const ze_mutable_group_count_exp_desc_t *groupCountDesc = reinterpret_cast<const ze_mutable_group_count_exp_desc_t *>(next);
-            AppendMutation &selectedAppend = this->mutations[(groupCountDesc->commandId - 1)];
-            if ((selectedAppend.mutationFlags & ZE_MUTABLE_COMMAND_EXP_FLAG_GROUP_COUNT) == 0) {
-                return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-            }
+            AppendKernelMutation &selectedAppend = this->kernelMutations[(groupCountDesc->commandId - 1)];
             currentVariables = getVariableDescriptorContainer(selectedAppend);
-            MutableVariableDescriptor *mutableGroupCountDesc = nullptr;
-            for (auto &mutableTypeDescriptor : *currentVariables) {
-                if (mutableTypeDescriptor.varType != ZE_MUTABLE_COMMAND_EXP_FLAG_GROUP_COUNT) {
-                    continue;
-                }
-                mutableGroupCountDesc = &mutableTypeDescriptor;
-                break;
-            }
-            if (mutableGroupCountDesc == nullptr) {
+            if (currentVariables->groupCount == nullptr) {
                 return ZE_RESULT_ERROR_INVALID_ARGUMENT;
             }
-            result = mutableGroupCountDesc->var->setValue(sizeof(ze_group_count_t), 0, groupCountDesc->pGroupCount);
+            result = currentVariables->groupCount->setValue(sizeof(ze_group_count_t), 0, groupCountDesc->pGroupCount);
             if (result != ZE_RESULT_SUCCESS) {
                 return result;
             }
             this->updatedCommandList = true;
-            if (mutableGroupCountDesc->var->isCooperativeVariable()) {
-                auto varDispatch = mutableGroupCountDesc->var->getInitialVariableDispatch();
+            if (currentVariables->groupCount->isCooperativeVariable()) {
+                auto varDispatch = currentVariables->groupCount->getInitialVariableDispatch();
                 cooperativeKernelVariableDispatches.insert(varDispatch);
             }
             PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL update group count commandId: %" PRIu64 " x: %u y: %u z: %u\n",
@@ -498,30 +455,19 @@ ze_result_t MutableCommandListImp::updateMutableCommandsExp(const ze_mutable_com
         }
         if (extendedDesc->stype == ZE_STRUCTURE_TYPE_MUTABLE_GROUP_SIZE_EXP_DESC) {
             const ze_mutable_group_size_exp_desc_t *groupSizeDesc = reinterpret_cast<const ze_mutable_group_size_exp_desc_t *>(next);
-            AppendMutation &selectedAppend = this->mutations[(groupSizeDesc->commandId - 1)];
-            if ((selectedAppend.mutationFlags & ZE_MUTABLE_COMMAND_EXP_FLAG_GROUP_SIZE) == 0) {
-                return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-            }
+            AppendKernelMutation &selectedAppend = this->kernelMutations[(groupSizeDesc->commandId - 1)];
             currentVariables = getVariableDescriptorContainer(selectedAppend);
-            MutableVariableDescriptor *mutableGroupSizeDesc = nullptr;
-            for (auto &mutableTypeDescriptor : *currentVariables) {
-                if (mutableTypeDescriptor.varType != ZE_MUTABLE_COMMAND_EXP_FLAG_GROUP_SIZE) {
-                    continue;
-                }
-                mutableGroupSizeDesc = &mutableTypeDescriptor;
-                break;
-            }
-            if (mutableGroupSizeDesc == nullptr) {
+            if (currentVariables->groupSize == nullptr) {
                 return ZE_RESULT_ERROR_INVALID_ARGUMENT;
             }
             uint32_t groupSize[3] = {groupSizeDesc->groupSizeX, groupSizeDesc->groupSizeY, groupSizeDesc->groupSizeZ};
-            result = mutableGroupSizeDesc->var->setValue(sizeof(groupSize), 0, groupSize);
+            result = currentVariables->groupSize->setValue(sizeof(groupSize), 0, groupSize);
             if (result != ZE_RESULT_SUCCESS) {
                 return result;
             }
             this->updatedCommandList = true;
-            if (mutableGroupSizeDesc->var->isCooperativeVariable()) {
-                auto varDispatch = mutableGroupSizeDesc->var->getInitialVariableDispatch();
+            if (currentVariables->groupSize->isCooperativeVariable()) {
+                auto varDispatch = currentVariables->groupSize->getInitialVariableDispatch();
                 cooperativeKernelVariableDispatches.insert(varDispatch);
             }
             PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL update group size commandId: %" PRIu64 " x: %u y: %u z: %u\n",
@@ -529,24 +475,13 @@ ze_result_t MutableCommandListImp::updateMutableCommandsExp(const ze_mutable_com
         }
         if (extendedDesc->stype == ZE_STRUCTURE_TYPE_MUTABLE_GLOBAL_OFFSET_EXP_DESC) {
             const ze_mutable_global_offset_exp_desc_t *globalOffsetDesc = reinterpret_cast<const ze_mutable_global_offset_exp_desc_t *>(next);
-            AppendMutation &selectedAppend = this->mutations[(globalOffsetDesc->commandId - 1)];
-            if ((selectedAppend.mutationFlags & ZE_MUTABLE_COMMAND_EXP_FLAG_GLOBAL_OFFSET) == 0) {
-                return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-            }
+            AppendKernelMutation &selectedAppend = this->kernelMutations[(globalOffsetDesc->commandId - 1)];
             currentVariables = getVariableDescriptorContainer(selectedAppend);
-            MutableVariableDescriptor *mutableGlobalOffsetDesc = nullptr;
-            for (auto &mutableTypeDescriptor : *currentVariables) {
-                if (mutableTypeDescriptor.varType != ZE_MUTABLE_COMMAND_EXP_FLAG_GLOBAL_OFFSET) {
-                    continue;
-                }
-                mutableGlobalOffsetDesc = &mutableTypeDescriptor;
-                break;
-            }
-            if (mutableGlobalOffsetDesc == nullptr) {
+            if (currentVariables->globalOffset == nullptr) {
                 return ZE_RESULT_ERROR_INVALID_ARGUMENT;
             }
             uint32_t globalOffset[3] = {globalOffsetDesc->offsetX, globalOffsetDesc->offsetY, globalOffsetDesc->offsetZ};
-            result = mutableGlobalOffsetDesc->var->setValue(sizeof(globalOffset), 0, globalOffset);
+            result = currentVariables->globalOffset->setValue(sizeof(globalOffset), 0, globalOffset);
             if (result != ZE_RESULT_SUCCESS) {
                 return result;
             }
@@ -570,29 +505,18 @@ ze_result_t MutableCommandListImp::updateMutableCommandsExp(const ze_mutable_com
 
 ze_result_t MutableCommandListImp::updateMutableCommandSignalEventExp(uint64_t commandId, ze_event_handle_t signalEvent) {
     PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL updateMutableCommandSignalEventExp cmdlist: %p commandId: %" PRIu64 " new signal event handle: %p\n", this, commandId, signalEvent);
-    AppendMutation &selectedAppend = this->mutations[(commandId - 1)];
-    if ((selectedAppend.mutationFlags & ZE_MUTABLE_COMMAND_EXP_FLAG_SIGNAL_EVENT) == 0) {
-        return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-    }
-    MutableVariableDescriptor *mutableSignalEventDesc = nullptr;
-    for (auto &mutableTypeDescriptor : selectedAppend.variables) {
-        if (mutableTypeDescriptor.varType != ZE_MUTABLE_COMMAND_EXP_FLAG_SIGNAL_EVENT) {
-            continue;
-        }
-        mutableSignalEventDesc = &mutableTypeDescriptor;
-        break;
-    }
-    if (mutableSignalEventDesc == nullptr) {
+    AppendEventMutation &selectedAppend = this->eventMutations[(commandId - 1)];
+    if (selectedAppend.signalEvent.eventVariable == nullptr) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
     auto inputEvent = Event::fromHandle(signalEvent);
-    if (mutableSignalEventDesc->signalEvent.event == inputEvent) {
+    if (selectedAppend.signalEvent.event == inputEvent) {
         return ZE_RESULT_SUCCESS;
     }
 
-    auto ret = mutableSignalEventDesc->var->setValue(0, 0, inputEvent);
+    auto ret = selectedAppend.signalEvent.eventVariable->setValue(0, 0, inputEvent);
     if (ret == ZE_RESULT_SUCCESS) {
-        mutableSignalEventDesc->signalEvent.event = inputEvent;
+        selectedAppend.signalEvent.event = inputEvent;
         this->updatedCommandList = true;
     }
     return ret;
@@ -600,33 +524,22 @@ ze_result_t MutableCommandListImp::updateMutableCommandSignalEventExp(uint64_t c
 
 ze_result_t MutableCommandListImp::updateMutableCommandWaitEventsExp(uint64_t commandId, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents) {
     PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL updateMutableCommandWaitEventsExp cmdlist: %p commandId: %" PRIu64 " numWaitEvents: %u\n", this, commandId, numWaitEvents);
-    AppendMutation &selectedAppend = this->mutations[(commandId - 1)];
-    if ((selectedAppend.mutationFlags & ZE_MUTABLE_COMMAND_EXP_FLAG_WAIT_EVENTS) == 0) {
+    AppendEventMutation &selectedAppend = this->eventMutations[(commandId - 1)];
+    if (numWaitEvents > selectedAppend.waitEvents.size()) {
         return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     }
-
-    MutableVariableDescriptor *mutableWaitEventDesc = nullptr;
     for (uint32_t eventNum = 0; eventNum < numWaitEvents; eventNum++) {
-        for (auto &mutableTypeDescriptor : selectedAppend.variables) {
-            if (mutableTypeDescriptor.varType != ZE_MUTABLE_COMMAND_EXP_FLAG_WAIT_EVENTS || mutableTypeDescriptor.waitEvents.waitEventIndex != eventNum) {
-                continue;
-            }
-            mutableWaitEventDesc = &mutableTypeDescriptor;
-            break;
-        }
-        if (mutableWaitEventDesc == nullptr) {
-            return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-        }
-
-        auto waitEventHandle = phWaitEvents[eventNum];
+        WaitEventVariableDescriptor &mutableWaitEventDesc = selectedAppend.waitEvents[eventNum];
+        UNRECOVERABLE_IF(mutableWaitEventDesc.waitEventIndex != eventNum);
+        auto waitEventHandle = toInternalType(phWaitEvents[eventNum]);
         auto inputEvent = Event::fromHandle(waitEventHandle);
-        if (mutableWaitEventDesc->waitEvents.event == inputEvent) {
+        if (mutableWaitEventDesc.event == inputEvent) {
             continue;
         }
 
-        auto retCode = mutableWaitEventDesc->var->setValue(0, 0, inputEvent);
+        auto retCode = mutableWaitEventDesc.eventVariable->setValue(0, 0, inputEvent);
         if (retCode == ZE_RESULT_SUCCESS) {
-            mutableWaitEventDesc->waitEvents.event = inputEvent;
+            mutableWaitEventDesc.event = inputEvent;
             this->updatedCommandList = true;
         } else {
             return retCode;
@@ -641,28 +554,22 @@ ze_result_t MutableCommandListImp::updateMutableCommandKernelsExp(uint32_t numKe
     PRINT_DEBUG_STRING(NEO::debugManager.flags.PrintMclData.get(), stderr, "MCL updateMutableCommandKernelsExp cmdlist: %p numKernels: %u\n", this, numKernels);
     for (uint32_t id = 0; id < numKernels; id++) {
         auto commandId = pCommandId[id];
-        auto kernelHandle = phKernels[id];
+        auto kernelHandle = toInternalType(phKernels[id]);
         auto kernel = Kernel::fromHandle(kernelHandle);
-        AppendMutation &selectedAppend = this->mutations[(commandId - 1)];
-        if (!kernelInstructionMutationEnabled(selectedAppend.mutationFlags)) {
+        auto kernelGroup = this->kernelMutations[(commandId - 1)].kernelGroup;
+        if (kernelGroup == nullptr) {
             return ZE_RESULT_ERROR_INVALID_ARGUMENT;
         }
 
-        auto kernelGroup = selectedAppend.kernelGroup;
-
-        UNRECOVERABLE_IF(kernelGroup == nullptr);
         auto oldMutableKernel = kernelGroup->getCurrentMutableKernel();
+        // when old mutable kernel handle is the same as new, then skip mutation
         if (oldMutableKernel->getKernel() == kernel) {
             continue;
         }
         auto oldKernelComputeWalker = oldMutableKernel->getMutableComputeWalker();
 
-        // select new mutable kernel, when not found - old kernel remains as current - error
         kernelGroup->setCurrentMutableKernel(kernel);
         auto newMutableKernel = kernelGroup->getCurrentMutableKernel();
-        if (newMutableKernel == oldMutableKernel) {
-            return ZE_RESULT_ERROR_INVALID_KERNEL_HANDLE;
-        }
 
         // remove old kernel from mutable residency
         {
@@ -674,26 +581,28 @@ ze_result_t MutableCommandListImp::updateMutableCommandKernelsExp(uint32_t numKe
         }
         // remove old kernel arguments (buffers) from mutable residency and reset variables
         {
-            for (auto &kernelVariableDescriptor : oldMutableKernel->getKernelVariables()) {
-                auto &varDescriptor = kernelVariableDescriptor.var->getDesc();
+            auto &kernelVariableDescriptors = oldMutableKernel->getKernelVariables();
+            for (auto &kernelArgVarDesc : kernelVariableDescriptors.kernelArguments) {
+                if (kernelArgVarDesc.kernelArgumentVariable == nullptr) {
+                    continue;
+                }
+                auto &varDescriptor = kernelArgVarDesc.kernelArgumentVariable->getDesc();
                 if (varDescriptor.type == VariableType::buffer) {
                     if (varDescriptor.bufferAlloc != nullptr) {
                         removeFromResidencyContainer(varDescriptor.bufferAlloc);
                     }
-                    kernelVariableDescriptor.var->resetBufferVariable();
+                    kernelArgVarDesc.kernelArgumentVariable->resetBufferVariable();
                 }
                 if (varDescriptor.type == VariableType::slmBuffer) {
-                    kernelVariableDescriptor.var->resetSlmVariable();
+                    kernelArgVarDesc.kernelArgumentVariable->resetSlmVariable();
                 }
-                if (varDescriptor.type == VariableType::groupCount) {
-                    kernelVariableDescriptor.var->resetGroupCountVariable();
-                }
-                if (varDescriptor.type == VariableType::groupSize) {
-                    kernelVariableDescriptor.var->resetGroupSizeVariable();
-                }
-                if (varDescriptor.type == VariableType::globalOffset) {
-                    kernelVariableDescriptor.var->resetGlobalOffsetVariable();
-                }
+            }
+            kernelVariableDescriptors.groupCount->resetGroupCountVariable();
+            if (kernelVariableDescriptors.groupSize != nullptr) {
+                kernelVariableDescriptors.groupSize->resetGroupSizeVariable();
+            }
+            if (kernelVariableDescriptors.globalOffset != nullptr) {
+                kernelVariableDescriptors.globalOffset->resetGlobalOffsetVariable();
             }
         }
 
@@ -707,9 +616,21 @@ ze_result_t MutableCommandListImp::updateMutableCommandKernelsExp(uint32_t numKe
 
             newKernelDispatch->syncBufferNoopPatchIndex = oldKernelDispatch->syncBufferNoopPatchIndex;
             newKernelDispatch->regionBarrierNoopPatchIndex = oldKernelDispatch->regionBarrierNoopPatchIndex;
+
+            if (newKernelDispatch->syncBufferNoopPatchIndex != undefined<size_t> &&
+                newKernelDispatch->kernelData->usesSyncBuffer == false) {
+                // disable noop patch index if sync buffer is not used
+                disableAddressNoopPatch(newKernelDispatch->syncBufferNoopPatchIndex);
+            }
+
+            if (newKernelDispatch->regionBarrierNoopPatchIndex != undefined<size_t> &&
+                newKernelDispatch->kernelData->usesRegionGroupBarrier == false) {
+                // disable noop patch index if region barrier buffer is not used
+                disableAddressNoopPatch(newKernelDispatch->regionBarrierNoopPatchIndex);
+            }
         }
 
-        // copy post sync and payload from old walker host view into new walker host view
+        // copy post sync and possible indirect/scratch pointers from old walker host view into new walker host view
         auto newKernelComputeWalker = newMutableKernel->getMutableComputeWalker();
         newKernelComputeWalker->copyWalkerDataToHostBuffer(oldKernelComputeWalker);
 
@@ -719,12 +640,12 @@ ze_result_t MutableCommandListImp::updateMutableCommandKernelsExp(uint32_t numKe
             this->updateScratchAddress(scratchAddressPatchIndex, *oldKernelComputeWalker, *newKernelComputeWalker);
         }
 
-        // save new host view into command buffer
-        newKernelComputeWalker->saveCpuBufferIntoGpuBuffer(false);
+        // save new host view inline data/post sync into command buffer
+        newKernelComputeWalker->saveCpuBufferIntoGpuBuffer(false, true);
 
-        // update reminder variables (signal/wait events variables) with new compute walker to have correct reference for new post sync addresses
-        for (auto &mutableVariableDescriptor : selectedAppend.variables) {
-            mutableVariableDescriptor.var->updateMutableComputeWalker(newKernelComputeWalker);
+        // update reminder variables (signal event variable) with new compute walker to have correct reference for new post sync addresses
+        if (kernelGroup->getSharedSignalVariable() != nullptr) {
+            kernelGroup->getSharedSignalVariable()->updateMutableComputeWalker(newKernelComputeWalker);
         }
 
         // add new kernel to mutable residency

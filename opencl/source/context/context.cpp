@@ -8,9 +8,7 @@
 #include "opencl/source/context/context.h"
 
 #include "shared/source/ail/ail_configuration.h"
-#include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
-#include "shared/source/compiler_interface/compiler_interface.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
 #include "shared/source/device/sub_device.h"
 #include "shared/source/execution_environment/root_device_environment.h"
@@ -21,6 +19,7 @@
 #include "shared/source/memory_manager/deferred_deleter.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
+#include "shared/source/os_interface/device_factory.h"
 #include "shared/source/utilities/buffer_pool_allocator.inl"
 #include "shared/source/utilities/heap_allocator.h"
 #include "shared/source/utilities/staging_buffer_manager.h"
@@ -38,8 +37,6 @@
 #include "opencl/source/platform/platform.h"
 #include "opencl/source/sharings/sharing.h"
 #include "opencl/source/sharings/sharing_factory.h"
-
-#include "d3d_sharing_functions.h"
 
 #include <algorithm>
 #include <memory>
@@ -548,7 +545,9 @@ void Context::initializeUsmAllocationPools() {
     }
 
     auto &productHelper = getDevices()[0]->getProductHelper();
-    bool enabled = ApiSpecificConfig::isDeviceUsmPoolingEnabled() && productHelper.isDeviceUsmPoolAllocatorSupported();
+    bool enabled = ApiSpecificConfig::isDeviceUsmPoolingEnabled() &&
+                   productHelper.isDeviceUsmPoolAllocatorSupported() &&
+                   DeviceFactory::isHwModeSelected();
 
     auto usmDevicePoolParams = getUsmDevicePoolParams();
     if (debugManager.flags.EnableDeviceUsmAllocationPool.get() != -1) {
@@ -565,7 +564,9 @@ void Context::initializeUsmAllocationPools() {
         usmDeviceMemAllocPool.initialize(svmMemoryManager, memoryProperties, usmDevicePoolParams.poolSize, usmDevicePoolParams.minServicedSize, usmDevicePoolParams.maxServicedSize);
     }
 
-    enabled = ApiSpecificConfig::isHostUsmPoolingEnabled() && productHelper.isHostUsmPoolAllocatorSupported();
+    enabled = ApiSpecificConfig::isHostUsmPoolingEnabled() &&
+              productHelper.isHostUsmPoolAllocatorSupported() &&
+              DeviceFactory::isHwModeSelected();
     auto usmHostPoolParams = getUsmHostPoolParams();
     if (debugManager.flags.EnableHostUsmAllocationPool.get() != -1) {
         enabled = debugManager.flags.EnableHostUsmAllocationPool.get() > 0;

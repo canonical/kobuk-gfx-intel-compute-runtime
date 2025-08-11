@@ -12,6 +12,7 @@
 #include "level_zero/core/source/cmdlist/cmdlist_hw_immediate.h"
 #include "level_zero/core/source/cmdlist/cmdlist_launch_params.h"
 #include "level_zero/core/source/kernel/kernel.h"
+#include "level_zero/core/test/unit_tests/mock.h"
 #include "level_zero/core/test/unit_tests/mocks/mock_device.h"
 #include "level_zero/core/test/unit_tests/white_box.h"
 
@@ -250,6 +251,7 @@ struct WhiteBox<L0::CommandListCoreFamilyImmediate<gfxCoreFamily>>
     using BaseClass::syncDispatchQueueId;
     using BaseClass::synchronizedDispatchMode;
     using BaseClass::synchronizeInOrderExecution;
+    using BaseClass::transferDirectionRequiresBcsSplit;
     using BaseClass::updateInOrderExecInfo;
     using BaseClass::useAdditionalBlitProperties;
 
@@ -343,11 +345,15 @@ struct WhiteBox<::L0::CommandListImp> : public ::L0::CommandListImp {
 
 using CommandList = WhiteBox<::L0::CommandListImp>;
 
-struct MockCommandList : public CommandList {
+template <>
+struct Mock<CommandList> : public CommandList {
     using BaseClass = CommandList;
+    using BaseClass::isWalkerWithProfilingEnqueued;
+    using BaseClass::registerWalkerWithProfilingEnqueued;
+    using BaseClass::shouldRegisterEnqueuedWalkerWithProfiling;
 
-    MockCommandList(Device *device = nullptr);
-    ~MockCommandList() override;
+    Mock(Device *device = nullptr);
+    ~Mock() override;
 
     ADDMETHOD_NOBASE(close, ze_result_t, ZE_RESULT_SUCCESS, ());
     ADDMETHOD_NOBASE(destroy, ze_result_t, ZE_RESULT_SUCCESS, ());
@@ -382,8 +388,8 @@ struct MockCommandList : public CommandList {
                      (ze_kernel_handle_t hKernel,
                       const ze_group_count_t groupCounts,
                       const ze_group_size_t groupSizes,
-                      void **pArguments,
-                      void *pNext,
+                      const void **pArguments,
+                      const void *pNext,
                       ze_event_handle_t hSignalEvent,
                       uint32_t numWaitEvents,
                       ze_event_handle_t *phWaitEvents));
@@ -562,27 +568,6 @@ struct MockCommandList : public CommandList {
                       uint32_t numWaitEvents,
                       ze_event_handle_t *phWaitEvents));
 
-    ADDMETHOD_NOBASE(appendMILoadRegImm, ze_result_t, ZE_RESULT_SUCCESS,
-                     (uint32_t reg,
-                      uint32_t value,
-                      bool isBcs));
-
-    ADDMETHOD_NOBASE(appendMILoadRegReg, ze_result_t, ZE_RESULT_SUCCESS,
-                     (uint32_t reg1,
-                      uint32_t reg2));
-
-    ADDMETHOD_NOBASE(appendMILoadRegMem, ze_result_t, ZE_RESULT_SUCCESS,
-                     (uint32_t reg1,
-                      uint64_t address));
-
-    ADDMETHOD_NOBASE(appendMIStoreRegMem, ze_result_t, ZE_RESULT_SUCCESS,
-                     (uint32_t reg1,
-                      uint64_t address));
-
-    ADDMETHOD_NOBASE(appendMIMath, ze_result_t, ZE_RESULT_SUCCESS,
-                     (void *aluArray,
-                      size_t aluCount));
-
     ADDMETHOD_NOBASE(appendMIBBStart, ze_result_t, ZE_RESULT_SUCCESS,
                      (uint64_t address,
                       size_t predication,
@@ -624,9 +609,15 @@ struct MockCommandList : public CommandList {
                      (uint32_t numCommandLists, ze_command_list_handle_t *phCommandLists,
                       ze_event_handle_t hSignalEvent, uint32_t numWaitEvents, ze_event_handle_t *phWaitEvents));
 
+    ADDMETHOD_NOBASE(getDeviceHandle, ze_result_t, ZE_RESULT_SUCCESS, (ze_device_handle_t * phDevice));
+    ADDMETHOD_NOBASE(getContextHandle, ze_result_t, ZE_RESULT_SUCCESS, (ze_context_handle_t * phContext));
+    ADDMETHOD_NOBASE(getOrdinal, ze_result_t, ZE_RESULT_SUCCESS, (uint32_t * pOrdinal));
+
     uint8_t *batchBuffer = nullptr;
     NEO::GraphicsAllocation *mockAllocation = nullptr;
 };
+
+using MockCommandList = Mock<CommandList>;
 
 template <GFXCORE_FAMILY gfxCoreFamily>
 class MockCommandListCoreFamily : public CommandListCoreFamily<gfxCoreFamily> {
@@ -773,6 +764,26 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
         return appendWriteToMemoryCalledCountReturnValue;
     }
 
+    ze_result_t appendMemoryCopyKernelWithGA(void *dstPtr,
+                                             NEO::GraphicsAllocation *dstPtrAlloc,
+                                             uint64_t dstOffset,
+                                             void *srcPtr,
+                                             NEO::GraphicsAllocation *srcPtrAlloc,
+                                             uint64_t srcOffset,
+                                             uint64_t size,
+                                             uint64_t elementSize,
+                                             Builtin builtin,
+                                             L0::Event *signalEvent,
+                                             bool isStateless,
+                                             CmdListKernelLaunchParams &launchParams) override {
+        ++appendMemoryCopyKernelWithGACalledCount;
+        if (callAppendMemoryCopyKernelWithGABase) {
+            return BaseClass::appendMemoryCopyKernelWithGA(dstPtr, dstPtrAlloc, dstOffset, srcPtr, srcPtrAlloc, srcOffset,
+                                                           size, elementSize, builtin, signalEvent, isStateless, launchParams);
+        }
+        return appendMemoryCopyKernelWithGACalledCountReturnValue;
+    }
+
     void checkAssert() override {
         checkAssertCalled++;
     }
@@ -799,6 +810,10 @@ class MockCommandListImmediateHw : public WhiteBox<::L0::CommandListCoreFamilyIm
     bool callAppendWriteToMemoryBase = true;
     ze_result_t appendWriteToMemoryCalledCountReturnValue = ZE_RESULT_SUCCESS;
     uint32_t appendWriteToMemoryCalledCount = 0;
+
+    bool callAppendMemoryCopyKernelWithGABase = true;
+    ze_result_t appendMemoryCopyKernelWithGACalledCountReturnValue = ZE_RESULT_SUCCESS;
+    uint32_t appendMemoryCopyKernelWithGACalledCount = 0;
 };
 
 struct CmdListHelper {

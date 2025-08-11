@@ -93,6 +93,9 @@ bool SVMAllocsManager::SvmAllocationCache::insert(size_t size, void *ptr, SvmAll
         if (waitForCompletion) {
             svmAllocsManager->waitForEnginesCompletion(svmData);
         }
+        if (requireUpdatingAllocsForIndirectAccess) {
+            svmAllocsManager->removeFromAllocsForIndirectAccess(*svmData);
+        }
         svmData->isSavedForReuse = true;
         allocations.emplace(std::lower_bound(allocations.begin(), allocations.end(), size), size, ptr, svmData, waitForCompletion);
     }
@@ -169,6 +172,10 @@ void *SVMAllocsManager::SvmAllocationCache::get(size_t size, const UnifiedMemory
             allocationIter->svmData->isSavedForReuse = false;
             allocationIter->svmData->gpuAllocations.getDefaultGraphicsAllocation()->setAubWritable(true, std::numeric_limits<uint32_t>::max());
             allocationIter->svmData->gpuAllocations.getDefaultGraphicsAllocation()->setTbxWritable(true, std::numeric_limits<uint32_t>::max());
+            if (requireUpdatingAllocsForIndirectAccess) {
+                allocationIter->svmData->setAllocId(++svmAllocsManager->allocationsCounter);
+                svmAllocsManager->reinsertToAllocsForIndirectAccess(*allocationIter->svmData);
+            }
             allocations.erase(allocationIter);
             return allocationPtr;
         }
@@ -638,6 +645,21 @@ void SVMAllocsManager::setUnifiedAllocationProperties(GraphicsAllocation *alloca
     allocation->setCoherent(svmProperties.coherent);
 }
 
+void SVMAllocsManager::reinsertToAllocsForIndirectAccess(SvmAllocationData &svmData) {
+    std::unique_lock<std::mutex> lockForIndirect(mtxForIndirectAccess);
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    for (auto alloc : svmData.gpuAllocations.getGraphicsAllocations()) {
+        OPTIONAL_UNRECOVERABLE_IF(nullptr == alloc);
+        internalAllocationsMap.insert({svmData.getAllocId(), alloc});
+    }
+}
+
+void SVMAllocsManager::removeFromAllocsForIndirectAccess(SvmAllocationData &svmData) {
+    std::unique_lock<std::mutex> lockForIndirect(mtxForIndirectAccess);
+    std::unique_lock<std::shared_mutex> lock(mtx);
+    internalAllocationsMap.erase(svmData.getAllocId());
+}
+
 void SVMAllocsManager::insertSVMAlloc(const SvmAllocationData &svmAllocData) {
     insertSVMAlloc(reinterpret_cast<void *>(svmAllocData.gpuAllocations.getDefaultGraphicsAllocation()->getGpuAddress()), svmAllocData);
 }
@@ -929,22 +951,33 @@ void SVMAllocsManager::initUsmHostAllocationsCache() {
 }
 
 void SVMAllocsManager::initUsmAllocationsCaches(Device &device) {
-    bool usmDeviceAllocationsCacheEnabled = NEO::ApiSpecificConfig::isDeviceAllocationCacheEnabled() && device.getProductHelper().isDeviceUsmAllocationReuseSupported();
+    const bool debuggerEnabled = nullptr != device.getDebugger();
+    bool usmDeviceAllocationsCacheEnabled = NEO::ApiSpecificConfig::isDeviceAllocationCacheEnabled() &&
+                                            device.getProductHelper().isDeviceUsmAllocationReuseSupported() &&
+                                            !debuggerEnabled;
     if (debugManager.flags.ExperimentalEnableDeviceAllocationCache.get() != -1) {
         usmDeviceAllocationsCacheEnabled = !!debugManager.flags.ExperimentalEnableDeviceAllocationCache.get();
     }
     if (usmDeviceAllocationsCacheEnabled && device.usmReuseInfo.getMaxAllocationsSavedForReuseSize() > 0u) {
         device.getExecutionEnvironment()->initializeUnifiedMemoryReuseCleaner(device.isAnyDirectSubmissionLightEnabled());
         this->initUsmDeviceAllocationsCache(device);
+        if (debugManager.flags.SetCommandStreamReceiver.get() > 0) {
+            this->usmDeviceAllocationsCache->requireUpdatingAllocsForIndirectAccess = true;
+        }
     }
 
-    bool usmHostAllocationsCacheEnabled = NEO::ApiSpecificConfig::isHostAllocationCacheEnabled() && device.getProductHelper().isHostUsmAllocationReuseSupported();
+    bool usmHostAllocationsCacheEnabled = NEO::ApiSpecificConfig::isHostAllocationCacheEnabled() &&
+                                          device.getProductHelper().isHostUsmAllocationReuseSupported() &&
+                                          !debuggerEnabled;
     if (debugManager.flags.ExperimentalEnableHostAllocationCache.get() != -1) {
         usmHostAllocationsCacheEnabled = !!debugManager.flags.ExperimentalEnableHostAllocationCache.get();
     }
     if (usmHostAllocationsCacheEnabled && this->memoryManager->usmReuseInfo.getMaxAllocationsSavedForReuseSize() > 0u) {
         device.getExecutionEnvironment()->initializeUnifiedMemoryReuseCleaner(device.isAnyDirectSubmissionLightEnabled());
         this->initUsmHostAllocationsCache();
+        if (debugManager.flags.SetCommandStreamReceiver.get() > 0) {
+            this->usmHostAllocationsCache->requireUpdatingAllocsForIndirectAccess = true;
+        }
     }
 }
 

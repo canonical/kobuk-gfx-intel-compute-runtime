@@ -17,12 +17,15 @@
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/prefetch_manager.h"
 
-#include "level_zero/core/source/cmdqueue/cmdqueue.h"
+#include "level_zero/core/source/cmdqueue/cmdqueue_imp.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/driver/driver_handle_imp.h"
 #include "level_zero/core/source/event/event.h"
 #include "level_zero/core/source/kernel/kernel.h"
 #include "level_zero/core/source/kernel/kernel_imp.h"
+#include "level_zero/experimental/source/graph/graph.h"
+
+#include "implicit_args.h"
 
 namespace L0 {
 
@@ -39,6 +42,9 @@ CommandList::~CommandList() {
     }
     removeMemoryPrefetchAllocations();
     printfKernelContainer.clear();
+    if (captureTarget && (false == captureTarget->wasPreallocated())) {
+        delete captureTarget;
+    }
 }
 
 void CommandList::storePrintfKernel(Kernel *kernel) {
@@ -227,4 +233,11 @@ NEO::CommandStreamReceiver *CommandList::getCsr(bool copyOffload) const {
 
     return static_cast<CommandQueueImp *>(queue)->getCsr();
 }
+
+void CommandList::registerWalkerWithProfilingEnqueued(Event *event) {
+    if (this->shouldRegisterEnqueuedWalkerWithProfiling && event && event->isEventTimestampFlagSet()) {
+        this->isWalkerWithProfilingEnqueued = true;
+    }
+}
+
 } // namespace L0

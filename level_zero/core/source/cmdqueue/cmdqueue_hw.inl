@@ -656,7 +656,7 @@ template <GFXCORE_FAMILY gfxCoreFamily>
 void CommandQueueHw<gfxCoreFamily>::programPipelineSelectIfGpgpuDisabled(NEO::LinearStream &cmdStream) {
     bool gpgpuEnabled = this->csr->getPreambleSetFlag();
     if (!gpgpuEnabled) {
-        NEO::PipelineSelectArgs args = {false, false, false, false};
+        NEO::PipelineSelectArgs args = {false, false, false};
         NEO::PreambleHelper<GfxFamily>::programPipelineSelect(&cmdStream, args, device->getNEODevice()->getRootDeviceEnvironment());
         this->csr->setPreambleSetFlag(true);
     }
@@ -774,8 +774,14 @@ ze_result_t CommandQueueHw<gfxCoreFamily>::setupCmdListsAndContextParams(
             return ZE_RESULT_ERROR_INVALID_ARGUMENT;
         }
         commandList->storeReferenceTsToMappedEvents(false);
-        commandList->addRegularCmdListSubmissionCounter();
-        commandList->patchInOrderCmds();
+
+        if (commandList->inOrderCmdsPatchingEnabled()) {
+            commandList->addRegularCmdListSubmissionCounter();
+            commandList->patchInOrderCmds();
+        } else {
+            commandList->clearInOrderExecCounterAllocation();
+        }
+
         commandList->setInterruptEventsCsr(*this->csr);
 
         auto &commandContainer = commandList->getCmdContainer();
@@ -821,6 +827,8 @@ ze_result_t CommandQueueHw<gfxCoreFamily>::setupCmdListsAndContextParams(
 
             ctx.spaceForResidency += estimateCommandListResidencySize(commandList);
         }
+
+        this->isWalkerWithProfilingEnqueued = commandList->getIsWalkerWithProfilingEnqueued();
     }
 
     this->getCsr()->getResidencyAllocations().reserve(ctx.spaceForResidency);
@@ -1381,6 +1389,7 @@ void CommandQueueHw<gfxCoreFamily>::dispatchTaskCountPostSyncRegular(
     args.dcFlushEnable = this->csr->getDcFlushSupport();
     args.workloadPartitionOffset = this->partitionCount > 1;
     args.notifyEnable = this->csr->isUsedNotifyEnableForPostSync();
+    args.isWalkerWithProfilingEnqueued = this->getAndClearIsWalkerWithProfilingEnqueued();
     NEO::MemorySynchronizationCommands<GfxFamily>::addBarrierWithPostSyncOperation(
         cmdStream,
         NEO::PostSyncMode::immediateData,
@@ -1557,7 +1566,6 @@ void CommandQueueHw<gfxCoreFamily>::programOneCmdListPipelineSelect(NEO::LinearS
         NEO::PipelineSelectArgs args = {
             systolic,
             false,
-            false,
             cmdListRequired.commandList->getSystolicModeSupport()};
 
         NEO::PreambleHelper<GfxFamily>::programPipelineSelect(&commandStream, args, device->getNEODevice()->getRootDeviceEnvironment());
@@ -1614,7 +1622,6 @@ void CommandQueueHw<gfxCoreFamily>::programRequiredStateComputeModeForCommandLis
     if (cmdListRequired.flags.propertyScmDirty) {
         NEO::PipelineSelectArgs pipelineSelectArgs = {
             cmdListRequired.requiredState.pipelineSelect.systolicMode.value == 1,
-            false,
             false,
             cmdListRequired.commandList->getSystolicModeSupport()};
 

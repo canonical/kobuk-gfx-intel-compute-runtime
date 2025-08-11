@@ -89,6 +89,7 @@ struct DriverHandleImp : public DriverHandle {
     MOCKABLE_VIRTUAL void *importNTHandle(ze_device_handle_t hDevice, void *handle, NEO::AllocationType allocationType);
     ze_result_t checkMemoryAccessFromDevice(Device *device, const void *ptr) override;
     NEO::SVMAllocsManager *getSvmAllocsManager() override;
+    NEO::StagingBufferManager *getStagingBufferManager() override;
     ze_result_t initialize(std::vector<std::unique_ptr<NEO::Device>> neoDevices);
     bool findAllocationDataForRange(const void *buffer,
                                     size_t size,
@@ -136,8 +137,11 @@ struct DriverHandleImp : public DriverHandle {
 
     ze_result_t loadRTASLibrary() override;
     ze_result_t createRTASBuilder(const ze_rtas_builder_exp_desc_t *desc, ze_rtas_builder_exp_handle_t *phBuilder) override;
+    ze_result_t createRTASBuilderExt(const ze_rtas_builder_ext_desc_t *desc, ze_rtas_builder_ext_handle_t *phBuilder) override;
     ze_result_t createRTASParallelOperation(ze_rtas_parallel_operation_exp_handle_t *phParallelOperation) override;
+    ze_result_t createRTASParallelOperationExt(ze_rtas_parallel_operation_ext_handle_t *phParallelOperation) override;
     ze_result_t formatRTASCompatibilityCheck(ze_rtas_format_exp_t rtasFormatA, ze_rtas_format_exp_t rtasFormatB) override;
+    ze_result_t formatRTASCompatibilityCheckExt(ze_rtas_format_ext_t rtasFormatA, ze_rtas_format_ext_t rtasFormatB) override;
 
     std::map<uint64_t, IpcHandleTracking *> &getIPCHandleMap() { return this->ipcHandles; };
     [[nodiscard]] std::unique_lock<std::mutex> lockIPCHandleMap() { return std::unique_lock<std::mutex>(this->ipcHandleMapMutex); };
@@ -171,6 +175,7 @@ struct DriverHandleImp : public DriverHandle {
     NEO::SVMAllocsManager *svmAllocsManager = nullptr;
     NEO::UsmMemAllocPool usmHostMemAllocPool;
     ze_context_handle_t defaultContext = nullptr;
+    std::unique_ptr<NEO::StagingBufferManager> stagingBufferManager;
 
     std::unique_ptr<NEO::OsLibrary> rtasLibraryHandle;
     bool rtasLibraryUnavailable = false;

@@ -31,7 +31,6 @@ struct XeHpgCore {
     static constexpr uint32_t timestampPacketCount = 1u;
 
     static constexpr bool isUsingL3Control = true;
-    static constexpr bool isUsingMediaSamplerDopClockGate = false;
     static constexpr bool supportsSampler = true;
     static constexpr bool isUsingGenericMediaStateClear = true;
     static constexpr bool isUsingMiMemFence = false;
@@ -61,7 +60,6 @@ struct XeHpgCore {
     };
 
     struct PipelineSelectStateSupport {
-        static constexpr bool mediaSamplerDopClockGate = false;
         static constexpr bool systolicMode = true;
     };
 

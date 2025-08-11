@@ -112,6 +112,9 @@ std::string Program::getInternalOptions() const {
     CompilerOptions::concatenateAppend(internalOptions, compilerProductHelper.getCachingPolicyOptions(isDebuggerActive));
     CompilerOptions::applyExtraInternalOptions(internalOptions, hwInfo, compilerProductHelper, NEO::CompilerOptions::HeaplessMode::defaultMode);
 
+    if (pClDevice->getDevice().getExecutionEnvironment()->isOneApiPvcWaEnv() == false) {
+        NEO::CompilerOptions::concatenateAppend(internalOptions, NEO::CompilerOptions::optDisableSendWarWa);
+    }
     return internalOptions;
 }
 
@@ -213,10 +216,10 @@ cl_int Program::createProgramFromBinary(
 
             this->isGeneratedByIgc = singleDeviceBinary.generator == GeneratorType::igc;
             this->indirectDetectionVersion = singleDeviceBinary.generatorFeatureVersions.indirectMemoryAccessDetection;
+            this->indirectAccessBufferMajorVersion = singleDeviceBinary.generatorFeatureVersions.indirectMemoryAccessDetection;
 
-            auto isVmeUsed = containsVmeUsage(this->buildInfos[rootDeviceIndex].kernelInfoArray);
-            bool rebuild = isRebuiltToPatchtokensRequired(&clDevice.getDevice(), archive, this->options, this->isBuiltIn, isVmeUsed) ||
-                           AddressingModeHelper::containsBindlessKernel(decodedSingleDeviceBinary.programInfo.kernelInfos);
+            bool rebuild = AddressingModeHelper::containsBindlessKernel(decodedSingleDeviceBinary.programInfo.kernelInfos);
+            rebuild |= !clDevice.getDevice().getExecutionEnvironment()->isOneApiPvcWaEnv();
 
             bool flagRebuild = debugManager.flags.RebuildPrecompiledKernels.get();
 
@@ -405,10 +408,6 @@ void Program::replaceDeviceBinary(std::unique_ptr<char[]> &&newBinary, size_t ne
         this->buildInfos[rootDeviceIndex].packedDeviceBinarySize = newBinarySize;
         this->buildInfos[rootDeviceIndex].unpackedDeviceBinary.reset();
         this->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = 0U;
-        if (isAnySingleDeviceBinaryFormat(ArrayRef<const uint8_t>(reinterpret_cast<uint8_t *>(this->buildInfos[rootDeviceIndex].packedDeviceBinary.get()), this->buildInfos[rootDeviceIndex].packedDeviceBinarySize))) {
-            this->buildInfos[rootDeviceIndex].unpackedDeviceBinary = makeCopy(buildInfos[rootDeviceIndex].packedDeviceBinary.get(), buildInfos[rootDeviceIndex].packedDeviceBinarySize);
-            this->buildInfos[rootDeviceIndex].unpackedDeviceBinarySize = buildInfos[rootDeviceIndex].packedDeviceBinarySize;
-        }
     } else {
         this->buildInfos[rootDeviceIndex].packedDeviceBinary.reset();
         this->buildInfos[rootDeviceIndex].packedDeviceBinarySize = 0U;
@@ -482,45 +481,6 @@ void Program::setBuildStatusSuccess(const ClDeviceVector &deviceVector, cl_progr
             }
             deviceBuildInfos[subDevice].programBinaryType = binaryType;
         }
-    }
-}
-
-bool Program::containsVmeUsage(const std::vector<KernelInfo *> &kernelInfos) const {
-    for (auto kernelInfo : kernelInfos) {
-        if (kernelInfo->isVmeUsed()) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void Program::disableZebinIfVmeEnabled(std::string &options, std::string &internalOptions, const std::string &sourceCode) {
-
-    const char *vmeOptions[] = {"cl_intel_device_side_advanced_vme_enable",
-                                "cl_intel_device_side_avc_vme_enable",
-                                "cl_intel_device_side_vme_enable"};
-
-    const char *vmeEnabledExtensions[] = {"cl_intel_motion_estimation : enable",
-                                          "cl_intel_device_side_avc_motion_estimation : enable",
-                                          "cl_intel_advanced_motion_estimation : enable"};
-
-    auto containsVme = [](const auto &data, const auto &patterns) {
-        for (const auto &pattern : patterns) {
-            auto pos = data.find(pattern);
-            if (pos != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    if (debugManager.flags.DontDisableZebinIfVmeUsed.get() == true) {
-        return;
-    }
-
-    if (containsVme(options, vmeOptions) || containsVme(sourceCode, vmeEnabledExtensions)) {
-        const auto &rootDevice = getDevices()[0]->getDevice().getRootDevice();
-        rootDevice->getCompilerInterface()->disableZebin(options, internalOptions);
     }
 }
 

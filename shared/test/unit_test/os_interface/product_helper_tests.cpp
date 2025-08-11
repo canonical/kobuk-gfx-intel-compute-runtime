@@ -100,7 +100,7 @@ HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingSharedSystemMemCapabili
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenAskedIfIsBlitSplitEnqueueWARequiredThenReturnFalse) {
 
-    EXPECT_FALSE(productHelper->getBcsSplitSettings().enabled);
+    EXPECT_FALSE(productHelper->getBcsSplitSettings(pInHwInfo).enabled);
 }
 
 HWTEST_F(ProductHelperTest, givenProductHelperWhenGettingMemoryCapabilitiesThenCorrectValueIsReturned) {
@@ -611,7 +611,6 @@ HWTEST_F(ProductHelperTest, WhenFillingPipelineSelectPropertiesSupportThenExpect
     PipelineSelectPropertiesSupport pipelineSelectPropertiesSupport = {};
 
     productHelper->fillPipelineSelectPropertiesSupportStructure(pipelineSelectPropertiesSupport, pInHwInfo);
-    EXPECT_EQ(productHelper->getPipelineSelectPropertyMediaSamplerDopClockGateSupport(), pipelineSelectPropertiesSupport.mediaSamplerDopClockGate);
     EXPECT_EQ(productHelper->isSystolicModeConfigurable(pInHwInfo), pipelineSelectPropertiesSupport.systolicMode);
 }
 
@@ -1238,4 +1237,8 @@ HWTEST2_F(ProductHelperTest, givenProductHelperWhenPidFdOrSocketForIpcIsNotSuppo
 
 HWTEST2_F(ProductHelperTest, givenProductHelperWhenPidFdOrSocketForIpcIsNotSupportedThenFalseReturned, IsAtMostXeCore) {
     EXPECT_FALSE(productHelper->isPidFdOrSocketForIpcSupported());
+}
+
+HWTEST_F(ProductHelperTest, givenProductHelperWhenAskingShouldRegisterEnqueuedWalkerWithProfilingThenFalseReturned) {
+    EXPECT_FALSE(productHelper->shouldRegisterEnqueuedWalkerWithProfiling());
 }

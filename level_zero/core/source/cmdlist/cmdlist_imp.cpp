@@ -20,6 +20,7 @@
 #include "shared/source/os_interface/os_time.h"
 
 #include "level_zero/core/source/cmdqueue/cmdqueue.h"
+#include "level_zero/core/source/device/bcs_split.h"
 #include "level_zero/core/source/device/device.h"
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
@@ -41,7 +42,7 @@ CommandListAllocatorFn commandListFactoryImmediate[IGFX_MAX_PRODUCT] = {};
 
 ze_result_t CommandListImp::destroy() {
     if (this->isBcsSplitNeeded) {
-        static_cast<DeviceImp *>(this->device)->bcsSplit.releaseResources();
+        static_cast<DeviceImp *>(this->device)->bcsSplit->releaseResources();
     }
 
     if (this->cmdQImmediate && !this->isSyncModeQueue) {
@@ -243,7 +244,9 @@ CommandList *CommandList::createImmediate(uint32_t productFamily, Device *device
         commandList->isTbxMode = csr->isTbxMode();
         commandList->commandListPreemptionMode = device->getDevicePreemptionMode();
 
-        commandList->isBcsSplitNeeded = deviceImp->bcsSplit.setupDevice(productFamily, internalUsage, &cmdQdesc, csr);
+        if (!internalUsage) {
+            commandList->isBcsSplitNeeded = deviceImp->bcsSplit->setupDevice(csr);
+        }
 
         commandList->copyThroughLockedPtrEnabled = gfxCoreHelper.copyThroughLockedPtrEnabled(hwInfo, productHelper);
 
@@ -304,7 +307,7 @@ void CommandListImp::setStreamPropertiesDefaultSettings(NEO::StreamProperties &s
     }
 
     streamProperties.frontEndState.setPropertiesDisableOverdispatch(cmdListDefaultDisableOverdispatch, true);
-    streamProperties.pipelineSelect.setPropertiesModeSelectedMediaSamplerClockGate(cmdListDefaultPipelineSelectModeSelected, cmdListDefaultMediaSamplerClockGate, true);
+    streamProperties.pipelineSelect.setPropertiesModeSelected(cmdListDefaultPipelineSelectModeSelected, true);
 }
 
 void CommandListImp::enableInOrderExecution() {
@@ -347,6 +350,16 @@ void CommandListImp::addToMappedEventList(Event *event) {
 void CommandListImp::addRegularCmdListSubmissionCounter() {
     if (isInOrderExecutionEnabled()) {
         inOrderExecInfo->addRegularCmdListSubmissionCounter(1);
+    }
+}
+
+bool CommandListImp::inOrderCmdsPatchingEnabled() const {
+    return (!isImmediateType() && NEO::debugManager.flags.EnableInOrderRegularCmdListPatching.get() == 1);
+}
+
+void CommandListImp::clearInOrderExecCounterAllocation() {
+    if (isInOrderExecutionEnabled()) {
+        inOrderExecInfo->initializeAllocationsFromHost();
     }
 }
 

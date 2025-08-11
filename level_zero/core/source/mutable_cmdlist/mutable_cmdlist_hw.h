@@ -36,9 +36,8 @@ struct MutableAppendLaunchKernelWithParams {
 struct MutableAppendLaunchKernelEvents {
     CommandToPatch signalCmd;
 
-    size_t currentSignalEventDescriptorIndex = std::numeric_limits<size_t>::max();
-
     bool waitEvents = false;
+    bool signalEvent = false;
     bool l3FlushEventSyncCmd = false;
     bool l3FlushEventTimestampSyncCmds = false;
     bool counterBasedEvent = false;
@@ -76,6 +75,11 @@ struct MutableCommandListCoreFamily : public MutableCommandListImp, public Comma
     ze_result_t appendSetPredicate(NEO::MiPredicateType predicateType) override;
     ze_result_t appendMILoadRegVariable(MclAluReg reg, Variable *variable) override;
     ze_result_t appendMIStoreRegVariable(MclAluReg reg, Variable *variable) override;
+    ze_result_t appendMILoadRegImm(MclAluReg reg, uint32_t value) override;
+    ze_result_t appendMILoadRegReg(MclAluReg dstReg, MclAluReg srcReg) override;
+    ze_result_t appendMILoadRegMem(MclAluReg reg, uint64_t address) override;
+    ze_result_t appendMIStoreRegMem(MclAluReg reg, uint64_t address) override;
+    ze_result_t appendMIMath(void *aluArray, size_t aluCount) override;
     void programStateBaseAddressHook(size_t cmdBufferOffset, bool surfaceBaseAddressModify) override;
     void setBufferSurfaceState(void *address, NEO::GraphicsAllocation *alloc, Variable *variable) override;
 
@@ -108,20 +112,17 @@ struct MutableCommandListCoreFamily : public MutableCommandListImp, public Comma
     void storeKernelArgumentAndDispatchVariables(MutableAppendLaunchKernelWithParams &mutableParams,
                                                  CmdListKernelLaunchParams &launchParams,
                                                  Kernel *kernel,
-                                                 MutationVariables *variableDescriptors,
-                                                 ze_mutable_command_exp_flags_t mutableFlags);
+                                                 KernelVariableDescriptor *kernelVariables);
     void storeSignalEventVariable(MutableAppendLaunchKernelEvents &mutableEventParams,
                                   CmdListKernelLaunchParams &launchParams,
-                                  Event *event,
-                                  MutationVariables *variableDescriptors,
-                                  ze_mutable_command_exp_flags_t mutableFlags);
+                                  Event *event);
 
     void captureCounterBasedWaitEventCommands(CommandToPatchContainer::iterator &cmdsIterator,
                                               std::vector<MutableSemaphoreWait *> &variableSemaphoreWaitList,
                                               std::vector<MutableLoadRegisterImm *> &variableLoadRegisterImmList);
     void captureRegularWaitEventCommands(CommandToPatchContainer::iterator &cmdsIterator,
                                          std::vector<MutableSemaphoreWait *> &variableSemaphoreWaitList);
-    void captureCounterBasedTimestampSignalEventCommands(MutableVariableDescriptor &currentMutableSignalEvent,
+    void captureCounterBasedTimestampSignalEventCommands(SignalEventVariableDescriptor &currentMutableSignalEvent,
                                                          std::vector<MutableSemaphoreWait *> &variableSemaphoreWaitList,
                                                          std::vector<MutableStoreDataImm *> &variableStoreDataImmList);
     void captureStandaloneTimestampSignalEventCommands(std::vector<MutableStoreRegisterMem *> &variableStoreRegisterMem);
@@ -138,6 +139,7 @@ struct MutableCommandListCoreFamily : public MutableCommandListImp, public Comma
     void updateCmdListNoopPatchData(size_t noopPatchIndex, void *newCpuPtr, size_t newPatchSize, size_t newOffset) override;
     size_t createNewCmdListNoopPatchData(void *newCpuPtr, size_t newPatchSize, size_t newOffset) override;
     void fillCmdListNoopPatchData(size_t noopPatchIndex, void *&cpuPtr, size_t &patchSize, size_t &offset) override;
+    void disableAddressNoopPatch(size_t noopPatchIndex) override;
     void addKernelIsaMemoryPrefetchPadding(NEO::LinearStream &cmdStream, const Kernel &kernel, uint64_t cmdId) override;
     void addKernelIndirectDataMemoryPrefetchPadding(NEO::LinearStream &cmdStream, const Kernel &kernel, uint64_t cmdId) override;
     uint64_t getPrefetchCmdId() const override;

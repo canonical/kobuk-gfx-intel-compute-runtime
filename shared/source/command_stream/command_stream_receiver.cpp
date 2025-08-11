@@ -599,7 +599,6 @@ void CommandStreamReceiver::initProgrammingFlags() {
     stateComputeModeDirty = true;
 
     lastSentL3Config = 0;
-    lastMediaSamplerConfig = -1;
     lastPreemptionMode = PreemptionMode::Initial;
 
     latestSentStatelessMocsConfig = CacheSettings::unknownMocs;
@@ -1115,6 +1114,10 @@ void CommandStreamReceiver::printTagAddressContent(TaskCountType taskCountToWait
 
 bool CommandStreamReceiver::isTbxMode() const {
     return (getType() == NEO::CommandStreamReceiverType::tbx || getType() == NEO::CommandStreamReceiverType::tbxWithAub);
+}
+
+bool CommandStreamReceiver::isAubMode() const {
+    return (getType() == NEO::CommandStreamReceiverType::aub || getType() == NEO::CommandStreamReceiverType::tbxWithAub || getType() == NEO::CommandStreamReceiverType::hardwareWithAub || getType() == NEO::CommandStreamReceiverType::nullAub);
 }
 
 TaskCountType CompletionStamp::getTaskCountFromSubmissionStatusError(SubmissionStatus status) {

@@ -18,6 +18,7 @@ namespace L0 {
 DriverDispatch globalDriverDispatch;
 
 DriverDispatch::DriverDispatch() {
+    this->core.isValidFlag = true;
     this->core.version = ZE_API_VERSION_1_13;
     this->core.RTASBuilderExp = &this->coreRTASBuilderExp;
     this->core.RTASBuilder = &this->coreRTASBuilder;
@@ -50,6 +51,7 @@ DriverDispatch::DriverDispatch() {
     this->core.FabricVertexExp = &this->coreFabricVertexExp;
     this->core.FabricEdgeExp = &this->coreFabricEdgeExp;
 
+    this->tools.isValidFlag = true;
     this->tools.version = ZE_API_VERSION_1_12;
     this->tools.MetricProgrammableExp = &this->toolsMetricProgrammableExp;
     this->tools.MetricTracerExp = &this->toolsMetricTracerExp;
@@ -70,6 +72,7 @@ DriverDispatch::DriverDispatch() {
     this->tools.TracerExp = &this->toolsTracerExp;
     this->tools.Debug = &this->toolsDebug;
 
+    this->sysman.isValidFlag = true;
     this->sysman.version = ZE_API_VERSION_1_12;
     this->sysman.Global = &this->sysmanGlobal;
     this->sysman.Device = &this->sysmanDevice;
@@ -96,6 +99,11 @@ DriverDispatch::DriverDispatch() {
     this->sysman.Diagnostics = &this->sysmanDiagnostics;
     this->sysman.VFManagementExp = &this->sysmanVFManagementExp;
 
+    this->coreRTASBuilder.pfnCreateExt = L0::zeRTASBuilderCreateExt;
+    this->coreRTASBuilder.pfnGetBuildPropertiesExt = L0::zeRTASBuilderGetBuildPropertiesExt;
+    this->coreRTASBuilder.pfnBuildExt = L0::zeRTASBuilderBuildExt;
+    this->coreRTASBuilder.pfnDestroyExt = L0::zeRTASBuilderDestroyExt;
+    this->coreRTASBuilder.pfnCommandListAppendCopyExt = L0::zeRTASBuilderCommandListAppendCopyExt;
     this->coreRTASBuilderExp.pfnCreateExp = L0::zeRTASBuilderCreateExp;
     this->coreRTASBuilderExp.pfnGetBuildPropertiesExp = L0::zeRTASBuilderGetBuildPropertiesExp;
     this->coreRTASBuilderExp.pfnBuildExp = L0::zeRTASBuilderBuildExp;
@@ -104,6 +112,10 @@ DriverDispatch::DriverDispatch() {
     this->coreRTASParallelOperationExp.pfnGetPropertiesExp = L0::zeRTASParallelOperationGetPropertiesExp;
     this->coreRTASParallelOperationExp.pfnJoinExp = L0::zeRTASParallelOperationJoinExp;
     this->coreRTASParallelOperationExp.pfnDestroyExp = L0::zeRTASParallelOperationDestroyExp;
+    this->coreRTASParallelOperation.pfnCreateExt = L0::zeRTASParallelOperationCreateExt;
+    this->coreRTASParallelOperation.pfnGetPropertiesExt = L0::zeRTASParallelOperationGetPropertiesExt;
+    this->coreRTASParallelOperation.pfnJoinExt = L0::zeRTASParallelOperationJoinExt;
+    this->coreRTASParallelOperation.pfnDestroyExt = L0::zeRTASParallelOperationDestroyExt;
     this->coreGlobal.pfnInit = L0::zeInit;
     this->coreGlobal.pfnInitDrivers = L0::zeInitDrivers;
     this->coreDriver.pfnGet = L0::zeDriverGet;
@@ -306,6 +318,8 @@ DriverDispatch::DriverDispatch() {
     this->toolsDevice.pfnGetDebugProperties = L0::zetDeviceGetDebugProperties;
     this->toolsDeviceExp.pfnGetConcurrentMetricGroupsExp = L0::zetDeviceGetConcurrentMetricGroupsExp;
     this->toolsDeviceExp.pfnCreateMetricGroupsFromMetricsExp = L0::zetDeviceCreateMetricGroupsFromMetricsExp;
+    this->toolsDeviceExp.pfnEnableMetricsExp = L0::zetDeviceEnableMetricsExp;
+    this->toolsDeviceExp.pfnDisableMetricsExp = L0::zetDeviceDisableMetricsExp;
     this->toolsContext.pfnActivateMetricGroups = L0::zetContextActivateMetricGroups;
     this->toolsCommandList.pfnAppendMetricStreamerMarker = L0::zetCommandListAppendMetricStreamerMarker;
     this->toolsCommandList.pfnAppendMetricQueryBegin = L0::zetCommandListAppendMetricQueryBegin;

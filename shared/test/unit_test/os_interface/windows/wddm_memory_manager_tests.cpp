@@ -264,6 +264,16 @@ TEST_F(WddmMemoryManagerTests, givenAllocateGraphicsMemory64kbWhen32bitThenAddre
     memoryManager.freeGraphicsMemory(allocation);
 }
 
+TEST_F(WddmMemoryManagerTests, givenMemoryManagerWith64KBPagesEnabledWhenAllocateGraphicsMemoryWith128kbAlignmentThenGmmObjectHasCorrectAlignment) {
+    MockWddmMemoryManager memoryManager(false, false, *executionEnvironment);
+    AllocationData allocationData;
+    allocationData.size = 4096u;
+    allocationData.alignment = 2 * MemoryConstants::pageSize64k;
+    auto allocation = memoryManager.allocateGraphicsMemory64kb(allocationData);
+
+    EXPECT_EQ(allocation->getDefaultGmm()->resourceParams.BaseAlignment, allocationData.alignment);
+    memoryManager.freeGraphicsMemory(allocation);
+}
 class MockAllocateGraphicsMemoryUsingKmdAndMapItToCpuVAWddm : public MemoryManagerCreate<WddmMemoryManager> {
   public:
     using WddmMemoryManager::adjustGpuPtrToHostAddressSpace;
@@ -730,7 +740,7 @@ class WddmMemoryManagerSimpleTest : public ::testing::Test {
     MockGdi *gdi = nullptr;
 };
 
-TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryWithPropertiesCalledWithDebugSurfaceTypeThenDebugSurfaceIsCreatedAndZerod) {
+TEST_F(WddmMemoryManagerSimpleTest, givenAllocateGraphicsMemoryWithPropertiesCalledWithDebugSurfaceTypeThenDebugSurfaceIsCreatedAndZeroed) {
     DebugManagerStateRestore restorer;
     debugManager.flags.ForcePreferredAllocationMethod.set(static_cast<int32_t>(GfxMemoryAllocationMethod::useUmdSystemPtr));
     AllocationProperties debugSurfaceProperties{0, true, MemoryConstants::pageSize, AllocationType::debugContextSaveArea, false, false, 0b1011};
@@ -1206,9 +1216,8 @@ TEST_F(WddmMemoryManagerSimpleTest, GivenPhysicalDeviceMemoryAndVirtualMemoryThe
     MemoryManager::AllocationStatus status;
     auto allocation = memoryManager->allocatePhysicalLocalDeviceMemory(allocationData, status);
     EXPECT_NE(nullptr, allocation);
-    auto res = memoryManager->mapPhysicalDeviceMemoryToVirtualMemory(allocation, gpuRange, allocationData.size);
-    EXPECT_TRUE(res);
-    memoryManager->unMapPhysicalDeviceMemoryFromVirtualMemory(allocation, gpuRange, allocationData.size, osContext, 0u);
+    EXPECT_TRUE(memoryManager->mapPhysicalDeviceMemoryToVirtualMemory(allocation, gpuRange, allocationData.size));
+    EXPECT_TRUE(memoryManager->unMapPhysicalDeviceMemoryFromVirtualMemory(allocation, gpuRange, allocationData.size, osContext, 0u));
     memoryManager->freeGraphicsMemory(allocation);
 }
 
@@ -1229,9 +1238,8 @@ TEST_F(WddmMemoryManagerSimpleTest, GivenPhysicalHostMemoryAndVirtualMemoryThenM
     rootDeviceIndices.pushUnique(0);
     rootDeviceIndices.pushUnique(1);
     MultiGraphicsAllocation multiGraphicsAllocations{2};
-    auto res = memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocations, allocation, gpuRange, allocationData.size);
-    EXPECT_FALSE(res);
-    memoryManager->unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocations, allocation, gpuRange, allocationData.size);
+    EXPECT_FALSE(memoryManager->mapPhysicalHostMemoryToVirtualMemory(rootDeviceIndices, multiGraphicsAllocations, allocation, gpuRange, allocationData.size));
+    EXPECT_TRUE(memoryManager->unMapPhysicalHostMemoryFromVirtualMemory(multiGraphicsAllocations, allocation, gpuRange, allocationData.size));
 }
 
 TEST_F(WddmMemoryManagerSimpleTest, givenZeroFenceValueOnSingleEngineRegisteredWhenHandleFenceCompletionIsCalledThenDoNotWaitOnCpu) {
@@ -4542,6 +4550,29 @@ TEST_F(WddmMemoryManagerBindlessHeapHelperCustomHeapAllocatorCfgTest, givenCusto
     EXPECT_LE(allocationSize, allocation->getUnderlyingBufferSize());
     EXPECT_NE(nullptr, allocation->getUnderlyingBuffer());
     EXPECT_TRUE(allocation->isAllocInFrontWindowPool());
+
+    memoryManager->freeGraphicsMemory(allocation);
+}
+
+TEST_F(WddmMemoryManagerSimpleTest, givenPhysicalDeviceMemoryAndVirtualMemoryThenUnmapFails) {
+    AllocationData allocationData;
+    allocationData.size = MemoryConstants::pageSize64k;
+    uint64_t gpuRange = 0x1234;
+    MemoryManager::AllocationStatus status;
+    auto allocation = memoryManager->allocatePhysicalLocalDeviceMemory(allocationData, status);
+    EXPECT_NE(nullptr, allocation);
+    EXPECT_TRUE(memoryManager->mapPhysicalDeviceMemoryToVirtualMemory(allocation, gpuRange, allocationData.size));
+
+    // Set the mock WDDM to return an error for reserveGpuVirtualAddress in the unMapPhysicalDeviceMemoryFromVirtualMemory call.
+    wddm->failReserveGpuVirtualAddress = true;
+    EXPECT_FALSE(memoryManager->unMapPhysicalDeviceMemoryFromVirtualMemory(allocation, gpuRange, allocationData.size, osContext, 0u));
+    wddm->failReserveGpuVirtualAddress = false;
+
+    // Complete the cleanup that was skipped in unMapPhysicalDeviceMemoryFromVirtualMemory.
+    allocation->setCpuPtrAndGpuAddress(nullptr, 0u);
+    allocation->setReservedAddressRange(nullptr, 0u);
+    WddmAllocation *wddmAllocation = reinterpret_cast<WddmAllocation *>(allocation);
+    wddmAllocation->setMappedPhysicalMemoryReservation(false);
 
     memoryManager->freeGraphicsMemory(allocation);
 }

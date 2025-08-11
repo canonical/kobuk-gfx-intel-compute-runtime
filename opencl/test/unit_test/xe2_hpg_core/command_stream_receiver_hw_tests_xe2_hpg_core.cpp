@@ -554,8 +554,6 @@ XE2_HPG_CORETEST_F(Xe2CommandStreamReceiverFlushTaskTests, givenNotExistPolicyWh
 XE2_HPG_CORETEST_F(Xe2CommandStreamReceiverFlushTaskTests, givenLastSystolicPipelineSelectModeWhenFlushTaskIsCalledThenDontReprogramPipelineSelect) {
     auto &commandStreamReceiver = pDevice->getUltCommandStreamReceiver<FamilyType>();
     commandStreamReceiver.isPreambleSent = true;
-    commandStreamReceiver.lastMediaSamplerConfig = false;
-    flushTaskFlags.pipelineSelectArgs.mediaSamplerRequired = false;
     flushTaskFlags.pipelineSelectArgs.systolicPipelineSelectMode = true;
 
     flushTask(commandStreamReceiver);
@@ -689,8 +687,7 @@ XE2_HPG_CORETEST_F(Xe2BcsTests, givenCompressibleDstBuffersWhenAppendBlitCommand
     const auto &rootDeviceEnvironment = context->getDevice(0)->getRootDeviceEnvironment();
     BlitCommandsHelper<FamilyType>::appendBlitCommandsForBuffer(blitProperties, *bltCmd, rootDeviceEnvironment);
 
-    auto resourceFormat = srcAllocation->getDefaultGmm()->gmmResourceInfo->getResourceFormat();
-    auto compressionFormat = rootDeviceEnvironment.getGmmClientContext()->getSurfaceStateCompressionFormat(resourceFormat);
+    auto compressionFormat = 2;
 
     EXPECT_EQ(compressionFormat, bltCmd->getCompressionFormat());
 }
@@ -723,8 +720,7 @@ XE2_HPG_CORETEST_F(Xe2BcsTests, givenCompressibleSrcBuffersWhenAppendBlitCommand
     const auto &rootDeviceEnvironment = context->getDevice(0)->getRootDeviceEnvironment();
     BlitCommandsHelper<FamilyType>::appendBlitCommandsForBuffer(blitProperties, *bltCmd, rootDeviceEnvironment);
 
-    auto resourceFormat = srcAllocation->getDefaultGmm()->gmmResourceInfo->getResourceFormat();
-    auto compressionFormat = rootDeviceEnvironment.getGmmClientContext()->getSurfaceStateCompressionFormat(resourceFormat);
+    auto compressionFormat = 2;
 
     EXPECT_EQ(compressionFormat, bltCmd->getCompressionFormat());
 }

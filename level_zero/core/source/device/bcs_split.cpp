@@ -9,17 +9,19 @@
 
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
+#include "shared/source/helpers/hw_info.h"
 #include "shared/source/os_interface/os_context.h"
 
 #include "level_zero/core/source/device/device_imp.h"
 #include "level_zero/core/source/driver/driver_handle.h"
+#include "level_zero/core/source/gfx_core_helpers/l0_gfx_core_helper.h"
 #include "level_zero/driver_experimental/zex_api.h"
 
 namespace L0 {
 
-bool BcsSplit::setupDevice(uint32_t productFamily, bool internalUsage, const ze_command_queue_desc_t *desc, NEO::CommandStreamReceiver *csr) {
+bool BcsSplit::setupDevice(NEO::CommandStreamReceiver *csr) {
     auto &productHelper = this->device.getProductHelper();
-    auto bcsSplitSettings = productHelper.getBcsSplitSettings();
+    auto bcsSplitSettings = productHelper.getBcsSplitSettings(this->device.getHwInfo());
 
     if (NEO::debugManager.flags.SplitBcsRequiredTileCount.get() != -1) {
         bcsSplitSettings.requiredTileCount = static_cast<uint32_t>(NEO::debugManager.flags.SplitBcsRequiredTileCount.get());
@@ -30,7 +32,7 @@ bool BcsSplit::setupDevice(uint32_t productFamily, bool internalUsage, const ze_
 
     auto initializeBcsSplit = this->device.getNEODevice()->isBcsSplitSupported() &&
                               (csr->getOsContext().getEngineType() == productHelper.getDefaultCopyEngine()) &&
-                              !internalUsage && tileCountMatch;
+                              tileCountMatch;
 
     if (!initializeBcsSplit) {
         return false;
@@ -44,12 +46,18 @@ bool BcsSplit::setupDevice(uint32_t productFamily, bool internalUsage, const ze_
         return true;
     }
 
+    events.aggregatedEventsMode = device.getL0GfxCoreHelper().bcsSplitAggregatedModeEnabled();
+
+    if (NEO::debugManager.flags.SplitBcsAggregatedEventsMode.get() != -1) {
+        events.aggregatedEventsMode = !!NEO::debugManager.flags.SplitBcsAggregatedEventsMode.get();
+    }
+
     setupEnginesMask(bcsSplitSettings);
 
-    return setupQueues(bcsSplitSettings, productFamily);
+    return setupQueues(bcsSplitSettings);
 }
 
-bool BcsSplit::setupQueues(const NEO::BcsSplitSettings &settings, uint32_t productFamily) {
+bool BcsSplit::setupQueues(const NEO::BcsSplitSettings &settings) {
     CsrContainer csrs;
 
     for (uint32_t tileId = 0; tileId < settings.requiredTileCount; tileId++) {
@@ -63,6 +71,10 @@ bool BcsSplit::setupQueues(const NEO::BcsSplitSettings &settings, uint32_t produ
                     csrs.push_back(engine->commandStreamReceiver);
                 }
             }
+
+            if (csrs.size() >= settings.minRequiredTotalCsrCount) {
+                break;
+            }
         }
     }
 
@@ -71,6 +83,7 @@ bool BcsSplit::setupQueues(const NEO::BcsSplitSettings &settings, uint32_t produ
     }
 
     const ze_command_queue_desc_t splitDesc = {.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC, .mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS};
+    auto productFamily = this->device.getHwInfo().platform.eProductFamily;
 
     for (const auto &csr : csrs) {
         ze_result_t result;
@@ -133,12 +146,6 @@ std::vector<CommandQueue *> &BcsSplit::getCmdQsForSplit(NEO::TransferDirection d
 
     return this->cmdQs;
 }
-
-BcsSplit::Events::Events(BcsSplit &bcsSplit) : bcsSplit(bcsSplit) {
-    if (NEO::debugManager.flags.SplitBcsAggregatedEventsMode.get() != -1) {
-        aggregatedEventsMode = !!NEO::debugManager.flags.SplitBcsAggregatedEventsMode.get();
-    }
-};
 
 size_t BcsSplit::Events::obtainAggregatedEventsForSplit(Context *context) {
     for (size_t i = 0; i < this->marker.size(); i++) {

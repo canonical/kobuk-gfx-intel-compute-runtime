@@ -42,6 +42,9 @@ class Surface;
 class PrintfHandler;
 class MultiDeviceKernel;
 class LocalIdsCache;
+class ExecutionEnvironment;
+class GfxCoreHelper;
+struct HardwareInfo;
 
 class Kernel : public ReferenceTrackedObject<Kernel>, NEO::NonCopyableAndNonMovableClass {
   public:
@@ -72,6 +75,7 @@ class Kernel : public ReferenceTrackedObject<Kernel>, NEO::NonCopyableAndNonMova
         bool isPatched = false;
         bool isStatelessUncacheable = false;
         bool isSetToNullptr = false;
+        bool isImageFromBuffer = false;
     };
 
     typedef int32_t (Kernel::*KernelArgHandler)(uint32_t argIndex,
@@ -248,10 +252,6 @@ class Kernel : public ReferenceTrackedObject<Kernel>, NEO::NonCopyableAndNonMova
                          size_t argSize,
                          const void *argVal);
 
-    cl_int setArgAccelerator(uint32_t argIndex,
-                             size_t argSize,
-                             const void *argVal);
-
     void storeKernelArg(uint32_t argIndex,
                         KernelArgType argType,
                         void *argObject,
@@ -264,7 +264,6 @@ class Kernel : public ReferenceTrackedObject<Kernel>, NEO::NonCopyableAndNonMova
     const SimpleKernelArgInfo &getKernelArgInfo(uint32_t argIndex) const;
 
     bool getAllowNonUniform() const;
-    bool isVmeKernel() const { return kernelInfo.kernelDescriptor.kernelAttributes.flags.usesVme; }
     bool requiresSystolicPipelineSelectMode() const { return systolicPipelineSelectMode; }
 
     MOCKABLE_VIRTUAL bool isSingleSubdevicePreferred() const;
@@ -276,6 +275,7 @@ class Kernel : public ReferenceTrackedObject<Kernel>, NEO::NonCopyableAndNonMova
     void resetSharedObjectsPatchAddresses();
     bool isUsingSharedObjArgs() const { return usingSharedObjArgs; }
     bool hasUncacheableStatelessArgs() const { return statelessUncacheableArgsCount > 0; }
+    bool hasImageFromBufferArgs() const { return imageFromBufferArgsCount > 0; }
 
     bool hasPrintfOutput() const;
 
@@ -460,6 +460,7 @@ class Kernel : public ReferenceTrackedObject<Kernel>, NEO::NonCopyableAndNonMova
     uint32_t patchedArgumentsNum = 0;
     uint32_t startOffset = 0;
     uint32_t statelessUncacheableArgsCount = 0;
+    uint32_t imageFromBufferArgsCount = 0;
     uint32_t additionalKernelExecInfo = AdditionalKernelExecInfo::disableOverdispatch;
     uint32_t maxKernelWorkGroupSize = 0;
     uint32_t slmTotalSize = 0u;

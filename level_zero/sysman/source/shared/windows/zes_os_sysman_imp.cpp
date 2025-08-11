@@ -53,7 +53,6 @@ ze_result_t WddmSysmanImp::init() {
     }
 
     pPmt = PlatformMonitoringTech::create(pSysmanProductHelper.get());
-
     return ZE_RESULT_SUCCESS;
 }
 
@@ -188,6 +187,14 @@ bool WddmSysmanImp::generateUuidFromPciBusInfo(const NEO::PhysicalDevicePciBusIn
         return true;
     }
 
+    return false;
+}
+
+ze_result_t WddmSysmanImp::initSurvivabilityMode(std::unique_ptr<NEO::HwDeviceId> hwDeviceId) {
+    return ZE_RESULT_ERROR_UNINITIALIZED;
+}
+
+bool WddmSysmanImp::isDeviceInSurvivabilityMode() {
     return false;
 }
 

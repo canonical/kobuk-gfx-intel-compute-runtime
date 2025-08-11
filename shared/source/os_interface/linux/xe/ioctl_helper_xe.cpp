@@ -10,6 +10,7 @@
 #include "shared/source/debugger/debugger.h"
 #include "shared/source/execution_environment/execution_environment.h"
 #include "shared/source/execution_environment/root_device_environment.h"
+#include "shared/source/gmm_helper/client_context/gmm_client_context.h"
 #include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/aligned_memory.h"
 #include "shared/source/helpers/basic_math.h"
@@ -300,10 +301,6 @@ std::vector<DataType> IoctlHelperXe::queryData(uint32_t queryId) {
 template std::vector<uint8_t> IoctlHelperXe::queryData(uint32_t queryId);
 template std::vector<uint64_t> IoctlHelperXe::queryData(uint32_t queryId);
 
-uint32_t IoctlHelperXe::getNumEngines(uint64_t *enginesData) const {
-    return reinterpret_cast<struct drm_xe_query_engines *>(enginesData)->num_engines;
-}
-
 std::unique_ptr<EngineInfo> IoctlHelperXe::createEngineInfo(bool isSysmanEnabled) {
     auto enginesData = queryData<uint64_t>(DRM_XE_DEVICE_QUERY_ENGINES);
 
@@ -313,7 +310,7 @@ std::unique_ptr<EngineInfo> IoctlHelperXe::createEngineInfo(bool isSysmanEnabled
 
     auto queryEngines = reinterpret_cast<struct drm_xe_query_engines *>(enginesData.data());
 
-    auto numberHwEngines = getNumEngines(enginesData.data());
+    const auto numberHwEngines = queryEngines->num_engines;
 
     xeLog("numberHwEngines=%d\n", numberHwEngines);
 
@@ -1315,6 +1312,7 @@ int IoctlHelperXe::ioctl(DrmIoctl request, void *arg) {
         GemMmapOffset *d = static_cast<GemMmapOffset *>(arg);
         struct drm_xe_gem_mmap_offset mmo = {};
         mmo.handle = d->handle;
+        mmo.flags = static_cast<uint32_t>(d->flags);
         ret = IoctlHelper::ioctl(request, &mmo);
         d->offset = mmo.offset;
         xeLog(" -> IoctlHelperXe::ioctl GemMmapOffset h=0x%x o=0x%x f=0x%x r=%d\n",
@@ -1471,7 +1469,14 @@ int IoctlHelperXe::xeVmBind(const VmBindParams &vmBindParams, bool isBind) {
 
     bind.bind.range = vmBindParams.length;
     bind.bind.obj_offset = vmBindParams.offset;
-    bind.bind.pat_index = static_cast<uint16_t>(vmBindParams.patIndex);
+    if (isBind) {
+        bind.bind.pat_index = static_cast<uint16_t>(vmBindParams.patIndex);
+    } else {
+        GMM_RESOURCE_USAGE_TYPE usageType = GMM_RESOURCE_USAGE_OCL_BUFFER;
+        bool compressed = false;
+        bool cachable = false;
+        bind.bind.pat_index = static_cast<uint16_t>(drm.getRootDeviceEnvironment().getGmmClientContext()->cachePolicyGetPATIndex(nullptr, usageType, compressed, cachable));
+    }
     bind.bind.extensions = vmBindParams.extensions;
     bind.bind.flags = static_cast<uint32_t>(vmBindParams.flags);
 
@@ -1900,6 +1905,45 @@ std::string IoctlHelperXe::getIoctlString(DrmIoctl ioctlRequest) const {
     default:
         return "???";
     }
+}
+
+void *IoctlHelperXe::pciBarrierMmap() {
+    GemMmapOffset mmapOffset = {};
+    mmapOffset.flags = DRM_XE_MMAP_OFFSET_FLAG_PCI_BARRIER;
+    auto ret = ioctl(DrmIoctl::gemMmapOffset, &mmapOffset);
+    if (ret != 0) {
+        return MAP_FAILED;
+    }
+
+    return SysCalls::mmap(NULL, MemoryConstants::pageSize, PROT_WRITE, MAP_SHARED, drm.getFileDescriptor(), static_cast<off_t>(mmapOffset.offset));
+}
+
+bool IoctlHelperXe::retrieveMmapOffsetForBufferObject(BufferObject &bo, uint64_t flags, uint64_t &offset) {
+    GemMmapOffset mmapOffset = {};
+    mmapOffset.handle = bo.peekHandle();
+
+    auto &rootDeviceEnvironment = drm.getRootDeviceEnvironment();
+    auto memoryManager = rootDeviceEnvironment.executionEnvironment.memoryManager.get();
+
+    auto ret = ioctl(DrmIoctl::gemMmapOffset, &mmapOffset);
+    if (ret != 0 && memoryManager->isLocalMemorySupported(bo.getRootDeviceIndex())) {
+        mmapOffset.flags = flags;
+        ret = ioctl(DrmIoctl::gemMmapOffset, &mmapOffset);
+    }
+    if (ret != 0) {
+        int err = drm.getErrno();
+
+        CREATE_DEBUG_STRING(str, "ioctl(%s) failed with %d. errno=%d(%s)\n",
+                            getIoctlString(DrmIoctl::gemMmapOffset).c_str(), ret, err, strerror(err));
+        drm.getRootDeviceEnvironment().executionEnvironment.setErrorDescription(std::string(str.get()));
+        PRINT_DEBUG_STRING(debugManager.flags.PrintDebugMessages.get(), stderr, str.get());
+        DEBUG_BREAK_IF(true);
+
+        return false;
+    }
+
+    offset = mmapOffset.offset;
+    return true;
 }
 
 } // namespace NEO

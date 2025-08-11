@@ -274,7 +274,6 @@ HWTEST_F(CommandListExecuteImmediate, GivenImmediateCommandListWhenCommandListIs
     EXPECT_EQ(-1, currentCsrStreamProperties.frontEndState.singleSliceDispatchCcsMode.value);
 
     EXPECT_EQ(-1, currentCsrStreamProperties.pipelineSelect.modeSelected.value);
-    EXPECT_EQ(-1, currentCsrStreamProperties.pipelineSelect.mediaSamplerDopClockGate.value);
 }
 
 struct CommandListTest : Test<DeviceFixture> {
@@ -1103,6 +1102,22 @@ TEST(CommandList, WhenConsumeTextureCacheFlushPendingThenReturnsCurrentValueAndC
         cmdList.setTextureCacheFlushPending(true);
         EXPECT_TRUE(cmdList.consumeTextureCacheFlushPending());
         EXPECT_FALSE(cmdList.isTextureCacheFlushPending());
+    }
+}
+
+TEST(CommandList, givenNullEventWhenRegisterWalkerWithProfilingEnqueuedThenReturnFalse) {
+    MockCommandList cmdlist;
+
+    {
+        cmdlist.shouldRegisterEnqueuedWalkerWithProfiling = false;
+        cmdlist.registerWalkerWithProfilingEnqueued(nullptr);
+        EXPECT_FALSE(cmdlist.isWalkerWithProfilingEnqueued);
+    }
+
+    {
+        cmdlist.shouldRegisterEnqueuedWalkerWithProfiling = true;
+        cmdlist.registerWalkerWithProfilingEnqueued(nullptr);
+        EXPECT_FALSE(cmdlist.isWalkerWithProfilingEnqueued);
     }
 }
 

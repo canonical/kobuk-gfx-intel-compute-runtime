@@ -326,7 +326,8 @@ ze_result_t ModuleTranslationUnit::createFromNativeBinary(const char *input, siz
         this->isGeneratedByIgc = singleDeviceBinary.generator == NEO::GeneratorType::igc;
 
         bool rebuild = NEO::debugManager.flags.RebuildPrecompiledKernels.get() && irBinarySize != 0;
-        rebuild |= NEO::isRebuiltToPatchtokensRequired(device->getNEODevice(), archive, this->options, this->isBuiltIn, false);
+        rebuild |= !device->getNEODevice()->getExecutionEnvironment()->isOneApiPvcWaEnv();
+
         if (rebuild && irBinarySize == 0) {
             driverHandle->clearErrorDescription();
             return ZE_RESULT_ERROR_INVALID_NATIVE_BINARY;
@@ -927,6 +928,9 @@ void ModuleImp::createBuildOptions(const char *pBuildFlags, std::string &apiOpti
         this->isFunctionSymbolExportEnabled = moveBuildOption(apiOptions, apiOptions, BuildOptions::enableLibraryCompile, BuildOptions::enableLibraryCompile);
         this->isGlobalSymbolExportEnabled = moveBuildOption(apiOptions, apiOptions, BuildOptions::enableGlobalVariableSymbols, BuildOptions::enableGlobalVariableSymbols);
 
+        if (getDevice()->getNEODevice()->getExecutionEnvironment()->isOneApiPvcWaEnv() == false) {
+            NEO::CompilerOptions::concatenateAppend(internalBuildOptions, NEO::CompilerOptions::optDisableSendWarWa);
+        }
         createBuildExtraOptions(apiOptions, internalBuildOptions);
     }
     if (NEO::ApiSpecificConfig::getBindlessMode(*device->getNEODevice())) {

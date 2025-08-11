@@ -31,33 +31,24 @@
 #include "level_zero/core/source/mutable_cmdlist/usage.h"
 #include "level_zero/core/source/mutable_cmdlist/variable_dispatch.h"
 
+#include "implicit_args.h"
+
 namespace L0::MCL {
 using State = VariableDescriptor::State;
 
-Variable::Variable(MutableCommandList *cmdList, const std::string &varName) {
+Variable::Variable(MutableCommandList *cmdList) {
     this->cmdList = cmdList;
     this->desc = {};
-    desc.name = varName;
 }
 
 Variable *Variable::create(ze_command_list_handle_t hCmdList, const InterfaceVariableDescriptor *ifaceVarDesc) {
-    std::string varName = ifaceVarDesc->name == nullptr ? "" : std::string(ifaceVarDesc->name);
-
-    auto var = new Variable(MutableCommandList::fromHandle(hCmdList), varName);
+    auto var = new Variable(MutableCommandList::fromHandle(hCmdList));
     auto &desc = var->getDesc();
 
     desc.isStageCommit = ifaceVarDesc->isStageCommit;
     desc.immediateValueChunks = ifaceVarDesc->immediateValueChunks;
 
-    if (ifaceVarDesc->isTemporary) {
-        desc.isTemporary = true;
-        if (ifaceVarDesc->isConstSize) {
-            desc.size = ifaceVarDesc->size;
-        } else if (ifaceVarDesc->isScalable) {
-            desc.isScalable = true;
-            desc.eleSize = ifaceVarDesc->size;
-        }
-    }
+    var->setDescExperimentalValues(ifaceVarDesc);
 
     return var;
 }
@@ -212,25 +203,9 @@ ze_result_t Variable::addKernelArgUsage(const NEO::ArgDescriptor &kernelArg, Ind
             }
         }
 
-        if (sshOffset != undefined<SurfaceStateHeapOffset>) {
-            if (NEO::isValidOffset(arg.bufferOffset)) {
-                if (NEO::isValidOffset(arg.bindful)) {
-                    bufferUsages.bindful.push_back(sshOffset + arg.bindful);
-                } else if (NEO::isValidOffset(arg.bindless)) {
-                    bufferUsages.bindless.push_back(iohOffset + arg.bindless);
-                } else {
-                    return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-                }
-                bufferUsages.bufferOffset.push_back(iohOffset + arg.bufferOffset);
-            } else {
-                if (NEO::isValidOffset(arg.bindful)) {
-                    bufferUsages.bindfulWithoutOffset.push_back(sshOffset + arg.bindful);
-                } else if (NEO::isValidOffset(arg.bindless)) {
-                    bufferUsages.bindlessWithoutOffset.push_back(iohOffset + arg.bindless);
-                } else {
-                    return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-                }
-            }
+        auto ret = addKernelArgUsageStatefulBuffer(kernelArg, iohOffset, sshOffset);
+        if (ret != ZE_RESULT_SUCCESS) {
+            return ret;
         }
 
         desc.size = sizeof(void *);
@@ -446,7 +421,7 @@ ze_result_t Variable::setBufferVariable(size_t size, const void *argVal) {
     }
 
     if (argValue != nullptr) {
-        cmdList->setBufferSurfaceState(reinterpret_cast<void *>(gpuAddress), newBufferAlloc, this);
+        mutateStatefulBufferArg(gpuAddress, newBufferAlloc);
         desc.state = State::initialized;
     }
     updateAllocationResidency(oldBufferAlloc, newBufferAlloc);

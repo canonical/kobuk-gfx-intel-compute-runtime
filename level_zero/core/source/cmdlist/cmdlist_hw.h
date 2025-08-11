@@ -134,8 +134,8 @@ struct CommandListCoreFamily : public CommandListImp {
                                                 const ze_group_count_t groupCounts,
                                                 const ze_group_size_t groupSizes,
 
-                                                void **pArguments,
-                                                void *pNext,
+                                                const void **pArguments,
+                                                const void *pNext,
                                                 ze_event_handle_t hSignalEvent,
                                                 uint32_t numWaitEvents,
                                                 ze_event_handle_t *phWaitEvents) override;
@@ -170,11 +170,6 @@ struct CommandListCoreFamily : public CommandListImp {
                                  uint32_t numWaitEvents,
                                  ze_event_handle_t *phWaitEvents, CmdListMemoryCopyParams &memoryCopyParams) override;
 
-    ze_result_t appendMILoadRegImm(uint32_t reg, uint32_t value, bool isBcs) override;
-    ze_result_t appendMILoadRegReg(uint32_t reg1, uint32_t reg2) override;
-    ze_result_t appendMILoadRegMem(uint32_t reg1, uint64_t address) override;
-    ze_result_t appendMIStoreRegMem(uint32_t reg1, uint64_t address) override;
-    ze_result_t appendMIMath(void *aluArray, size_t aluCount) override;
     ze_result_t appendMIBBStart(uint64_t address, size_t predication, bool secondLevel) override;
     ze_result_t appendMIBBEnd() override;
     ze_result_t appendMINoop() override;
@@ -309,6 +304,7 @@ struct CommandListCoreFamily : public CommandListImp {
     void appendWaitOnSingleEvent(Event *event, CommandToPatchContainer *outWaitCmds, bool relaxedOrderingAllowed, bool dualStreamCopyOffload, CommandToPatch::CommandType storedSemaphore);
 
     void appendSdiInOrderCounterSignalling(uint64_t baseGpuVa, uint64_t signalValue, bool copyOffloadOperation);
+    void appendSignalAggregatedEventAtomic(Event &event);
 
     ze_result_t prepareIndirectParams(const ze_group_count_t *threadGroupDimensions);
     void updateStreamPropertiesForRegularCommandLists(Kernel &kernel, bool isCooperative, const ze_group_count_t &threadGroupDimensions, bool isIndirect);
@@ -319,7 +315,8 @@ struct CommandListCoreFamily : public CommandListImp {
 
     size_t getTotalSizeForCopyRegion(const ze_copy_region_t *region, uint32_t pitch, uint32_t slicePitch);
     bool isAppendSplitNeeded(void *dstPtr, const void *srcPtr, size_t size, NEO::TransferDirection &directionOut);
-    bool isAppendSplitNeeded(NEO::MemoryPool dstPool, NEO::MemoryPool srcPool, size_t size, NEO::TransferDirection &directionOut);
+    bool isAppendSplitNeeded(NEO::MemoryPool dstPool, NEO::MemoryPool srcPool, size_t size, NEO::TransferDirection &directionOut, bool remoteCopy);
+    bool isAppendSplitRemote(NEO::SvmAllocationData *allocData, void *ptr) const;
 
     void applyMemoryRangesBarrier(uint32_t numRanges, const size_t *pRangeSizes,
                                   const void **pRanges);
@@ -420,6 +417,7 @@ struct CommandListCoreFamily : public CommandListImp {
     virtual uint64_t getPrefetchCmdId() const { return std::numeric_limits<uint64_t>::max(); }
     virtual uint32_t getIohSizeForPrefetch(const Kernel &kernel, uint32_t reserveExtraSpace) const;
     virtual void ensureCmdBufferSpaceForPrefetch() {}
+    bool transferDirectionRequiresBcsSplit(NEO::TransferDirection direction) const;
 
     NEO::InOrderPatchCommandsContainer<GfxFamily> inOrderPatchCmds;
 

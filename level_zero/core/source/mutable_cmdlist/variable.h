@@ -45,6 +45,7 @@ struct InterfaceVariableDescriptor {
     bool isConstSize = false;
     bool isStageCommit = false;
     bool immediateValueChunks = false;
+    bool api = false;
 };
 
 enum VariableType : uint8_t {
@@ -84,12 +85,13 @@ struct VariableDescriptor {
     bool isStageCommit = false;
     bool commitRequired = false;
     bool immediateValueChunks = false;
+    bool apiVariable = false;
 };
 
 struct Variable : public VariableHandle {
     static constexpr uint32_t directFlag = 0x1U;
     Variable() = delete;
-    Variable(MutableCommandList *mcl, const std::string &name);
+    Variable(MutableCommandList *mcl);
 
     static Variable *create(ze_command_list_handle_t hCmdList, const InterfaceVariableDescriptor *ifaceVarDesc);
     static Variable *fromHandle(VariableHandle *handle) { return static_cast<Variable *>(handle); }
@@ -211,6 +213,9 @@ struct Variable : public VariableHandle {
         kernelDispatch.globalOffset[1] = globalOffset[1];
         kernelDispatch.globalOffset[2] = globalOffset[2];
     }
+    inline MutableCommandList *getCmdList() const {
+        return cmdList;
+    }
 
   protected:
     struct ImmediateValueChunkProperties {
@@ -259,7 +264,9 @@ struct Variable : public VariableHandle {
         uint32_t globalOffset[3] = {undefined<uint32_t>, undefined<uint32_t>, undefined<uint32_t>};
     };
 
+    void setDescExperimentalValues(const InterfaceVariableDescriptor *ifaceVarDesc);
     bool hasKernelArgCorrectType(const NEO::ArgDescriptor &arg);
+    void mutateStatefulBufferArg(GpuAddress bufferGpuAddress, NEO::GraphicsAllocation *bufferAllocation);
 
     ze_result_t setBufferVariable(size_t size, const void *argVal);
     ze_result_t setValueVariable(size_t size, const void *argVal);
@@ -276,6 +283,7 @@ struct Variable : public VariableHandle {
                                                   CommandBufferOffset walkerCmdOffset, MutableComputeWalker *mutableComputeWalker, bool inlineData);
     ze_result_t addKernelArgUsageImmediateAsContinuous(const NEO::ArgDescriptor &kernelArg, IndirectObjectHeapOffset iohOffset, IndirectObjectHeapOffset iohFullOffset,
                                                        CommandBufferOffset walkerCmdOffset, MutableComputeWalker *mutableComputeWalker, bool inlineData);
+    ze_result_t addKernelArgUsageStatefulBuffer(const NEO::ArgDescriptor &kernelArg, IndirectObjectHeapOffset iohOffset, SurfaceStateHeapOffset sshOffset);
     void handleFlags(uint32_t flags);
     ze_result_t selectImmediateSetValueHandler(size_t size, const void *argVal);
     ze_result_t selectImmediateAddKernelArgUsageHandler(const NEO::ArgDescriptor &kernelArg, IndirectObjectHeapOffset iohOffset, IndirectObjectHeapOffset iohFullOffset,

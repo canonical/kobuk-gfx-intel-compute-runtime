@@ -13,10 +13,12 @@
 #include "shared/source/helpers/basic_math.h"
 #include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/helpers/hw_info.h"
+#include "shared/source/helpers/in_order_cmd_helpers.h"
 #include "shared/source/memory_manager/internal_allocation_storage.h"
 #include "shared/source/memory_manager/memory_operations_handler.h"
 #include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/os_time.h"
+#include "shared/source/utilities/staging_buffer_manager.h"
 #include "shared/source/utilities/wait_util.h"
 
 #include "level_zero/core/source/device/device.h"
@@ -386,6 +388,7 @@ void EventImp<TagSizeT>::handleSuccessfulHostSynchronization() {
     }
 
     releaseTempInOrderTimestampNodes();
+    device->getDriverHandle()->getStagingBufferManager()->resetDetectedPtrs();
 }
 
 template <typename TagSizeT>
@@ -741,10 +744,15 @@ ze_result_t EventImp<TagSizeT>::hostSynchronize(uint64_t timeout) {
 
     TaskCountType taskCountToWaitForL3Flush = 0;
     auto &hwInfo = this->device->getHwInfo();
-    if (((this->isCounterBased() && !this->inOrderTimestampNode.empty()) || this->mitigateHostVisibleSignal) && this->device->getProductHelper().isDcFlushAllowed() && !this->device->getCompilerProductHelper().isHeaplessModeEnabled(hwInfo)) {
+    auto isHeaplessModeDisabled = !this->device->getCompilerProductHelper().isHeaplessModeEnabled(hwInfo);
+    auto isDcFlushAllowed = this->device->getProductHelper().isDcFlushAllowed();
+    auto isFlushForOptimizedBarrierRequired = isDcFlushAllowed && this->isEventOnBarrierOptimized;
+    if ((((this->isCounterBased() && !this->inOrderTimestampNode.empty()) || this->mitigateHostVisibleSignal) && isDcFlushAllowed && isHeaplessModeDisabled) ||
+        isFlushForOptimizedBarrierRequired) {
         auto lock = this->csrs[0]->obtainUniqueOwnership();
         this->csrs[0]->flushTagUpdate();
         taskCountToWaitForL3Flush = this->csrs[0]->peekLatestFlushedTaskCount();
+        this->setEventOnBarrierOptimized(false);
     }
 
     waitStartTime = std::chrono::high_resolution_clock::now();

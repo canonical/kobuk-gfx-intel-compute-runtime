@@ -24,6 +24,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/default_hw_info.h"
 #include "shared/test/common/helpers/raii_product_helper.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/helpers/ult_hw_config.h"
 #include "shared/test/common/helpers/variable_backup.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
@@ -42,6 +43,7 @@
 #include "shared/test/common/mocks/ult_device_factory.h"
 #include "shared/test/common/test_macros/hw_test.h"
 #include "shared/test/common/test_macros/test.h"
+
 using namespace NEO;
 extern ApiSpecificConfig::ApiType apiTypeForUlts;
 namespace NEO {
@@ -257,7 +259,7 @@ TEST_F(DeviceTest, whenAllocateRTDispatchGlobalsIsCalledThenStackSizePerRayIsSet
 
     auto releaseHelper = getReleaseHelper();
     if (releaseHelper) {
-        EXPECT_EQ(dispatchGlobals.stackSizePerRay, releaseHelper->getAsyncStackSizePerRay());
+        EXPECT_EQ(dispatchGlobals.stackSizePerRay, releaseHelper->getStackSizePerRay());
     } else {
         EXPECT_EQ(dispatchGlobals.stackSizePerRay, 0u);
     }
@@ -571,8 +573,8 @@ TEST_F(DeviceGetCapsTest, givenFlagEnabled64kbPagesWhenCallConstructorMemoryMana
         GraphicsAllocation *allocatePhysicalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
         GraphicsAllocation *allocatePhysicalLocalDeviceMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
         GraphicsAllocation *allocatePhysicalHostMemory(const AllocationData &allocationData, AllocationStatus &status) override { return nullptr; };
-        void unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) override { return; };
-        void unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return; };
+        bool unMapPhysicalDeviceMemoryFromVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize, OsContext *osContext, uint32_t rootDeviceIndex) override { return false; };
+        bool unMapPhysicalHostMemoryFromVirtualMemory(MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
         bool mapPhysicalDeviceMemoryToVirtualMemory(GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
         bool mapPhysicalHostMemoryToVirtualMemory(RootDeviceIndicesContainer &rootDeviceIndices, MultiGraphicsAllocation &multiGraphicsAllocation, GraphicsAllocation *physicalAllocation, uint64_t gpuRange, size_t bufferSize) override { return false; };
 
@@ -657,6 +659,18 @@ TEST_F(DeviceTests, givenPreemptionModeWhenOverridePreemptionModeThenProperlySet
     newPreemptionMode = PreemptionMode::Disabled;
     device->overridePreemptionMode(newPreemptionMode);
     EXPECT_EQ(newPreemptionMode, device->getPreemptionMode());
+}
+
+TEST_F(DeviceTests, givenNullAubcenterThenAdjustCcsCountDoesNotThrow) {
+    auto hwInfo = *defaultHwInfo;
+    VariableBackup<UltHwConfig> backup(&ultHwConfig);
+    ultHwConfig.useMockedPrepareDeviceEnvironmentsFunc = false;
+    DebugManagerStateRestore restorer;
+    debugManager.flags.ZEX_NUMBER_OF_CCS.set("4");
+
+    MockExecutionEnvironment executionEnvironment(&hwInfo, false, 1u);
+    executionEnvironment.incRefInternal();
+    EXPECT_NO_THROW(executionEnvironment.adjustCcsCount());
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, DeviceTests, givenZexNumberOfCssEnvVariableDefinedForNonPvcWhenDeviceIsCreatedThenCreateDevicesWithProperCcsCount) {
@@ -2454,6 +2468,66 @@ HWTEST_F(DeviceTests, givenHpCopyEngineAndDebugFlagSetWhenCreatingSecondaryEngin
     EXPECT_EQ(device->secondaryEngines.end(), device->secondaryEngines.find(hpEngine));
 }
 
+HWTEST_F(DeviceTests, givenHpCopyEngineAndAggregatedProcessCountWhenCreatingSecondaryEnginesThenContextCountIsDividedByProcessCount) {
+    HardwareInfo hwInfo = *defaultHwInfo;
+
+    DebugManagerStateRestore dbgRestorer;
+    debugManager.flags.ContextGroupSize.set(64);
+
+    hwInfo.featureTable.flags.ftrCCSNode = true;
+    hwInfo.capabilityTable.defaultEngineType = aub_stream::ENGINE_CCS;
+    hwInfo.gtSystemInfo.CCSInfo.NumberOfCCSEnabled = 1;
+    hwInfo.capabilityTable.blitterOperationsSupported = true;
+    hwInfo.featureTable.ftrBcsInfo = 0b111;
+
+    // Determine hpEngine type first
+    auto executionEnvironment = std::unique_ptr<ExecutionEnvironment>(NEO::MockDevice::prepareExecutionEnvironment(&hwInfo, 0u));
+    const auto &gfxCoreHelper = executionEnvironment->rootDeviceEnvironments[0]->getHelper<GfxCoreHelper>();
+    auto hpEngine = gfxCoreHelper.getDefaultHpCopyEngine(hwInfo);
+    if (hpEngine == aub_stream::EngineType::NUM_ENGINES) {
+        GTEST_SKIP();
+    }
+
+    // Test single process scenario first
+    {
+        auto executionEnvironment = NEO::MockDevice::prepareExecutionEnvironment(&hwInfo, 0u);
+        auto device = std::unique_ptr<MockDevice>(MockDevice::createWithExecutionEnvironment<MockDevice>(&hwInfo, executionEnvironment, 0));
+
+        EXPECT_NE(nullptr, device->getHpCopyEngine());
+
+        if (device->secondaryEngines.find(hpEngine) != device->secondaryEngines.end()) {
+            auto &secondaryEngines = device->secondaryEngines[hpEngine];
+            auto expectedContextCount = gfxCoreHelper.getContextGroupContextsCount();
+            // Without process division, should have full context group count (64 contexts total)
+            EXPECT_EQ(expectedContextCount, secondaryEngines.engines.size());
+        }
+    }
+
+    // Test multi-process scenario with process count division
+    {
+        auto executionEnvironment = NEO::MockDevice::prepareExecutionEnvironment(&hwInfo, 0u);
+        auto osInterface = new MockOsInterface();
+        auto driverModelMock = std::make_unique<MockDriverModel>();
+        osInterface->setDriverModel(std::move(driverModelMock));
+        executionEnvironment->rootDeviceEnvironments[0]->osInterface.reset(osInterface);
+
+        const auto numProcesses = 4u;
+        osInterface->numberOfProcesses = numProcesses;
+
+        auto device = std::unique_ptr<MockDevice>(MockDevice::createWithExecutionEnvironment<MockDevice>(&hwInfo, executionEnvironment, 0));
+
+        EXPECT_NE(nullptr, device->getHpCopyEngine());
+
+        if (device->secondaryEngines.find(hpEngine) != device->secondaryEngines.end()) {
+            auto &secondaryEngines = device->secondaryEngines[hpEngine];
+
+            // With process division: max(64/4, 2) = max(16, 2) = 16 contexts total
+            const uint32_t expectedContextCount = std::max(gfxCoreHelper.getContextGroupContextsCount() / numProcesses, 2u);
+            EXPECT_EQ(expectedContextCount, secondaryEngines.engines.size());
+        }
+    }
+}
+
 TEST_F(DeviceTests, GivenDebuggingEnabledWhenDeviceIsInitializedThenL0DebuggerIsCreated) {
     auto executionEnvironment = MockDevice::prepareExecutionEnvironment(defaultHwInfo.get(), 0u);
     executionEnvironment->setDebuggingMode(NEO::DebuggingMode::online);
@@ -2479,9 +2553,10 @@ TEST_F(DeviceTests, givenDebuggerRequestedByUserAndNotAvailableWhenDeviceIsIniti
     executionEnvironment->setDebuggingMode(NEO::DebuggingMode::online);
 
     NEO::debugManager.flags.PrintDebugMessages.set(1);
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
     auto device = std::unique_ptr<MockDevice>(MockDevice::createWithExecutionEnvironment<MockDevice>(defaultHwInfo.get(), executionEnvironment, 0u));
-    auto output = testing::internal::GetCapturedStderr();
+    auto output = capture.getCapturedStderr();
 
     EXPECT_EQ(std::string("Debug mode is not enabled in the system.\n"), output);
     EXPECT_EQ(nullptr, device);
@@ -2689,4 +2764,99 @@ TEST(GroupDevicesTest, givenNullInputInDeviceVectorWhenGroupDevicesThenEmptyVect
     auto groupedDevices = Device::groupDevices(std::move(inputDevices));
 
     EXPECT_TRUE(groupedDevices.empty());
+}
+
+HWTEST_F(DeviceTests, givenVariousCsrModeWhenDevicePollForCompletionIsCalledThenPollForCompletionIsCalledCorrectlyOnCommandStreamReceivers) {
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+    std::vector<uint32_t> csrCallCounts;
+    csrCallCounts.reserve(device->commandStreamReceivers.size());
+
+    for (uint32_t csrIndex = 0; csrIndex < device->commandStreamReceivers.size(); csrIndex++) {
+        auto &csr = device->getUltCommandStreamReceiverFromIndex<FamilyType>(csrIndex);
+        csrCallCounts.push_back(csr.pollForCompletionCalled);
+    }
+
+    device->getUltCommandStreamReceiver<FamilyType>().setType(CommandStreamReceiverType::hardwareWithAub);
+    device->pollForCompletion();
+
+    for (uint32_t csrIndex = 0; csrIndex < device->commandStreamReceivers.size(); csrIndex++) {
+        auto &csr = device->getUltCommandStreamReceiverFromIndex<FamilyType>(csrIndex);
+        EXPECT_EQ(++csrCallCounts[csrIndex], csr.pollForCompletionCalled);
+    }
+
+    device->getUltCommandStreamReceiver<FamilyType>().setType(CommandStreamReceiverType::hardware);
+    device->pollForCompletion();
+
+    for (uint32_t csrIndex = 0; csrIndex < device->commandStreamReceivers.size(); csrIndex++) {
+        auto &csr = device->getUltCommandStreamReceiverFromIndex<FamilyType>(csrIndex);
+        EXPECT_EQ(csrCallCounts[csrIndex], csr.pollForCompletionCalled);
+    }
+}
+
+HWTEST_F(DeviceTests, givenDeviceWithNoEnginesWhenPollForCompletionIsCalledThenEarlyReturnAndDontCrash) {
+    auto device = std::unique_ptr<MockDevice>(MockDevice::createWithNewExecutionEnvironment<MockDevice>(defaultHwInfo.get()));
+
+    auto &allEngines = const_cast<std::vector<NEO::EngineControl> &>(device->getAllEngines());
+    allEngines.clear();
+
+    EXPECT_EQ(device->allEngines.size(), 0u);
+    EXPECT_NO_THROW(device->pollForCompletion());
+}
+
+HWTEST_F(DeviceTests, givenRootDeviceWhenPollForCompletionIsCalledThenPollForCompletionIsCalledOnAllSubDevices) {
+    UltDeviceFactory factory{1, 2};
+    auto rootDevice = factory.rootDevices[0];
+    for (auto subDevice : factory.subDevices) {
+        auto *mockSubDevice = static_cast<MockSubDevice *>(subDevice);
+        EXPECT_FALSE(mockSubDevice->pollForCompletionCalled);
+    }
+
+    rootDevice->getUltCommandStreamReceiver<FamilyType>().setType(CommandStreamReceiverType::hardwareWithAub);
+    rootDevice->pollForCompletion();
+
+    for (auto subDevice : factory.subDevices) {
+        auto *mockSubDevice = static_cast<MockSubDevice *>(subDevice);
+        EXPECT_TRUE(mockSubDevice->pollForCompletionCalled);
+    }
+}
+
+HWTEST_F(DeviceTests, givenMaskedSubDevicesWhenCallingPollForCompletionOnRootDeviceThenPollForCompletionIsCalledOnlyOnMaskedDevices) {
+    constexpr uint32_t numSubDevices = 3;
+    constexpr uint32_t numMaskedSubDevices = 2;
+
+    DebugManagerStateRestore restorer;
+    debugManager.flags.CreateMultipleSubDevices.set(numSubDevices);
+    debugManager.flags.ZE_AFFINITY_MASK.set("0.0,0.2");
+
+    auto executionEnvironment = std::make_unique<NEO::ExecutionEnvironment>();
+    executionEnvironment->prepareRootDeviceEnvironments(1);
+
+    executionEnvironment->rootDeviceEnvironments[0]->setHwInfoAndInitHelpers(defaultHwInfo.get());
+    executionEnvironment->rootDeviceEnvironments[0]->initGmm();
+    executionEnvironment->parseAffinityMask();
+    UltDeviceFactory deviceFactory{1, numSubDevices, *executionEnvironment.release()};
+    auto rootDevice = deviceFactory.rootDevices[0];
+    EXPECT_NE(nullptr, rootDevice);
+    EXPECT_EQ(numMaskedSubDevices, rootDevice->getNumSubDevices());
+
+    for (auto subDevice : rootDevice->getSubDevices()) {
+        if (subDevice != nullptr) {
+            auto *mockSubDevice = static_cast<MockSubDevice *>(subDevice);
+            EXPECT_FALSE(mockSubDevice->pollForCompletionCalled);
+        }
+    }
+
+    rootDevice->getUltCommandStreamReceiver<FamilyType>().setType(CommandStreamReceiverType::hardwareWithAub);
+    rootDevice->pollForCompletion();
+
+    unsigned int callCount = 0;
+    for (auto subDevice : rootDevice->getSubDevices()) {
+        if (subDevice != nullptr) {
+            auto *mockSubDevice = static_cast<MockSubDevice *>(subDevice);
+            if (mockSubDevice->pollForCompletionCalled) {
+                callCount++;
+            }
+        }
+    }
+    EXPECT_EQ(callCount, numMaskedSubDevices);
 }

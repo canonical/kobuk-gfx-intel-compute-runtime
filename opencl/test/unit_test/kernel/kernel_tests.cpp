@@ -23,6 +23,7 @@
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/gtest_helpers.h"
 #include "shared/test/common/helpers/raii_gfx_core_helper.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/libult/ult_command_stream_receiver.h"
 #include "shared/test/common/mocks/mock_allocation_properties.h"
 #include "shared/test/common/mocks/mock_bindless_heaps_helper.h"
@@ -60,7 +61,7 @@ class KernelTests : public ProgramFromBinaryFixture {
 
   protected:
     void SetUp() override {
-        ProgramFromBinaryFixture::setUp("CopyBuffer_simd32", "CopyBuffer");
+        ProgramFromBinaryFixture::setUp();
         ASSERT_NE(nullptr, pProgram);
         ASSERT_EQ(CL_SUCCESS, retVal);
 
@@ -3630,7 +3631,8 @@ TEST(KernelInitializationTest, givenSlmSizeExceedingLocalMemorySizeWhenInitializ
     DebugManagerStateRestore dbgRestorer;
     debugManager.flags.PrintDebugMessages.set(true);
 
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
 
     MockContext context;
     MockProgram mockProgram(&context, false, context.getDevices());
@@ -3644,15 +3646,15 @@ TEST(KernelInitializationTest, givenSlmSizeExceedingLocalMemorySizeWhenInitializ
     mockKernelInfoExceedsSLM.kernelDescriptor.kernelAttributes.slmInlineSize = slmTotalSize;
     auto localMemSize = static_cast<uint32_t>(clDevice->getDevice().getDeviceInfo().localMemSize);
 
-    std::string output = testing::internal::GetCapturedStderr();
+    std::string output = capture.getCapturedStderr();
 
     cl_int retVal{};
-    ::testing::internal::CaptureStderr();
+    capture.captureStderr();
     std::unique_ptr<MockKernel> kernelPtr(Kernel::create<MockKernel>(&mockProgram, mockKernelInfoExceedsSLM, *clDevice, retVal));
     EXPECT_EQ(nullptr, kernelPtr.get());
     EXPECT_EQ(CL_OUT_OF_RESOURCES, retVal);
 
-    output = testing::internal::GetCapturedStderr();
+    output = capture.getCapturedStderr();
     std::string expectedOutput = "Size of SLM (" + std::to_string(slmTotalSize) + ") larger than available (" + std::to_string(localMemSize) + ")\n";
     EXPECT_EQ(expectedOutput, output);
 }
@@ -3822,10 +3824,28 @@ TEST_F(KernelImplicitArgsTest, WhenKernelRequiresImplicitArgsThenImplicitArgsStr
         } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 1) {
             expectedImplicitArgs.v1.header.structVersion = 1;
             expectedImplicitArgs.v1.header.structSize = ImplicitArgsV1::getSize();
+        } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 2) {
+            expectedImplicitArgs.v2.header.structVersion = 2;
+            expectedImplicitArgs.v2.header.structSize = ImplicitArgsV2::getSize();
         }
         expectedImplicitArgs.setSimdWidth(32);
 
         EXPECT_EQ(0, memcmp(&expectedImplicitArgs, pImplicitArgs, pImplicitArgs->getSize()));
+    }
+}
+
+TEST_F(KernelImplicitArgsTest, GivenProgramWithImplicitAccessBufferVersionWhenKernelCreatedThenCorrectVersionIsSet) {
+    auto pKernelInfo = std::make_unique<MockKernelInfo>();
+    pKernelInfo->kernelDescriptor.kernelAttributes.simdSize = 32;
+    pKernelInfo->kernelDescriptor.kernelAttributes.flags.requiresImplicitArgs = true;
+
+    MockContext context(pClDevice);
+    MockProgram program(&context, false, toClDeviceVector(*pClDevice));
+    program.indirectAccessBufferMajorVersion = 5;
+    {
+        MockKernel kernel(&program, *pKernelInfo, *pClDevice);
+        ASSERT_EQ(CL_SUCCESS, kernel.initialize());
+        EXPECT_EQ(5u, kernel.implicitArgsVersion);
     }
 }
 
@@ -3850,6 +3870,9 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenSettingKernelParam
     } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 1) {
         expectedImplicitArgs.v1.header.structVersion = 1;
         expectedImplicitArgs.v1.header.structSize = ImplicitArgsV1::getSize();
+    } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 2) {
+        expectedImplicitArgs.v2.header.structVersion = 2;
+        expectedImplicitArgs.v2.header.structSize = ImplicitArgsV2::getSize();
     }
 
     expectedImplicitArgs.setNumWorkDim(3);
@@ -3934,6 +3957,9 @@ TEST_F(KernelImplicitArgsTest, givenKernelWithImplicitArgsWhenCloneKernelThenImp
     } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 1) {
         expectedImplicitArgs.v1.header.structVersion = 1;
         expectedImplicitArgs.v1.header.structSize = ImplicitArgsV1::getSize();
+    } else if (pClDevice->getGfxCoreHelper().getImplicitArgsVersion() == 2) {
+        expectedImplicitArgs.v2.header.structVersion = 2;
+        expectedImplicitArgs.v2.header.structSize = ImplicitArgsV2::getSize();
     }
 
     expectedImplicitArgs.setNumWorkDim(3);

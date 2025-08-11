@@ -17,6 +17,9 @@
 struct _ze_context_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_CONTEXT> {};
 static_assert(IsCompliantWithDdiHandlesExt<_ze_context_handle_t>);
 
+struct _ze_physical_mem_handle_t : BaseHandleWithLoaderTranslation<ZEL_HANDLE_PHYSICAL_MEM> {};
+static_assert(IsCompliantWithDdiHandlesExt<_ze_physical_mem_handle_t>);
+
 namespace NEO {
 class Device;
 }
@@ -33,8 +36,10 @@ struct Context : _ze_context_handle_t {
         case InternalMemoryType::sharedUnifiedMemory:
             return ZE_MEMORY_TYPE_SHARED;
         case InternalMemoryType::deviceUnifiedMemory:
+        case InternalMemoryType::reservedDeviceMemory:
             return ZE_MEMORY_TYPE_DEVICE;
         case InternalMemoryType::hostUnifiedMemory:
+        case InternalMemoryType::reservedHostMemory:
             return ZE_MEMORY_TYPE_HOST;
         default:
             return ZE_MEMORY_TYPE_UNKNOWN;

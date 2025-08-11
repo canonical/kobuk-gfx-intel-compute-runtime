@@ -26,7 +26,7 @@ const std::string mockRemove("remove");
 const std::string mockRescan("rescan");
 const std::string mockSlotPath("/sys/bus/pci/slots/");
 const std::string mockSlotPath1("/sys/bus/pci/slots/1/");
-const std::string mockCorrectRootAddress("0000:8a:00.0");
+const std::string mockCorrectRootAddress("0000:8a:00");
 const std::string mockWrongRootAddress("0000:7a:00.0");
 
 struct MockDiagnosticsFwInterface : public L0::Sysman::FirmwareUtil {
@@ -64,6 +64,7 @@ struct MockDiagnosticsFwInterface : public L0::Sysman::FirmwareUtil {
     ADDMETHOD_NOBASE(fwGetEccConfigurable, ze_result_t, ZE_RESULT_SUCCESS, (ze_bool_t * pConfigurable));
     ADDMETHOD_NOBASE(fwGetEccConfig, ze_result_t, ZE_RESULT_SUCCESS, (uint8_t * currentState, uint8_t *pendingState, uint8_t *defaultState));
     ADDMETHOD_NOBASE(fwSetEccConfig, ze_result_t, ZE_RESULT_SUCCESS, (uint8_t newState, uint8_t *currentState, uint8_t *pendingState));
+    ADDMETHOD_NOBASE(fwSetDowngradeConfig, ze_result_t, ZE_RESULT_SUCCESS, (uint8_t newState, uint8_t *pendingState));
     ADDMETHOD_NOBASE_VOIDRETURN(getDeviceSupportedFwTypes, (std::vector<std::string> & fwTypes));
     ADDMETHOD_NOBASE_VOIDRETURN(fwGetMemoryHealthIndicator, (zes_mem_health_t * health));
     ADDMETHOD_NOBASE_VOIDRETURN(getLateBindingSupportedFwTypes, (std::vector<std::string> & fwTypes));

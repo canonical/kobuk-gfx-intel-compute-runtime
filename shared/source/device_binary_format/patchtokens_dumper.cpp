@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2024 Intel Corporation
+ * Copyright (C) 2019-2025 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  *
@@ -569,34 +569,6 @@ void dump(const SPatchMediaVFEState &value, std::stringstream &out, const std::s
     out << indent << "}\n";
 }
 
-void dump(const SPatchAllocateStatelessDefaultDeviceQueueSurface &value, std::stringstream &out, const std::string &indent) {
-    out << indent << "struct SPatchAllocateStatelessDefaultDeviceQueueSurface :\n";
-    out << indent << "       SPatchItemHeader (";
-    dumpPatchItemHeaderInline(value, out, "");
-    out << ")\n"
-        << indent << "{\n";
-    out << indent << "    uint32_t   SurfaceStateHeapOffset;// = " << value.SurfaceStateHeapOffset << "\n";
-    out << indent << "    uint32_t   DataParamOffset;// = " << value.DataParamOffset << "\n";
-    out << indent << "    uint32_t   DataParamSize;// = " << value.DataParamSize << "\n";
-    out << indent << "}\n";
-}
-
-void dump(const SPatchStatelessDeviceQueueKernelArgument &value, std::stringstream &out, const std::string &indent) {
-    out << indent << "struct SPatchStatelessDeviceQueueKernelArgument :\n";
-    out << indent << "       SPatchItemHeader (";
-    dumpPatchItemHeaderInline(value, out, "");
-    out << ")\n"
-        << indent << "{\n";
-    out << indent << "    uint32_t   ArgumentNumber;// = " << value.ArgumentNumber << "\n";
-    out << indent << "    uint32_t   SurfaceStateHeapOffset;// = " << value.SurfaceStateHeapOffset << "\n";
-    out << indent << "    uint32_t   DataParamOffset;// = " << value.DataParamOffset << "\n";
-    out << indent << "    uint32_t   DataParamSize;// = " << value.DataParamSize << "\n";
-    out << indent << "    uint32_t   LocationIndex;// = " << value.LocationIndex << "\n";
-    out << indent << "    uint32_t   LocationIndex2;// = " << value.LocationIndex2 << "\n";
-    out << indent << "    uint32_t   IsEmulationArgument;// = " << value.IsEmulationArgument << "\n";
-    out << indent << "}\n";
-}
-
 void dump(const SPatchGtpinFreeGRFInfo &value, std::stringstream &out, const std::string &indent) {
     out << indent << "struct SPatchGtpinFreeGRFInfo :\n";
     out << indent << "       SPatchItemHeader (";
@@ -649,9 +621,6 @@ void dumpOrNullObjArg(const T *value, std::stringstream &out, const std::string 
         break;
     case PATCH_TOKEN_STATELESS_CONSTANT_MEMORY_OBJECT_KERNEL_ARGUMENT:
         dumpOrNull(reinterpret_cast<const SPatchStatelessConstantMemoryObjectKernelArgument *>(value), "", out, indent);
-        break;
-    case PATCH_TOKEN_STATELESS_DEVICE_QUEUE_KERNEL_ARGUMENT:
-        dumpOrNull(reinterpret_cast<const SPatchStatelessDeviceQueueKernelArgument *>(value), "", out, indent);
         break;
     }
 }
@@ -727,7 +696,6 @@ std::string asString(const KernelFromPatchtokens &kern) {
     dumpOrNull(kern.tokens.allocateStatelessConstantMemorySurfaceWithInitialization, "", stream, indentLevel1);
     dumpOrNull(kern.tokens.allocateStatelessGlobalMemorySurfaceWithInitialization, "", stream, indentLevel1);
     dumpOrNull(kern.tokens.allocateStatelessPrintfSurface, "", stream, indentLevel1);
-    dumpOrNull(kern.tokens.allocateStatelessDefaultDeviceQueueSurface, "", stream, indentLevel1);
     dumpOrNull(kern.tokens.inlineVmeSamplerInfo, "", stream, indentLevel1);
     dumpOrNull(kern.tokens.gtpinFreeGrfInfo, "", stream, indentLevel1);
     dumpOrNull(kern.tokens.stateSip, "", stream, indentLevel1);
@@ -762,7 +730,7 @@ std::string asString(const KernelFromPatchtokens &kern) {
     return stream.str();
 }
 
-std::string asString(ArgObjectType type, ArgObjectTypeSpecialized typeSpecialized) {
+std::string asString(ArgObjectType type) {
     std::string typeAsStr;
     switch (type) {
     default:
@@ -782,20 +750,12 @@ std::string asString(ArgObjectType type, ArgObjectTypeSpecialized typeSpecialize
         break;
     }
 
-    switch (typeSpecialized) {
-    default:
-        UNRECOVERABLE_IF(ArgObjectTypeSpecialized::none != typeSpecialized);
-        break;
-    case ArgObjectTypeSpecialized::vme:
-        typeAsStr += " [ VME ]";
-    }
-
     return typeAsStr;
 }
 
 std::string asString(const KernelArgFromPatchtokens &arg, const std::string &indent) {
     std::stringstream stream;
-    stream << indent << "Kernel argument of type " << asString(arg.objectType, arg.objectTypeSpecialized) << "\n";
+    stream << indent << "Kernel argument of type " << asString(arg.objectType) << "\n";
     std::string indentLevel1 = indent + "  ";
     std::string indentLevel2 = indentLevel1 + "  ";
     dumpOrNull(arg.argInfo, "", stream, indentLevel1);
@@ -832,17 +792,6 @@ std::string asString(const KernelArgFromPatchtokens &arg, const std::string &ind
     case ArgObjectType::slm:
         stream << indentLevel1 << "Slm Metadata:\n";
         dumpOrNull(arg.metadata.slm.token, "", stream, indentLevel2);
-        break;
-    }
-    switch (arg.objectTypeSpecialized) {
-    default:
-        break;
-    case ArgObjectTypeSpecialized::vme:
-        stream << indentLevel1 << "Vme Metadata:\n";
-        dumpOrNull(arg.metadataSpecialized.vme.mbBlockType, "", stream, indentLevel2);
-        dumpOrNull(arg.metadataSpecialized.vme.sadAdjustMode, "", stream, indentLevel2);
-        dumpOrNull(arg.metadataSpecialized.vme.searchPathType, "", stream, indentLevel2);
-        dumpOrNull(arg.metadataSpecialized.vme.subpixelMode, "", stream, indentLevel2);
         break;
     }
 

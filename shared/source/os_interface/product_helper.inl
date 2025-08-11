@@ -20,7 +20,6 @@
 #include "shared/source/helpers/kernel_helpers.h"
 #include "shared/source/helpers/local_memory_access_modes.h"
 #include "shared/source/helpers/preamble.h"
-#include "shared/source/helpers/ray_tracing_helper.h"
 #include "shared/source/helpers/string_helpers.h"
 #include "shared/source/kernel/kernel_descriptor.h"
 #include "shared/source/memory_manager/allocation_properties.h"
@@ -562,7 +561,7 @@ bool ProductHelperHw<gfxProduct>::isBcsReportWaRequired(const HardwareInfo &hwIn
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-BcsSplitSettings ProductHelperHw<gfxProduct>::getBcsSplitSettings() const {
+BcsSplitSettings ProductHelperHw<gfxProduct>::getBcsSplitSettings(const HardwareInfo &hwInfo) const {
     return {};
 }
 
@@ -781,12 +780,6 @@ void ProductHelperHw<gfxProduct>::fillFrontEndPropertiesSupportStructure(FrontEn
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-bool ProductHelperHw<gfxProduct>::getPipelineSelectPropertyMediaSamplerDopClockGateSupport() const {
-    using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
-    return GfxProduct::PipelineSelectStateSupport::mediaSamplerDopClockGate;
-}
-
-template <PRODUCT_FAMILY gfxProduct>
 bool ProductHelperHw<gfxProduct>::getPipelineSelectPropertySystolicModeSupport() const {
     using GfxProduct = typename HwMapper<gfxProduct>::GfxProduct;
     return GfxProduct::PipelineSelectStateSupport::systolicMode;
@@ -794,7 +787,6 @@ bool ProductHelperHw<gfxProduct>::getPipelineSelectPropertySystolicModeSupport()
 
 template <PRODUCT_FAMILY gfxProduct>
 void ProductHelperHw<gfxProduct>::fillPipelineSelectPropertiesSupportStructure(PipelineSelectPropertiesSupport &propertiesSupport, const HardwareInfo &hwInfo) const {
-    propertiesSupport.mediaSamplerDopClockGate = getPipelineSelectPropertyMediaSamplerDopClockGateSupport();
     propertiesSupport.systolicMode = isSystolicModeConfigurable(hwInfo);
 }
 
@@ -1084,18 +1076,13 @@ bool ProductHelperHw<gfxProduct>::getStorageInfoLocalOnlyFlag(LocalMemAllocation
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-void ProductHelperHw<gfxProduct>::adjustRTDispatchGlobals(RTDispatchGlobals &rtDispatchGlobals, const HardwareInfo &hwInfo) const {
+bool ProductHelperHw<gfxProduct>::checkBcsForDirectSubmissionStop() const {
+    return false;
 }
 
 template <PRODUCT_FAMILY gfxProduct>
-uint32_t ProductHelperHw<gfxProduct>::getSyncNumRTStacksPerDss(const HardwareInfo &hwInfo) const {
-    return 0;
-}
-
-template <PRODUCT_FAMILY gfxProduct>
-uint32_t ProductHelperHw<gfxProduct>::getNumRtStacksPerDSSForAllocation(const HardwareInfo &hwInfo) const {
-
-    return RayTracingHelper::getAsyncNumRTStacksPerDss();
+bool ProductHelperHw<gfxProduct>::shouldRegisterEnqueuedWalkerWithProfiling() const {
+    return false;
 }
 
 } // namespace NEO

@@ -126,6 +126,11 @@ struct MutableCommandList {
     virtual ze_result_t appendJump(Label *label, const InterfaceOperandDescriptor *condition) = 0;
     virtual ze_result_t appendMILoadRegVariable(MclAluReg reg, Variable *variable) = 0;
     virtual ze_result_t appendMIStoreRegVariable(MclAluReg reg, Variable *variable) = 0;
+    virtual ze_result_t appendMILoadRegImm(MclAluReg reg, uint32_t value) = 0;
+    virtual ze_result_t appendMILoadRegReg(MclAluReg dstReg, MclAluReg srcReg) = 0;
+    virtual ze_result_t appendMILoadRegMem(MclAluReg reg, uint64_t address) = 0;
+    virtual ze_result_t appendMIStoreRegMem(MclAluReg reg, uint64_t address) = 0;
+    virtual ze_result_t appendMIMath(void *aluArray, size_t aluCount) = 0;
 
     virtual ze_result_t tempMemSetElementCount(size_t elementCount) = 0;
     virtual ze_result_t tempMemGetSize(size_t *tempMemSize) = 0;
@@ -168,6 +173,7 @@ struct MutableCommandList {
     virtual void updateCmdListNoopPatchData(size_t noopPatchIndex, void *newCpuPtr, size_t newPatchSize, size_t newOffset) = 0;
     virtual size_t createNewCmdListNoopPatchData(void *newCpuPtr, size_t newPatchSize, size_t newOffset) = 0;
     virtual void fillCmdListNoopPatchData(size_t noopPatchIndex, void *&cpuPtr, size_t &patchSize, size_t &offset) = 0;
+    virtual void disableAddressNoopPatch(size_t noopPatchIndex) = 0;
     virtual void addVariableToCommitList(Variable *variable) = 0;
 
     virtual void toggleCommandListUpdated() = 0;

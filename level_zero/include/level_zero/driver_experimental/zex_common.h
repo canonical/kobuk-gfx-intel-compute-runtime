@@ -199,6 +199,17 @@ typedef struct _zex_counter_based_event_desc_t {
                                                ///< additional cache hierarchies are invalidated.
 } zex_counter_based_event_desc_t;
 
+const zex_counter_based_event_desc_t defaultCounterBasedEventDesc = {
+    ZEX_STRUCTURE_COUNTER_BASED_EVENT_DESC, // stype
+    nullptr,                                // pNext
+    static_cast<zex_counter_based_event_exp_flags_t>(
+        ZEX_COUNTER_BASED_EVENT_FLAG_IMMEDIATE |
+        ZEX_COUNTER_BASED_EVENT_FLAG_NON_IMMEDIATE |
+        ZEX_COUNTER_BASED_EVENT_FLAG_HOST_VISIBLE),                 // flags
+    static_cast<ze_event_scope_flags_t>(ZE_EVENT_SCOPE_FLAG_HOST),  // signalScope
+    static_cast<ze_event_scope_flags_t>(ZE_EVENT_SCOPE_FLAG_DEVICE) // waitScope
+};
+
 ///////////////////////////////////////////////////////////////////////////////
 /// @brief Initial Counter Based Event synchronization parameters. This structure may be
 ///        passed as pNext member of ::zex_counter_based_event_desc_t.

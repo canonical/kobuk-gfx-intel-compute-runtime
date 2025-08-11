@@ -1,8 +1,8 @@
 components:
   i915_kmd:
-    version: rel-25.3-11
+    version: rel-25.3-13
   xe_kmd:
     version: dev-1900
   ipldt:
-    revision: da4289f1337ea22a24507f4c4f8cbcfe4ae4a891
+    revision: 8518b4cde1ba3b9a6f36643b3e0d1a340e612fbb
 version: '1'

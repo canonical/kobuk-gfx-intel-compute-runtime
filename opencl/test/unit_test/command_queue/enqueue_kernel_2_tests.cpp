@@ -912,7 +912,7 @@ class MyCmdQ : public MockCommandQueueHw<FamilyType> {
                                                   auxTranslationDirection);
     }
 
-    WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, Range<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) override {
+    WaitStatus waitUntilComplete(TaskCountType gpgpuTaskCountToWait, std::span<CopyEngineState> copyEnginesToWait, FlushStamp flushStampToWait, bool useQuickKmdSleep, bool cleanTemporaryAllocationList, bool skipWait) override {
         waitCalled++;
         return MockCommandQueueHw<FamilyType>::waitUntilComplete(gpgpuTaskCountToWait, copyEnginesToWait, flushStampToWait, useQuickKmdSleep, cleanTemporaryAllocationList, skipWait);
     }
@@ -1364,4 +1364,19 @@ HWTEST_F(EnqueueKernelTest, givenTimestampWriteEnableWhenMarkerProfilingWithWait
 TEST(EnqueuePropertiesTest, givenGpuKernelEnqueuePropertiesThenStartTimestampOnCpuNotRequired) {
     EnqueueProperties properties(false, true, false, false, false, false, nullptr);
     EXPECT_FALSE(properties.isStartTimestampOnCpuRequired());
+}
+
+HWTEST_F(EnqueueKernelTest, whenEnqueueKernelWithImageFromBufferThenInvalidateTextureCache) {
+    auto &csr = pDevice->getUltCommandStreamReceiver<FamilyType>();
+    size_t off[3] = {0, 0, 0};
+    size_t gws[3] = {1, 1, 1};
+    MockKernelWithInternals mockKernel(*pClDevice);
+    auto res = pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, res);
+    EXPECT_FALSE(csr.recordedDispatchFlags.textureCacheFlush);
+
+    mockKernel.mockKernel->imageFromBufferArgsCount = 1;
+    res = pCmdQ->enqueueKernel(mockKernel.mockKernel, 1, off, gws, nullptr, 0, nullptr, nullptr);
+    EXPECT_EQ(CL_SUCCESS, res);
+    EXPECT_TRUE(csr.recordedDispatchFlags.textureCacheFlush);
 }

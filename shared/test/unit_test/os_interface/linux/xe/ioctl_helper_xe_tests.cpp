@@ -5,6 +5,8 @@
  *
  */
 
+#include "shared/source/gmm_helper/client_context/gmm_client_context.h"
+#include "shared/source/gmm_helper/gmm_helper.h"
 #include "shared/source/helpers/compiler_product_helper.h"
 #include "shared/source/os_interface/linux/memory_info.h"
 #include "shared/source/os_interface/linux/os_context_linux.h"
@@ -12,6 +14,7 @@
 #include "shared/source/unified_memory/usm_memory_support.h"
 #include "shared/test/common/helpers/debug_manager_state_restore.h"
 #include "shared/test/common/helpers/engine_descriptor_helper.h"
+#include "shared/test/common/helpers/stream_capture.h"
 #include "shared/test/common/mocks/linux/mock_drm_memory_manager.h"
 #include "shared/test/common/mocks/linux/mock_os_context_linux.h"
 #include "shared/test/common/mocks/linux/mock_os_time_linux.h"
@@ -47,13 +50,27 @@ TEST_F(IoctlHelperXeTest, whenGettingIfSmallBarConfigIsAllowedThenFalseIsReturne
     EXPECT_FALSE(ioctlHelper.isSmallBarConfigAllowed());
 }
 
-TEST_F(IoctlHelperXeTest, givenXeDrmWhenGetPciBarrierMmapThenReturnsNullptr) {
-    MockExecutionEnvironment executionEnvironment{};
-    std::unique_ptr<Drm> drm{Drm::create(std::make_unique<HwDeviceIdDrm>(0, ""), *executionEnvironment.rootDeviceEnvironments[0])};
-    IoctlHelperXe ioctlHelper{*drm};
+TEST_F(IoctlHelperXeTest, givenXeDrmWhenGetPciBarrierMmapThenReturnsSuccess) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+    ASSERT_NE(nullptr, xeIoctlHelper);
 
-    auto ptr = ioctlHelper.pciBarrierMmap();
-    EXPECT_EQ(ptr, nullptr);
+    auto ptr = xeIoctlHelper->pciBarrierMmap();
+    EXPECT_NE(ptr, MAP_FAILED);
+    EXPECT_NE(ptr, nullptr);
+    SysCalls::munmap(ptr, MemoryConstants::pageSize);
+}
+
+TEST_F(IoctlHelperXeTest, givenXeDrmAndMmapOffsetFailingWhenGetPciBarrierMmapThenReturnsFail) {
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+    ASSERT_NE(nullptr, xeIoctlHelper);
+
+    drm->forceMmapOffsetFail = true;
+    auto ptr = xeIoctlHelper->pciBarrierMmap();
+    EXPECT_EQ(ptr, MAP_FAILED);
 }
 
 TEST_F(IoctlHelperXeTest, whenChangingBufferBindingThenWaitIsNeededAlways) {
@@ -749,6 +766,14 @@ TEST_F(IoctlHelperXeTest, whenCallingIoctlThenProperValueIsReturned) {
         ret = mockXeIoctlHelper->ioctl(DrmIoctl::gemMmapOffset, &test);
         EXPECT_EQ(0, ret);
         EXPECT_EQ(static_cast<int>(test.offset), testValueMapOff);
+    }
+    {
+        GemMmapOffset test = {};
+        test.flags = DRM_XE_MMAP_OFFSET_FLAG_PCI_BARRIER;
+        test.handle = 0; // must be zero for PCI-BARRIER flag
+        ret = mockXeIoctlHelper->ioctl(DrmIoctl::gemMmapOffset, &test);
+        EXPECT_EQ(0, ret);
+        EXPECT_EQ(static_cast<int>(test.offset), testValuePciBarrierOff);
     }
     {
         PrimeHandle test = {};
@@ -1943,13 +1968,14 @@ TEST_F(IoctlHelperXeTest, whenXeShowBindTableIsCalledThenBindLogsArePrinted) {
     mockBindInfo.addr = 3u;
     xeIoctlHelper->bindInfo.push_back(mockBindInfo);
 
-    ::testing::internal::CaptureStderr();
+    StreamCapture capture;
+    capture.captureStderr();
 
     debugManager.flags.PrintXeLogs.set(true);
     xeIoctlHelper->xeShowBindTable();
     debugManager.flags.PrintXeLogs.set(false);
 
-    std::string output = testing::internal::GetCapturedStderr();
+    std::string output = capture.getCapturedStderr();
     std::string expectedOutput1 = "show bind: (<index> <userptr> <addr>)\n";
     std::string expectedOutput2 = "0 x0000000000000002 x0000000000000003";
 
@@ -2076,6 +2102,38 @@ TEST_F(IoctlHelperXeTest, whenCallingVmBindThenPatIndexIsSet) {
     ASSERT_EQ(1u, drm->vmBindInputs.size());
 
     EXPECT_EQ(drm->vmBindInputs[0].bind.pat_index, expectedPatIndex);
+}
+
+TEST_F(IoctlHelperXeTest, whenCallingVmUnbindThenPatIndexIsSetToDefault) {
+    DebugManagerStateRestore restorer;
+    auto executionEnvironment = std::make_unique<MockExecutionEnvironment>();
+    auto drm = DrmMockXe::create(*executionEnvironment->rootDeviceEnvironments[0]);
+    auto xeIoctlHelper = static_cast<MockIoctlHelperXe *>(drm->getIoctlHelper());
+
+    uint64_t fenceAddress = 0x4321;
+    uint64_t fenceValue = 0x789;
+    uint64_t bindPatIndex = 0xba;
+    GMM_RESOURCE_USAGE_TYPE usageType = GMM_RESOURCE_USAGE_OCL_BUFFER;
+    bool compressed = false;
+    bool cachable = false;
+    uint64_t defaultPatIndex = executionEnvironment->rootDeviceEnvironments[0]->getGmmClientContext()->cachePolicyGetPATIndex(nullptr, usageType, compressed, cachable);
+
+    VmBindExtUserFenceT vmBindExtUserFence{};
+
+    xeIoctlHelper->fillVmBindExtUserFence(vmBindExtUserFence, fenceAddress, fenceValue, 0u);
+
+    VmBindParams vmBindParams{};
+    vmBindParams.handle = 0x1234;
+    xeIoctlHelper->setVmBindUserFence(vmBindParams, vmBindExtUserFence);
+    vmBindParams.patIndex = bindPatIndex;
+
+    drm->vmBindInputs.clear();
+    drm->syncInputs.clear();
+    drm->waitUserFenceInputs.clear();
+    ASSERT_EQ(0, xeIoctlHelper->vmUnbind(vmBindParams));
+    ASSERT_EQ(1u, drm->vmBindInputs.size());
+
+    EXPECT_EQ(drm->vmBindInputs[0].bind.pat_index, defaultPatIndex);
 }
 
 TEST_F(IoctlHelperXeTest, whenBindingDrmContextWithoutVirtualEnginesThenProperEnginesAreSelected) {

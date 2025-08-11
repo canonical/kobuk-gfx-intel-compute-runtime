@@ -24,6 +24,7 @@ class GmmHelper;
 class GmmClientContext;
 struct PlatformInfo;
 struct HardwareInfo;
+class ClDevice;
 
 template <>
 struct OpenCLObjectMapper<_cl_platform_id> {
@@ -49,6 +50,7 @@ class Platform : public BaseObject<_cl_platform_id> {
     size_t getNumDevices() const;
     ClDevice **getClDevices();
     ClDevice *getClDevice(size_t deviceOrdinal);
+    void devicesCleanup(bool processTermination);
 
     const PlatformInfo &getPlatformInfo() const;
     ExecutionEnvironment *peekExecutionEnvironment() const { return &executionEnvironment; }

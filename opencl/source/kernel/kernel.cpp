@@ -7,7 +7,6 @@
 
 #include "opencl/source/kernel/kernel.h"
 
-#include "shared/source/built_ins/built_ins.h"
 #include "shared/source/command_container/implicit_scaling.h"
 #include "shared/source/command_stream/command_stream_receiver.h"
 #include "shared/source/debug_settings/debug_settings_manager.h"
@@ -29,27 +28,21 @@
 #include "shared/source/helpers/simd_helper.h"
 #include "shared/source/helpers/surface_format_info.h"
 #include "shared/source/kernel/implicit_args_helper.h"
-#include "shared/source/kernel/kernel_arg_descriptor_extended_vme.h"
 #include "shared/source/kernel/local_ids_cache.h"
 #include "shared/source/memory_manager/allocation_properties.h"
 #include "shared/source/memory_manager/compression_selector.h"
 #include "shared/source/memory_manager/memory_manager.h"
 #include "shared/source/memory_manager/unified_memory_manager.h"
-#include "shared/source/os_interface/os_context.h"
 #include "shared/source/os_interface/product_helper.h"
 #include "shared/source/page_fault_manager/cpu_page_fault_manager.h"
 #include "shared/source/program/kernel_info.h"
 #include "shared/source/utilities/lookup_array.h"
-#include "shared/source/utilities/tag_allocator.h"
 
-#include "opencl/source/accelerators/intel_accelerator.h"
-#include "opencl/source/accelerators/intel_motion_estimation.h"
 #include "opencl/source/built_ins/builtins_dispatch_builder.h"
 #include "opencl/source/cl_device/cl_device.h"
 #include "opencl/source/command_queue/cl_local_work_size.h"
 #include "opencl/source/command_queue/command_queue.h"
 #include "opencl/source/context/context.h"
-#include "opencl/source/event/event.h"
 #include "opencl/source/gtpin/gtpin_notify.h"
 #include "opencl/source/helpers/cl_gfx_core_helper.h"
 #include "opencl/source/helpers/cl_validators.h"
@@ -66,14 +59,12 @@
 #include "patch_list.h"
 
 #include <algorithm>
-#include <cstdint>
 #include <ranges>
 #include <vector>
 
 using namespace iOpenCL;
 
 namespace NEO {
-class Surface;
 
 uint32_t Kernel::dummyPatchLocation = 0xbaddf00d;
 
@@ -94,6 +85,9 @@ Kernel::Kernel(Program *programArg, const KernelInfo &kernelInfoArg, ClDevice &c
     }
     slmTotalSize = kernelInfoArg.kernelDescriptor.kernelAttributes.slmInlineSize;
     this->implicitArgsVersion = getDevice().getGfxCoreHelper().getImplicitArgsVersion();
+    if (program->getIndirectAccessBufferVersion() > 0) {
+        this->implicitArgsVersion = program->getIndirectAccessBufferVersion();
+    }
 }
 
 Kernel::~Kernel() {
@@ -360,12 +354,8 @@ cl_int Kernel::initialize() {
             kernelArguments[i].type = IMAGE_OBJ;
             usingImages = true;
         } else if (arg.is<ArgDescriptor::argTSampler>()) {
-            if (arg.getExtendedTypeInfo().isAccelerator) {
-                kernelArgHandlers[i] = &Kernel::setArgAccelerator;
-            } else {
-                kernelArgHandlers[i] = &Kernel::setArgSampler;
-                kernelArguments[i].type = SAMPLER_OBJ;
-            }
+            kernelArgHandlers[i] = &Kernel::setArgSampler;
+            kernelArguments[i].type = SAMPLER_OBJ;
         } else {
             kernelArgHandlers[i] = &Kernel::setArgImmediate;
         }
@@ -1580,8 +1570,10 @@ cl_int Kernel::setArgImageWithMipLevel(uint32_t argIndex,
         }
 
         DBG_LOG_INPUTS("setArgImage cl_mem", clMemObj);
-
+        auto wasImageFromBuffer = kernelArguments[argIndex].isImageFromBuffer;
         storeKernelArg(argIndex, IMAGE_OBJ, clMemObj, argVal, argSize);
+        kernelArguments[argIndex].isImageFromBuffer = pImage->isImageFromBuffer();
+        imageFromBufferArgsCount += (pImage->isImageFromBuffer() ? 1 : 0) - (wasImageFromBuffer ? 1 : 0);
 
         void *surfaceState = nullptr;
         if (isValidOffset(argAsImg.bindless)) {
@@ -1712,63 +1704,6 @@ cl_int Kernel::setArgSampler(uint32_t argIndex,
         patch<uint32_t, uint32_t>(getNormCoordsEnum(pSampler->normalizedCoordinates), crossThreadData, argAsSmp.metadataPayload.samplerNormalizedCoords);
 
         retVal = CL_SUCCESS;
-    }
-
-    return retVal;
-}
-
-cl_int Kernel::setArgAccelerator(uint32_t argIndex,
-                                 size_t argSize,
-                                 const void *argVal) {
-    auto retVal = CL_INVALID_ARG_VALUE;
-
-    if (argSize != sizeof(cl_accelerator_intel)) {
-        return CL_INVALID_ARG_SIZE;
-    }
-
-    if (!argVal) {
-        return retVal;
-    }
-
-    auto clAcceleratorObj = *(static_cast<const cl_accelerator_intel *>(argVal));
-    DBG_LOG_INPUTS("setArgAccelerator cl_mem", clAcceleratorObj);
-
-    const auto pAccelerator = castToObject<IntelAccelerator>(clAcceleratorObj);
-
-    if (pAccelerator) {
-        storeKernelArg(argIndex, ACCELERATOR_OBJ, clAcceleratorObj, argVal, argSize);
-
-        const auto &arg = kernelInfo.kernelDescriptor.payloadMappings.explicitArgs[argIndex];
-        const auto &argAsSmp = arg.as<ArgDescSampler>();
-
-        if (argAsSmp.samplerType == iOpenCL::SAMPLER_OBJECT_VME) {
-
-            const auto pVmeAccelerator = castToObjectOrAbort<VmeAccelerator>(pAccelerator);
-            auto pDesc = static_cast<const cl_motion_estimation_desc_intel *>(pVmeAccelerator->getDescriptor());
-            DEBUG_BREAK_IF(!pDesc);
-
-            if (arg.getExtendedTypeInfo().hasVmeExtendedDescriptor) {
-                const auto &explicitArgsExtendedDescriptors = kernelInfo.kernelDescriptor.payloadMappings.explicitArgsExtendedDescriptors;
-                UNRECOVERABLE_IF(argIndex >= explicitArgsExtendedDescriptors.size());
-                auto vmeDescriptor = static_cast<ArgDescVme *>(explicitArgsExtendedDescriptors[argIndex].get());
-
-                auto pVmeMbBlockTypeDst = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->mbBlockType));
-                *pVmeMbBlockTypeDst = pDesc->mb_block_type;
-
-                auto pVmeSubpixelMode = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->subpixelMode));
-                *pVmeSubpixelMode = pDesc->subpixel_mode;
-
-                auto pVmeSadAdjustMode = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->sadAdjustMode));
-                *pVmeSadAdjustMode = pDesc->sad_adjust_mode;
-
-                auto pVmeSearchPathType = reinterpret_cast<cl_uint *>(ptrOffset(crossThreadData, vmeDescriptor->searchPathType));
-                *pVmeSearchPathType = pDesc->search_path_type;
-            }
-
-            retVal = CL_SUCCESS;
-        } else if (argAsSmp.samplerType == iOpenCL::SAMPLER_OBJECT_VE) {
-            retVal = CL_SUCCESS;
-        }
     }
 
     return retVal;
@@ -2203,6 +2138,9 @@ void Kernel::setEnqueuedLocalWorkSizeValues(uint32_t localWorkSizeX, uint32_t lo
     patchVecNonPointer(getCrossThreadDataRef(),
                        getDescriptor().payloadMappings.dispatchTraits.enqueuedLocalWorkSize,
                        {localWorkSizeX, localWorkSizeY, localWorkSizeZ});
+    if (pImplicitArgs) {
+        pImplicitArgs->setEnqueuedLocalSize(localWorkSizeX, localWorkSizeY, localWorkSizeZ);
+    }
 }
 
 void Kernel::setNumWorkGroupsValues(uint32_t numWorkGroupsX, uint32_t numWorkGroupsY, uint32_t numWorkGroupsZ) {

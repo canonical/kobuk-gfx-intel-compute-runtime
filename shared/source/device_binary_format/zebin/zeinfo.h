@@ -10,8 +10,10 @@
 #include "shared/source/device_binary_format/yaml/yaml_parser.h"
 #include "shared/source/helpers/non_copyable_or_moveable.h"
 #include "shared/source/utilities/const_stringref.h"
+#include "shared/source/utilities/mem_lifetime.h"
 
 #include <array>
+#include <cstring>
 #include <optional>
 
 namespace NEO::Zebin::ZeInfo {
@@ -663,6 +665,8 @@ inline constexpr OffsetT offset = -1;
 inline constexpr BtiValueT btiValue = -1;
 } // namespace Defaults
 
+struct PayloadArgumentExtT;
+
 struct PayloadArgumentBaseT {
     ArgTypeT argType = argTypeUnknown;
     OffsetT offset = Defaults::offset;
@@ -680,6 +684,7 @@ struct PayloadArgumentBaseT {
     bool imageTransformable = false;
     bool isPipe = false;
     bool isPtr = false;
+    Ext<PayloadArgumentExtT> pPayArgExt;
 };
 
 } // namespace PayloadArgument

@@ -2007,7 +2007,6 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenCmdsChainingFromAppendCop
 
     DebugManagerStateRestore restorer;
     NEO::debugManager.flags.EnableL3FlushAfterPostSync.set(1);
-
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
     bool heaplessEnabled = immCmdList->isHeaplessModeEnabled();
@@ -2600,6 +2599,29 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenAddingRela
     lrrCmd++;
     EXPECT_EQ(RegisterOffsets::csGprR4 + 4, lrrCmd->getSourceRegisterAddress());
     EXPECT_EQ(RegisterOffsets::csGprR0 + 4, lrrCmd->getDestinationRegisterAddress());
+}
+
+HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenOptimizedCbEventWhenAppendNeedsRelaxedOrderingThenSubmitInOrderCounter) {
+    debugManager.flags.DirectSubmissionRelaxedOrdering.set(1);
+    debugManager.flags.DirectSubmissionRelaxedOrderingCounterHeuristic.set(0);
+
+    auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(device->getNEODevice()->getDefaultEngine().commandStreamReceiver);
+    auto directSubmission = new MockDirectSubmissionHw<FamilyType, RenderDispatcher<FamilyType>>(*ultCsr);
+    ultCsr->directSubmission.reset(directSubmission);
+    int client1, client2;
+    ultCsr->registerClient(&client1);
+    ultCsr->registerClient(&client2);
+
+    auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
+    auto eventPool = createEvents<FamilyType>(1, false);
+
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, events[0]->toHandle(), 0, nullptr, launchParams);
+    immCmdList->latestOperationHasOptimizedCbEvent = true;
+
+    auto value = immCmdList->inOrderExecInfo->getCounterValue();
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, events[0]->toHandle(), 0, nullptr, launchParams);
+
+    EXPECT_EQ(immCmdList->inOrderExecInfo->getCounterValue(), value + 1 + !immCmdList->isHeaplessModeEnabled());
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammingWalkerThenSignalSyncAllocation) {
@@ -3750,6 +3772,8 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, InOrderCmdListTests, givenImmediateEventWhenWaiti
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using WalkerType = typename FamilyType::DefaultWalkerType;
 
+    debugManager.flags.EnableInOrderRegularCmdListPatching.set(1);
+
     auto regularCmdList = createRegularCmdList<FamilyType::gfxCoreFamily>(false);
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
@@ -3788,6 +3812,9 @@ HWCMDTEST_F(IGFX_GEN12LP_CORE, InOrderCmdListTests, givenImmediateEventWhenWaiti
 HWTEST2_F(InOrderCmdListTests, givenImmediateEventWhenWaitingFromRegularCmdListThenDontPatch, IsAtLeastXeCore) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
     using WalkerType = typename FamilyType::DefaultWalkerType;
+
+    debugManager.flags.EnableInOrderRegularCmdListPatching.set(1);
+
     auto regularCmdList = createRegularCmdList<FamilyType::gfxCoreFamily>(false);
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
@@ -3823,8 +3850,10 @@ HWTEST2_F(InOrderCmdListTests, givenImmediateEventWhenWaitingFromRegularCmdListT
     EXPECT_NE(cmdList.end(), walkerItor);
 }
 
-HWTEST_F(InOrderCmdListTests, givenEventGeneratedByRegularCmdListWhenWaitingFromImmediateThenUseSubmissionCounter) {
+HWTEST_F(InOrderCmdListTests, givenDebugFlagAndEventGeneratedByRegularCmdListWhenWaitingFromImmediateThenUseSubmissionCounter) {
     using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+
+    debugManager.flags.EnableInOrderRegularCmdListPatching.set(1);
 
     ze_command_queue_desc_t desc = {};
 
@@ -3894,10 +3923,80 @@ HWTEST_F(InOrderCmdListTests, givenEventGeneratedByRegularCmdListWhenWaitingFrom
     verifySemaphore(expectedCounterValue + (expectedCounterAppendValue * 2));
 }
 
+HWTEST_F(InOrderCmdListTests, givenEventGeneratedByRegularCmdListWhenWaitingFromImmediateThenDontUseSubmissionCounter) {
+    using MI_SEMAPHORE_WAIT = typename FamilyType::MI_SEMAPHORE_WAIT;
+
+    ze_command_queue_desc_t desc = {};
+
+    auto mockCmdQHw = makeZeUniquePtr<MockCommandQueueHw<FamilyType::gfxCoreFamily>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &desc);
+    mockCmdQHw->initialize(true, false, false);
+
+    auto regularCmdList = createRegularCmdList<FamilyType::gfxCoreFamily>(false);
+    auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
+
+    auto regularCmdListHandle = regularCmdList->toHandle();
+
+    auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
+    auto offset = cmdStream->getUsed();
+
+    auto eventPool = createEvents<FamilyType>(1, false);
+    auto eventHandle = events[0]->toHandle();
+
+    regularCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    regularCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    regularCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, eventHandle, 0, nullptr, launchParams);
+    uint64_t expectedCounterValue = regularCmdList->inOrderExecInfo->getCounterValue();
+
+    regularCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    regularCmdList->close();
+
+    auto verifySemaphore = [&](uint64_t expectedValue) {
+        GenCmdList cmdList;
+        ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(cmdList, ptrOffset(cmdStream->getCpuBase(), offset), (cmdStream->getUsed() - offset)));
+
+        auto semaphoreItor = find<MI_SEMAPHORE_WAIT *>(cmdList.begin(), cmdList.end());
+        ASSERT_NE(cmdList.end(), semaphoreItor);
+        auto semaphoreCmd = genCmdCast<MI_SEMAPHORE_WAIT *>(*semaphoreItor);
+        ASSERT_NE(nullptr, semaphoreCmd);
+
+        if (semaphoreCmd->getSemaphoreGraphicsAddress() == immCmdList->inOrderExecInfo->getBaseDeviceAddress()) {
+            // skip implicit dependency
+            semaphoreItor++;
+        } else if (immCmdList->isQwordInOrderCounter()) {
+            std::advance(semaphoreItor, -2); // verify 2x LRI before semaphore
+        }
+
+        ASSERT_TRUE(verifyInOrderDependency<FamilyType>(semaphoreItor, expectedValue, regularCmdList->inOrderExecInfo->getBaseDeviceAddress(), immCmdList->isQwordInOrderCounter(), false));
+    };
+
+    // 0 Execute calls
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 1, &eventHandle, launchParams);
+    verifySemaphore(expectedCounterValue);
+
+    // 1 Execute call
+    offset = cmdStream->getUsed();
+    mockCmdQHw->executeCommandLists(1, &regularCmdListHandle, nullptr, false, nullptr, nullptr);
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 1, &eventHandle, launchParams);
+    verifySemaphore(expectedCounterValue);
+
+    // 2 Execute calls
+    offset = cmdStream->getUsed();
+    mockCmdQHw->executeCommandLists(1, &regularCmdListHandle, nullptr, false, nullptr, nullptr);
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 1, &eventHandle, launchParams);
+    verifySemaphore(expectedCounterValue);
+
+    // 3 Execute calls
+    offset = cmdStream->getUsed();
+    mockCmdQHw->executeCommandLists(1, &regularCmdListHandle, nullptr, false, nullptr, nullptr);
+    immCmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 1, &eventHandle, launchParams);
+    verifySemaphore(expectedCounterValue);
+}
+
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammingKernelSplitThenDontSignalFromWalker) {
     using WalkerType = typename FamilyType::DefaultWalkerType;
     using PostSyncType = decltype(FamilyType::template getPostSyncType<WalkerType>());
-
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableCopyWithStagingBuffers.set(0);
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
     auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
@@ -4769,6 +4868,49 @@ HWTEST_F(InOrderCmdListTests, givenRegularCmdListWhenProgrammingAppendBarrierWit
     EXPECT_EQ(offset, cmdStream->getUsed());
 
     EXPECT_EQ(1u, events[0]->inOrderExecSignalValue);
+}
+
+HWTEST_F(InOrderCmdListTests, givenEventCounterReusedFromPreviousAppendWhenHostSynchronizeThenFlushCaches) {
+    if (!device->getProductHelper().isDcFlushAllowed()) {
+        GTEST_SKIP();
+    }
+    auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(device->getNEODevice()->getDefaultEngine().commandStreamReceiver);
+
+    auto cmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
+
+    cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    EXPECT_EQ(1u, cmdList->inOrderExecInfo->getCounterValue());
+
+    auto eventPool = createEvents<FamilyType>(1, false);
+    auto eventHandle = events[0]->toHandle();
+    cmdList->appendBarrier(eventHandle, 0, nullptr, false);
+
+    EXPECT_FALSE(ultCsr->flushTagUpdateCalled);
+    events[0]->hostSynchronize(std::numeric_limits<uint64_t>::max());
+    EXPECT_TRUE(ultCsr->flushTagUpdateCalled);
+    EXPECT_EQ(1u, events[0]->inOrderExecSignalValue);
+}
+
+HWTEST_F(InOrderCmdListTests, givenEventCounterNotReusedFromPreviousAppendWhenHostSynchronizeThenDontFlushCaches) {
+    if (!device->getProductHelper().isDcFlushAllowed()) {
+        GTEST_SKIP();
+    }
+    auto ultCsr = static_cast<UltCommandStreamReceiver<FamilyType> *>(device->getNEODevice()->getDefaultEngine().commandStreamReceiver);
+
+    auto cmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
+
+    cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    EXPECT_EQ(1u, cmdList->inOrderExecInfo->getCounterValue());
+
+    auto eventPool = createEvents<FamilyType>(1, false);
+    auto eventHandle = events[0]->toHandle();
+    cmdList->appendBarrier(eventHandle, 0, nullptr, false);
+    cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, eventHandle, 0, nullptr, launchParams);
+
+    EXPECT_FALSE(ultCsr->flushTagUpdateCalled);
+    events[0]->hostSynchronize(std::numeric_limits<uint64_t>::max());
+    EXPECT_FALSE(ultCsr->flushTagUpdateCalled);
+    EXPECT_EQ(2u, events[0]->inOrderExecSignalValue);
 }
 
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammingAppendBarrierWithDifferentEventsThenDontInherit) {
@@ -5798,6 +5940,78 @@ HWTEST_F(InOrderCmdListTests, givenExternalSyncStorageWhenCallingAppendSignalInO
     context->freeMem(devAddress);
 }
 
+HWTEST_F(InOrderCmdListTests, givenExternalSyncStorageAndCopyOnlyCmdListWhenCallingAppendMemoryCopyWithDisabledInOrderSignalingThenSignalAtomicStorage) {
+    using MI_ATOMIC = typename FamilyType::MI_ATOMIC;
+    using ATOMIC_OPCODES = typename FamilyType::MI_ATOMIC::ATOMIC_OPCODES;
+    using DATA_SIZE = typename FamilyType::MI_ATOMIC::DATA_SIZE;
+
+    constexpr uint64_t incValue = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()) + 1234;
+    constexpr uint64_t counterValue = incValue * 2;
+
+    auto devAddress = reinterpret_cast<uint64_t *>(allocDeviceMem(sizeof(uint64_t)));
+
+    auto immCmdList = createCopyOnlyImmCmdList<FamilyType::gfxCoreFamily>();
+
+    auto eventObj = createExternalSyncStorageEvent(counterValue, incValue, devAddress);
+
+    auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
+
+    auto offset = cmdStream->getUsed();
+    uint32_t copyData = 0;
+    copyParams.forceDisableCopyOnlyInOrderSignaling = true;
+
+    {
+        immCmdList->appendMemoryCopy(&copyData, &copyData, 1, eventObj->toHandle(), 0, nullptr, copyParams);
+
+        GenCmdList cmdList;
+        ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(cmdList, ptrOffset(cmdStream->getCpuBase(), offset), cmdStream->getUsed() - offset));
+
+        auto it = find<MI_ATOMIC *>(cmdList.begin(), cmdList.end());
+
+        if (immCmdList->useAdditionalBlitProperties) {
+            EXPECT_EQ(cmdList.end(), it);
+        } else {
+            ASSERT_NE(cmdList.end(), it);
+
+            auto miAtomic = genCmdCast<MI_ATOMIC *>(*it);
+            EXPECT_EQ(ATOMIC_OPCODES::ATOMIC_8B_ADD, miAtomic->getAtomicOpcode());
+            EXPECT_EQ(DATA_SIZE::DATA_SIZE_QWORD, miAtomic->getDataSize());
+            EXPECT_EQ(getLowPart(incValue), miAtomic->getOperand1DataDword0());
+            EXPECT_EQ(getHighPart(incValue), miAtomic->getOperand1DataDword1());
+
+            EXPECT_EQ(castToUint64(devAddress), NEO::UnitTestHelper<FamilyType>::getAtomicMemoryAddress(*miAtomic));
+        }
+    }
+
+    offset = cmdStream->getUsed();
+
+    {
+        ze_copy_region_t region = {0, 0, 0, 1, 1, 1};
+
+        immCmdList->appendMemoryCopyRegion(&copyData, &region, 1, 1, &copyData, &region, 1, 1, eventObj->toHandle(), 0, nullptr, copyParams);
+
+        GenCmdList cmdList;
+        ASSERT_TRUE(FamilyType::Parse::parseCommandBuffer(cmdList, ptrOffset(cmdStream->getCpuBase(), offset), cmdStream->getUsed() - offset));
+
+        auto it = find<MI_ATOMIC *>(cmdList.begin(), cmdList.end());
+        if (immCmdList->useAdditionalBlitProperties) {
+            EXPECT_EQ(cmdList.end(), it);
+        } else {
+            ASSERT_NE(cmdList.end(), it);
+
+            auto miAtomic = genCmdCast<MI_ATOMIC *>(*it);
+            EXPECT_EQ(ATOMIC_OPCODES::ATOMIC_8B_ADD, miAtomic->getAtomicOpcode());
+            EXPECT_EQ(DATA_SIZE::DATA_SIZE_QWORD, miAtomic->getDataSize());
+            EXPECT_EQ(getLowPart(incValue), miAtomic->getOperand1DataDword0());
+            EXPECT_EQ(getHighPart(incValue), miAtomic->getOperand1DataDword1());
+
+            EXPECT_EQ(castToUint64(devAddress), NEO::UnitTestHelper<FamilyType>::getAtomicMemoryAddress(*miAtomic));
+        }
+    }
+
+    context->freeMem(devAddress);
+}
+
 HWTEST_F(InOrderCmdListTests, givenTimestmapEnabledWhenCreatingStandaloneCbEventThenSetCorrectPacketSize) {
     zex_counter_based_event_desc_t counterBasedDesc = {ZEX_STRUCTURE_COUNTER_BASED_EVENT_DESC};
     counterBasedDesc.flags = ZEX_COUNTER_BASED_EVENT_FLAG_KERNEL_TIMESTAMP;
@@ -6030,7 +6244,9 @@ HWTEST_F(InOrderCmdListTests, givenCounterBasedEventAndAdditionalTimestampNodeAn
     EXPECT_EQ(0u, events[0]->additionalTimestampNode.size());
 }
 
-HWTEST_F(InOrderCmdListTests, givenCounterBasedEventWhenAskingForEventAddressAndValueThenReturnCorrectValues) {
+HWTEST_F(InOrderCmdListTests, givenDebugFlagAndCounterBasedEventWhenAskingForEventAddressAndValueThenReturnCorrectValues) {
+    debugManager.flags.EnableInOrderRegularCmdListPatching.set(1);
+
     auto eventPool = createEvents<FamilyType>(1, false);
     uint64_t counterValue = -1;
     uint64_t address = -1;
@@ -6070,6 +6286,46 @@ HWTEST_F(InOrderCmdListTests, givenCounterBasedEventWhenAskingForEventAddressAnd
     EXPECT_EQ(deviceAlloc->getGpuAddress() + events[0]->inOrderAllocationOffset, address);
 }
 
+HWTEST_F(InOrderCmdListTests, givenCounterBasedEventWhenAskingForEventAddressAndValueThenReturnCorrectValues) {
+    auto eventPool = createEvents<FamilyType>(1, false);
+    uint64_t counterValue = -1;
+    uint64_t address = -1;
+
+    auto cmdList = createRegularCmdList<FamilyType::gfxCoreFamily>(false);
+    auto deviceAlloc = cmdList->inOrderExecInfo->getDeviceCounterAllocation();
+
+    auto eventHandle = events[0]->toHandle();
+
+    EXPECT_EQ(ZE_RESULT_ERROR_INVALID_ARGUMENT, zexEventGetDeviceAddress(eventHandle, &counterValue, &address));
+
+    cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
+    cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, eventHandle, 0, nullptr, launchParams);
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zexEventGetDeviceAddress(eventHandle, &counterValue, &address));
+    EXPECT_EQ(2u, counterValue);
+    EXPECT_EQ(deviceAlloc->getGpuAddress(), address);
+
+    cmdList->close();
+
+    ze_command_queue_desc_t desc = {};
+    auto mockCmdQHw = makeZeUniquePtr<MockCommandQueueHw<FamilyType::gfxCoreFamily>>(device, device->getNEODevice()->getDefaultEngine().commandStreamReceiver, &desc);
+    mockCmdQHw->initialize(false, false, false);
+
+    auto cmdListHandle = cmdList->toHandle();
+    mockCmdQHw->executeCommandLists(1, &cmdListHandle, nullptr, false, nullptr, nullptr);
+    mockCmdQHw->executeCommandLists(1, &cmdListHandle, nullptr, false, nullptr, nullptr);
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zexEventGetDeviceAddress(eventHandle, &counterValue, &address));
+    EXPECT_EQ(2u, counterValue);
+    EXPECT_EQ(deviceAlloc->getGpuAddress(), address);
+
+    events[0]->inOrderAllocationOffset = 0x12300;
+
+    EXPECT_EQ(ZE_RESULT_SUCCESS, zexEventGetDeviceAddress(eventHandle, &counterValue, &address));
+    EXPECT_EQ(2u, counterValue);
+    EXPECT_EQ(deviceAlloc->getGpuAddress() + events[0]->inOrderAllocationOffset, address);
+}
+
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, wWhenUsingImmediateCmdListThenDontAddCmdsToPatch) {
     auto immCmdList = createCopyOnlyImmCmdList<FamilyType::gfxCoreFamily>();
 
@@ -6081,6 +6337,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, wWhenUsingImmediateCmdListThen
 }
 
 HWTEST_F(InOrderCmdListTests, givenRegularCmdListWhenResetCalledThenClearCmdsToPatch) {
+    debugManager.flags.EnableInOrderRegularCmdListPatching.set(1);
+
     auto cmdList = createRegularCmdList<FamilyType::gfxCoreFamily>(false);
 
     cmdList->appendLaunchKernel(kernel->toHandle(), groupCount, nullptr, 0, nullptr, launchParams);
@@ -6135,7 +6393,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenGpuHangDet
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammingKernelSplitWithoutEventThenAddBarrierAndSignalCounter) {
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableCopyWithStagingBuffers.set(0);
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
     auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
@@ -6200,7 +6459,7 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenDebugFlagSetWhenKernelSpl
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammingKernelSplitWithEventThenSignalCounter) {
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-
+    debugManager.flags.EnableCopyWithStagingBuffers.set(0);
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
     auto cmdStream = immCmdList->getCmdContainer().getCommandStream();
@@ -6248,7 +6507,8 @@ HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammin
 HWCMDTEST_F(IGFX_XE_HP_CORE, InOrderCmdListTests, givenInOrderModeWhenProgrammingKernelSplitWithProfilingEventThenSignalCounter) {
     using MI_STORE_DATA_IMM = typename FamilyType::MI_STORE_DATA_IMM;
     using PIPE_CONTROL = typename FamilyType::PIPE_CONTROL;
-
+    DebugManagerStateRestore restorer;
+    debugManager.flags.EnableCopyWithStagingBuffers.set(0);
     auto immCmdList = createImmCmdList<FamilyType::gfxCoreFamily>();
 
     auto cmdStream = immCmdList->getCmdContainer().getCommandStream();

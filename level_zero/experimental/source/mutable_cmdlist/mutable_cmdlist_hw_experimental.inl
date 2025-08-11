@@ -52,6 +52,132 @@ constexpr uint32_t regToMMIO(MclAluReg reg) {
 }
 
 template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendMILoadRegImm(MclAluReg reg, uint32_t value) {
+    NEO::LriHelper<GfxFamily>::program(this->commandContainer.getCommandStream(),
+                                       regToMMIO(reg),
+                                       value,
+                                       false,
+                                       this->isCopyOnly(false));
+    return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendMILoadRegReg(MclAluReg dstReg, MclAluReg srcReg) {
+    NEO::EncodeSetMMIO<GfxFamily>::encodeREG(this->commandContainer, regToMMIO(dstReg), regToMMIO(srcReg), this->isCopyOnly(false));
+    return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendMILoadRegMem(MclAluReg reg, uint64_t address) {
+    NEO::EncodeSetMMIO<GfxFamily>::encodeMEM(this->commandContainer, regToMMIO(reg), address, this->isCopyOnly(false));
+    return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendMIStoreRegMem(MclAluReg reg, uint64_t address) {
+    NEO::EncodeStoreMMIO<GfxFamily>::encode(*this->commandContainer.getCommandStream(), regToMMIO(reg), address, false, nullptr, this->isCopyOnly(false));
+    return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
+ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendMIMath(void *aluArray, size_t aluCount) {
+    using MI_MATH = typename GfxFamily::MI_MATH;
+    using MI_MATH_ALU_INST_INLINE = typename GfxFamily::MI_MATH_ALU_INST_INLINE;
+    constexpr int32_t aluRegisterRSrca = 0x20;
+    constexpr int32_t aluRegisterRSrcb = 0x21;
+
+    // Add instruction MI_MATH with 4 MI_MATH_ALU_INST_INLINE operands
+    auto pCmd3 = reinterpret_cast<uint32_t *>(this->commandContainer.getCommandStream()->getSpace(sizeof(MI_MATH) + aluCount * 4 * sizeof(MI_MATH_ALU_INST_INLINE)));
+    MI_MATH miMath;
+    miMath.DW0.Value = 0x0;
+    miMath.DW0.BitField.InstructionType = MI_MATH::COMMAND_TYPE_MI_COMMAND;
+    miMath.DW0.BitField.InstructionOpcode = MI_MATH::MI_COMMAND_OPCODE_MI_MATH;
+    // 0x3 - 5 Dwords length cmd (-2): 1 for MI_MATH, 4 for MI_MATH_ALU_INST_INLINE
+    miMath.DW0.BitField.DwordLength = static_cast<uint32_t>(aluCount * 4 - 1);
+    *reinterpret_cast<MI_MATH *>(pCmd3) = miMath;
+    pCmd3++;
+    MI_MATH_ALU_INST_INLINE *pAluParam = reinterpret_cast<MI_MATH_ALU_INST_INLINE *>(pCmd3);
+    MI_MATH_ALU_INST_INLINE aluParam;
+
+    zex_mcl_alu_operation_t *exAluArray = reinterpret_cast<zex_mcl_alu_operation_t *>(aluArray);
+    for (size_t loop = 0; loop < aluCount; loop++, exAluArray++) {
+        aluParam.DW0.Value = 0x0;
+        // Setup first operand of MI_MATH - load regSource1 into register A
+        if (exAluArray->regSource1 != zex_mcl_alu_reg_t::ZE_MCL_ALU_REG_NONE) {
+            switch (exAluArray->regSource1) {
+            case zex_mcl_alu_reg_t::ZE_MCL_ALU_REG_CONST0:
+                aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_LOAD0);
+                break;
+            case zex_mcl_alu_reg_t::ZE_MCL_ALU_REG_CONST1:
+                aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_LOAD1);
+                break;
+            default:
+                aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_LOAD);
+                break;
+            }
+
+            aluParam.DW0.BitField.Operand1 = aluRegisterRSrca;
+            aluParam.DW0.BitField.Operand2 = static_cast<uint32_t>(exAluArray->regSource1) / 2;
+
+        } else {
+            aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_NOOP);
+            aluParam.DW0.BitField.Operand1 = 0;
+            aluParam.DW0.BitField.Operand2 = 0;
+        }
+        *pAluParam = aluParam;
+        pAluParam++;
+
+        aluParam.DW0.Value = 0x0;
+        // Setup second operand of MI_MATH - load regSource2 into register B
+        if (exAluArray->regSource2 != zex_mcl_alu_reg_t::ZE_MCL_ALU_REG_NONE) {
+            switch (exAluArray->regSource2) {
+            case zex_mcl_alu_reg_t::ZE_MCL_ALU_REG_CONST0:
+                aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_LOAD0);
+                break;
+            case zex_mcl_alu_reg_t::ZE_MCL_ALU_REG_CONST1:
+                aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_LOAD1);
+                break;
+            default:
+                aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_LOAD);
+                break;
+            }
+            aluParam.DW0.BitField.Operand1 = aluRegisterRSrcb;
+            aluParam.DW0.BitField.Operand2 = static_cast<uint32_t>(exAluArray->regSource2) / 2;
+
+        } else {
+            aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_NOOP);
+            aluParam.DW0.BitField.Operand1 = 0;
+            aluParam.DW0.BitField.Operand2 = 0;
+        }
+        *pAluParam = aluParam;
+        pAluParam++;
+
+        // Setup third operand of MI_MATH - "Operation" on registers A and B
+        aluParam.DW0.Value = 0x0;
+        aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(exAluArray->opType);
+        aluParam.DW0.BitField.Operand1 = 0;
+        aluParam.DW0.BitField.Operand2 = 0;
+        *pAluParam = aluParam;
+        pAluParam++;
+
+        aluParam.DW0.Value = 0x0;
+        // Setup fourth operand of MI_MATH - store result into regDest
+        if (exAluArray->flag >= zex_mcl_alu_flag_t::ZE_MCL_ALU_FLAG_NACC) {
+            aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_STOREINV);
+            aluParam.DW0.BitField.Operand2 = static_cast<uint32_t>(exAluArray->flag) - 0x100;
+        } else {
+            aluParam.DW0.BitField.ALUOpcode = static_cast<uint32_t>(zex_mcl_alu_op_type_t::ZE_MCL_ALU_OP_STORE);
+            aluParam.DW0.BitField.Operand2 = static_cast<uint32_t>(exAluArray->flag);
+        }
+        aluParam.DW0.BitField.Operand1 = static_cast<uint32_t>(exAluArray->regDest) / 2;
+        *pAluParam = aluParam;
+        pAluParam++;
+    }
+
+    return ZE_RESULT_SUCCESS;
+}
+
+template <GFXCORE_FAMILY gfxCoreFamily>
 ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendJump(Label *label, const InterfaceOperandDescriptor *condition) {
     auto cs = this->commandContainer.getCommandStream();
 
@@ -60,8 +186,9 @@ ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendJump(Label *label
         if (condition->memory != nullptr) {
             if (condition->flags & InterfaceOperandDescriptor::Flags::usesVariable) {
                 auto variable = reinterpret_cast<Variable *>(condition->memory);
-                if (false == variable->isType(VariableType::buffer))
+                if (false == variable->isType(VariableType::buffer)) {
                     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+                }
 
                 appendMILoadRegVariable(MclAluReg::mclAluRegPredicate2, variable);
             } else {
@@ -69,7 +196,7 @@ ze_result_t MutableCommandListCoreFamily<gfxCoreFamily>::appendJump(Label *label
                 NEO::EncodeSetMMIO<GfxFamily>::encodeMEM(*cs, regToMMIO(MclAluReg::mclAluRegPredicate2), memAddr, getBase()->isCopyOnly(false));
             }
         } else {
-            auto regMMIO = static_cast<uint32_t>(condition->offset);
+            auto regMMIO = regToMMIO(static_cast<MclAluReg>(condition->offset));
             NEO::EncodeSetMMIO<GfxFamily>::encodeREG(*cs, regToMMIO(MclAluReg::mclAluRegPredicate2), regMMIO, getBase()->isCopyOnly(false));
         }
 

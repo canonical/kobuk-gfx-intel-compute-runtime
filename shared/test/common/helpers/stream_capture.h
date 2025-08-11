@@ -22,6 +22,19 @@
 
 class StreamCapture {
   public:
+    ~StreamCapture() {
+#ifdef _WIN32
+        if (pipefdStdout[0] != -1)
+            _close(pipefdStdout[0]);
+        if (pipefdStderr[0] != -1)
+            _close(pipefdStderr[0]);
+#else
+        if (pipefdStdout[0] != -1)
+            close(pipefdStdout[0]);
+        if (pipefdStderr[0] != -1)
+            close(pipefdStderr[0]);
+#endif
+    }
     void captureStdout() {
         captureStream(stdout, pipefdStdout, saveStdout);
     }
@@ -41,17 +54,20 @@ class StreamCapture {
   private:
     void captureStream(FILE *stream, int pipefd[2], int &savedFd) {
 #ifdef _WIN32
-        _pipe(pipefd, 4096, O_TEXT);
+        _pipe(pipefd, bufferSize, O_TEXT);
         fflush(stream);
         savedFd = _dup(_fileno(stream));
         _dup2(pipefd[1], _fileno(stream));
         _close(pipefd[1]);
+        pipefd[1] = -1;
 #else
         fflush(stream);
         pipe(pipefd);
+        fcntl(pipefd[0], F_SETPIPE_SZ, bufferSize);
         savedFd = dup(fileno(stream));
         dup2(pipefd[1], fileno(stream));
         close(pipefd[1]);
+        pipefd[1] = -1;
 #endif
     }
 
@@ -61,8 +77,10 @@ class StreamCapture {
         _dup2(savedFd, _fileno(stream));
         _close(savedFd);
 
-        char buffer[4096];
+        char buffer[bufferSize];
         int count = _read(pipefd[0], buffer, sizeof(buffer) - 1);
+        _close(pipefd[0]);
+        pipefd[0] = -1;
         if (count > 0) {
             buffer[count] = '\0';
             return std::string(buffer);
@@ -73,9 +91,10 @@ class StreamCapture {
         dup2(savedFd, fileno(stream));
         close(savedFd);
 
-        constexpr size_t bufferSize = 4096;
         char buffer[bufferSize];
         ssize_t count = read(pipefd[0], buffer, bufferSize - 1);
+        close(pipefd[0]);
+        pipefd[0] = -1;
         if (count > 0) {
             buffer[count] = '\0';
             return std::string(buffer);
@@ -83,9 +102,9 @@ class StreamCapture {
         return "";
 #endif
     }
-
-    int pipefdStdout[2];
-    int pipefdStderr[2];
-    int saveStdout;
-    int saveStderr;
+    static constexpr size_t bufferSize = 16384;
+    int pipefdStdout[2]{-1, -1};
+    int pipefdStderr[2]{-1, -1};
+    int saveStdout{-1};
+    int saveStderr{-1};
 };
